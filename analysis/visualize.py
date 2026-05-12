@@ -1,23 +1,27 @@
 """Generate the three paper figures.
 
 Figure 1 — Bar chart: NormAd accuracy by culture group (Western, Non-Western) across
-           the four conditions; emphasizes the widening gap.
-Figure 2 — Heatmap: NormAd-identified culture-neuron attribution score by layer x
-           condition; the "fading" visualization showing alignment suppression.
-Figure 3 — Venn / overlap: NormAd-identified vs. BLEnD-identified culture neurons
-           per condition; validates the NormAd extension.
+           the four conditions; shows the widening gap.
+Figure 2 — Heatmap: NormAd-identified culture-neuron mean attribution score, by
+           layer x condition; the "fading" visualization showing alignment suppression.
+Figure 3 — Stacked bar: NormAd-only vs. Shared vs. BLEnD-only neurons per condition;
+           validates that the NormAd extension picks up overlapping-but-distinct neurons.
 
-Outputs go to outputs/figures/.
+Reads:
+  outputs/behavioral/normad_{cond}.json     (Figure 1)
+  outputs/neurons/{cond}/all_neurons_normad_max.json   (Figure 2)
+  outputs/neurons/attribution_summary.json  (Figure 3)
 """
 from __future__ import annotations
 
 import argparse
 import json
+from collections import defaultdict
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
@@ -35,7 +39,7 @@ def figure1_accuracy_bars():
         if not path.exists():
             western.append(np.nan); non_western.append(np.nan); continue
         d = json.loads(path.read_text())
-        g = d["accuracy_by_group"]
+        g = d.get("accuracy_by_group", {})
         western.append(g.get("Western") or np.nan)
         non_western.append(g.get("Non-Western") or np.nan)
 
@@ -58,29 +62,30 @@ def figure1_accuracy_bars():
 
 
 def figure2_neuron_heatmap():
-    """Layer x Condition heatmap of mean culture-neuron attribution score (NormAd source)."""
-    layer_means = []
-    n_layers = None
+    """Per-layer mean attribution score across conditions (NormAd-identified neurons)."""
+    rows = []
+    max_layer = 0
     for cond in CONDITIONS:
-        scores_dir = NEURONS_DIR / f"normad_{cond}"
-        delta_path = scores_dir / "scores_delta.pt"
-        mask_path = scores_dir / "culture_mask.pt"
-        if not delta_path.exists() or not mask_path.exists():
-            layer_means.append(None); continue
-        delta = torch.load(delta_path, map_location="cpu")
-        mask = torch.load(mask_path, map_location="cpu")
-        L = delta.shape[0]
-        n_layers = L
-        row = []
-        for layer in range(L):
-            sel = mask[layer]
-            row.append(float(delta[layer, sel].mean().item()) if sel.any() else 0.0)
-        layer_means.append(row)
+        path = NEURONS_DIR / cond / "all_neurons_normad_max.json"
+        if not path.exists():
+            rows.append(None); continue
+        data = json.loads(path.read_text())
+        by_layer = defaultdict(list)
+        for n in data["top_neurons"]:
+            by_layer[n["layer_idx"]].append(n["attribute_score"])
+        max_layer = max(max_layer, max(by_layer.keys(), default=-1))
+        rows.append(by_layer)
 
-    if n_layers is None:
-        print("[fig2] no neuron data found; skipping")
+    if max_layer < 0:
+        print("[fig2] no neuron data; skipping")
         return
-    mat = np.array([row if row else [np.nan] * n_layers for row in layer_means])
+    n_layers = max_layer + 1
+    mat = np.full((len(CONDITIONS), n_layers), np.nan)
+    for i, row in enumerate(rows):
+        if row is None:
+            continue
+        for L, scores in row.items():
+            mat[i, L] = float(np.mean(scores))
 
     fig, ax = plt.subplots(figsize=(9, 3.5))
     im = ax.imshow(mat, aspect="auto", cmap="magma")
@@ -88,7 +93,7 @@ def figure2_neuron_heatmap():
     ax.set_yticklabels([COND_LABELS[c] for c in CONDITIONS])
     ax.set_xlabel("Layer")
     ax.set_title("Figure 2. NormAd-identified culture-neuron attribution by layer")
-    plt.colorbar(im, ax=ax, label="Mean |grad·act| (NormAd − NormAdctrl)")
+    plt.colorbar(im, ax=ax, label="Mean (NormAd − NormAdctrl) attribution score")
     fig.tight_layout()
     out = FIGURES_DIR / "fig2_neuron_heatmap.pdf"
     fig.savefig(out, bbox_inches="tight")
@@ -97,10 +102,10 @@ def figure2_neuron_heatmap():
 
 
 def figure3_overlap():
-    """Per-condition Venn-style bar chart: NormAd-only / shared / BLEnD-only."""
+    """Per-condition stacked bar of NormAd-only / shared / BLEnD-only neurons."""
     summary_path = NEURONS_DIR / "attribution_summary.json"
     if not summary_path.exists():
-        print("[fig3] no attribution_summary.json; run neuron_attribution.py first")
+        print("[fig3] run analysis/neuron_attribution.py first")
         return
     summary = json.loads(summary_path.read_text())
     cross = summary.get("cross_source_overlap", {})
@@ -123,7 +128,7 @@ def figure3_overlap():
     ax.set_xticks(x)
     ax.set_xticklabels([COND_LABELS[c] for c in conds])
     ax.set_ylabel("# culture neurons")
-    ax.set_title("Figure 3. NormAd-identified vs. BLEnD-identified overlap")
+    ax.set_title("Figure 3. NormAd-identified vs. BLEnD-identified neuron overlap")
     ax.legend()
     fig.tight_layout()
     out = FIGURES_DIR / "fig3_overlap.pdf"
@@ -134,11 +139,9 @@ def figure3_overlap():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--figures", nargs="+",
-                        choices=["1", "2", "3", "all"], default=["all"])
+    parser.add_argument("--figures", nargs="+", choices=["1", "2", "3", "all"], default=["all"])
     args = parser.parse_args()
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
-
     todo = {"1", "2", "3"} if "all" in args.figures else set(args.figures)
     if "1" in todo: figure1_accuracy_bars()
     if "2" in todo: figure2_neuron_heatmap()

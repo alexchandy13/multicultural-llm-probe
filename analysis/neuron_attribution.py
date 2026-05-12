@@ -1,13 +1,14 @@
 """Neuron-level analysis across the four conditions.
 
-For each of (BLEnD-identified, NormAd-identified) sets, per condition:
-  - Total culture-neuron count
-  - Mean attribution score (delta tensor masked to culture neurons)
-  - Per-layer distribution
-  - Pairwise overlap with the base-condition set (Jaccard)
+Reads CULNIG-format JSON from outputs/neurons/{condition}/all_neurons_{source}_max.json
+where source is 'normad' (5b) or 'blend' (5a).
 
-Cross-source comparison: overlap of BLEnD-identified vs. NormAd-identified neurons
-per condition — validates that the NormAd extension is not measuring random noise.
+Computes:
+  - Total culture-neuron count per (source, condition)
+  - Mean attribution score
+  - Per-layer distribution (count + mean score)
+  - Pairwise Jaccard vs. base condition
+  - Cross-source overlap (NormAd vs. BLEnD per condition) — validates the extension
 
 Outputs:
   outputs/neurons/attribution_summary.json
@@ -18,9 +19,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import defaultdict
 from pathlib import Path
-
-import torch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,34 +29,33 @@ NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 CONDITIONS = ["base", "sft", "dpo", "instruct"]
 
 
-def load_set(source: str, cond: str) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Return (culture_mask [L, I], delta_scores [L, I]) for a given (source, condition)."""
-    base_dir = NEURONS_DIR / f"{source}_{cond}"
-    mask_path = base_dir / "culture_mask.pt"
-    delta_path = base_dir / "scores_delta.pt"
-    if not mask_path.exists() or not delta_path.exists():
-        return None, None
-    return torch.load(mask_path, map_location="cpu"), torch.load(delta_path, map_location="cpu")
+def load_neurons(source: str, cond: str) -> list[dict] | None:
+    """Return the list of (module, layer, neuron, score) tuples for a (source, cond) run."""
+    path = NEURONS_DIR / cond / f"all_neurons_{source}_max.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text())
+    return data.get("top_neurons", [])
 
 
-def jaccard(a: torch.Tensor, b: torch.Tensor) -> float:
-    if a.shape != b.shape:
-        return float("nan")
-    inter = (a & b).sum().item()
-    union = (a | b).sum().item()
-    return inter / union if union else 0.0
+def neuron_key(n: dict) -> tuple[str, int, int]:
+    return (n["module_name"], n["layer_idx"], n["neuron_idx"])
 
 
-def per_layer_counts(mask: torch.Tensor) -> list[int]:
-    return [int(mask[L].sum().item()) for L in range(mask.shape[0])]
+def jaccard(a: set, b: set) -> float:
+    if not a and not b:
+        return 0.0
+    return len(a & b) / len(a | b)
 
 
-def per_layer_mean_score(mask: torch.Tensor, delta: torch.Tensor) -> list[float]:
-    out = []
-    for L in range(mask.shape[0]):
-        sel = mask[L]
-        out.append(float(delta[L, sel].mean().item()) if sel.any() else 0.0)
-    return out
+def per_layer(neurons: list[dict]) -> dict[int, dict]:
+    by_layer: dict[int, list[float]] = defaultdict(list)
+    for n in neurons:
+        by_layer[n["layer_idx"]].append(n["attribute_score"])
+    return {
+        L: {"count": len(scores), "mean_score": sum(scores) / len(scores)}
+        for L, scores in by_layer.items()
+    }
 
 
 def main():
@@ -65,48 +64,50 @@ def main():
     args = parser.parse_args()
 
     summary = {"per_source": {}, "cross_source_overlap": {}}
-
     layer_rows = []
+
+    keys_by_source_cond: dict[tuple[str, str], set] = {}
+
     for source in args.sources:
         per_cond = {}
-        masks = {}
         for cond in CONDITIONS:
-            mask, delta = load_set(source, cond)
-            if mask is None:
+            neurons = load_neurons(source, cond)
+            if neurons is None:
                 per_cond[cond] = {"missing": True}
                 continue
-            masks[cond] = mask
-            per_cond[cond] = {
-                "total": int(mask.sum().item()),
-                "mean_score": float(delta[mask].mean().item()) if mask.any() else 0.0,
-                "per_layer_counts": per_layer_counts(mask),
-                "per_layer_mean_score": per_layer_mean_score(mask, delta),
-            }
-            for L, (cnt, score) in enumerate(zip(per_cond[cond]["per_layer_counts"],
-                                                  per_cond[cond]["per_layer_mean_score"])):
-                layer_rows.append([source, cond, L, cnt, score])
+            keys = {neuron_key(n) for n in neurons}
+            keys_by_source_cond[(source, cond)] = keys
+            scores = [n["attribute_score"] for n in neurons]
+            layer_stats = per_layer(neurons)
 
-        # Jaccard vs. base, per source
-        overlaps = {}
-        base_mask = masks.get("base")
-        for cond in CONDITIONS:
-            if cond == "base" or cond not in masks or base_mask is None:
-                continue
-            overlaps[f"{cond}_vs_base"] = jaccard(masks[cond], base_mask)
-        per_cond["jaccard_vs_base"] = overlaps
+            per_cond[cond] = {
+                "total": len(neurons),
+                "mean_score": sum(scores) / len(scores) if scores else 0.0,
+                "per_layer": layer_stats,
+            }
+            for L, st in layer_stats.items():
+                layer_rows.append([source, cond, L, st["count"], st["mean_score"]])
+
+        base_keys = keys_by_source_cond.get((source, "base"))
+        if base_keys is not None:
+            per_cond["jaccard_vs_base"] = {
+                cond: jaccard(keys_by_source_cond[(source, cond)], base_keys)
+                for cond in CONDITIONS
+                if cond != "base" and (source, cond) in keys_by_source_cond
+            }
         summary["per_source"][source] = per_cond
 
-    # Cross-source overlap: NormAd vs. BLEnD, per condition
+    # Cross-source overlap (NormAd vs. BLEnD per condition)
     if "normad" in args.sources and "blend" in args.sources:
         for cond in CONDITIONS:
-            n_mask, _ = load_set("normad", cond)
-            b_mask, _ = load_set("blend", cond)
-            if n_mask is not None and b_mask is not None:
+            n_keys = keys_by_source_cond.get(("normad", cond))
+            b_keys = keys_by_source_cond.get(("blend", cond))
+            if n_keys is not None and b_keys is not None:
                 summary["cross_source_overlap"][cond] = {
-                    "jaccard_normad_vs_blend": jaccard(n_mask, b_mask),
-                    "normad_only": int((n_mask & ~b_mask).sum().item()),
-                    "blend_only": int((b_mask & ~n_mask).sum().item()),
-                    "shared": int((n_mask & b_mask).sum().item()),
+                    "jaccard_normad_vs_blend": jaccard(n_keys, b_keys),
+                    "normad_only": len(n_keys - b_keys),
+                    "blend_only": len(b_keys - n_keys),
+                    "shared": len(n_keys & b_keys),
                 }
 
     out_json = NEURONS_DIR / "attribution_summary.json"

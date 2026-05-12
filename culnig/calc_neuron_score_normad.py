@@ -1,152 +1,198 @@
-"""Gradient-attribute MLP neurons on NormAd / NormAdctrl per condition.
+"""Fork of upstream `CULNIG/calc_neuron_score.py` with two minimal additions:
 
-Mirrors upstream CULNIG `calc_neuron_score.py`: for each example, compute |grad * act|
-on each MLP intermediate neuron for the target token, average over examples, save a
-[layer, neuron] tensor per condition.
+  1. Llama-3.2-3B (base + Instruct) added to the model whitelist.
+  2. QLoRA 4-bit base loading + optional LoRA adapter for our SFT/DPO conditions.
 
-The only differences from upstream are:
-  - dataset = NormAd (vs. BLEnD)
-  - control = NormAdctrl (vs. BLEnDctrl)
-  - output dir = outputs/neurons/normad_{condition}/
+The core gradient-scoring loop (`calculate_scores`) is imported from upstream
+unchanged, per the plan's directive: "keep gradient scoring logic completely
+unchanged — no modifications to the core algorithm."
 
-Core gradient logic is intentionally identical to upstream.
+Outputs land in our project's outputs/neurons/ tree instead of upstream's
+default ../outputs/, so analysis scripts can find them.
 
 Usage:
-    python culnig/calc_neuron_score_normad.py --condition sft
+    python culnig/calc_neuron_score_normad.py \
+        --condition sft --dataset-names normad
 """
 from __future__ import annotations
 
 import argparse
 import json
+import logging
+import sys
+from collections import defaultdict
 from pathlib import Path
 
 import torch
-from datasets import load_from_disk
-from tqdm import tqdm
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, set_seed
 
-from evaluate._common import (
-    PROJECT_ROOT,
-    load_model_for_eval,
-    resolve_condition,
-)
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+UPSTREAM = PROJECT_ROOT / "culnig" / "_upstream"
+sys.path.insert(0, str(UPSTREAM))
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Install our normadcontrol patch on upstream's dataset module BEFORE anything
+# else imports it.
+import culnig.dataset_ext  # noqa: F401, E402
+
+# Now safe to import upstream pieces.
+import utils as upstream_utils  # noqa: E402
+from CULNIG import calc_neuron_score as upstream_score  # noqa: E402
+
+from evaluate._common import BASE_MODEL, INSTRUCT_MODEL, resolve_condition  # noqa: E402
 
 
-def example_text(ex: dict) -> str:
-    for key in ("story", "scenario", "situation", "text"):
-        if key in ex and ex[key]:
-            return str(ex[key])
-    return ""
+LLAMA_32_MODELS = ["meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.2-3B-Instruct"]
+BATCH_SIZE = upstream_score.BATCH_SIZE
 
 
-def register_mlp_hooks(model):
-    """Capture intermediate activations from each MLP up_proj output.
+def _extend_whitelists():
+    """Add Llama 3.2 to upstream's hard-coded model whitelists.
 
-    For Llama-family models the MLP is: down_proj(silu(gate_proj(x)) * up_proj(x)).
-    We hook the post-activation (gate*up) tensor — the input to down_proj — since
-    that is the canonical "neuron" CULNIG attributes to.
+    Upstream's `get_target_module` and `calculate_scores` both branch on
+    `model.name_or_path in [...]` — Llama 3.1 8B is listed, 3.2 3B is not.
+    Both architectures expose the same module names, so we extend the list.
     """
-    acts = {}
-    handles = []
+    # In utils.py the whitelist is in the function body — patch by replacement.
+    orig_get_target_module = upstream_utils.get_target_module
 
-    def make_hook(layer_idx):
-        def hook(_module, inputs, _output):
-            # inputs[0] is the down_proj input, shape [B, T, intermediate]
-            x = inputs[0]
-            x.retain_grad()
-            acts[layer_idx] = x
-        return hook
+    def patched_get_target_module(model, module, layer_idx):
+        name = model.name_or_path
+        if name in LLAMA_32_MODELS:
+            model.name_or_path = "meta-llama/Llama-3.1-8B-Instruct"  # share branch
+            try:
+                return orig_get_target_module(model, module, layer_idx)
+            finally:
+                model.name_or_path = name
+        return orig_get_target_module(model, module, layer_idx)
 
-    # transformers.LlamaModel exposes .model.layers; use that path.
-    layers = model.base_model.model.model.layers if hasattr(model, "base_model") else model.model.layers
-    for i, layer in enumerate(layers):
-        h = layer.mlp.down_proj.register_forward_hook(make_hook(i))
-        handles.append(h)
-    return acts, handles
+    upstream_utils.get_target_module = patched_get_target_module
+    upstream_score.get_target_module = patched_get_target_module
+
+    # In calc_neuron_score.calculate_scores, the whitelist check on line ~118
+    # gates an `pass` branch (Llama-3.1 / Gemma) vs. phi-4-specific slicing.
+    # We monkey-patch by swapping `name_or_path` on the model object before the
+    # forward call — see `prepare_model_namepath` below.
 
 
-def score_one_split(model, tokenizer, dataset, max_examples: int) -> torch.Tensor:
-    """Run CULNIG-style |grad * activation| attribution.
+def prepare_model_namepath(model):
+    """Pin model.name_or_path to a Llama 3.1 branch so upstream's whitelist passes."""
+    if model.name_or_path in LLAMA_32_MODELS:
+        model._original_name_or_path = model.name_or_path
+        model.name_or_path = "meta-llama/Llama-3.1-8B-Instruct"
 
-    Returns a tensor of shape [n_layers, intermediate_dim] = per-neuron scalar score
-    averaged across examples.
-    """
-    model.eval()
-    n_layers = model.config.num_hidden_layers
-    inter = model.config.intermediate_size
-    accum = torch.zeros(n_layers, inter, dtype=torch.float32)
-    counted = 0
 
-    for idx, ex in enumerate(tqdm(dataset, desc="scoring")):
-        if idx >= max_examples:
-            break
-        text = example_text(ex)
-        if not text:
-            continue
+def load_model_for_culnig(condition_name: str):
+    """QLoRA 4-bit base + optional LoRA adapter, matching upstream's expected interface."""
+    cond = resolve_condition(condition_name)
+    tokenizer = AutoTokenizer.from_pretrained(cond.base, padding_side="left")
+    if not tokenizer.pad_token:
+        tokenizer.pad_token = tokenizer.eos_token
 
-        acts, handles = register_mlp_hooks(model)
-        try:
-            enc = tokenizer(text, return_tensors="pt", truncation=True, max_length=512)
-            enc = {k: v.to(model.device) for k, v in enc.items()}
+    bnb = BitsAndBytesConfig(
+        load_in_4bit=True, bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        cond.base,
+        quantization_config=bnb,
+        device_map="auto",
+        torch_dtype=torch.bfloat16,
+        attn_implementation="sdpa",
+    )
+    if cond.adapter is not None:
+        model = PeftModel.from_pretrained(model, str(cond.adapter))
+        model = model.merge_and_unload()  # merge so gradients flow into base weights
+    # Pin name_or_path to a known-good branch so upstream's whitelist accepts it.
+    model.name_or_path = cond.base
+    prepare_model_namepath(model)
+    return model, tokenizer
 
-            # Forward
-            out = model(**enc, labels=enc["input_ids"])
-            loss = out.loss
-            model.zero_grad(set_to_none=True)
-            loss.backward()
 
-            # Accumulate |grad * activation| for the last non-pad token, averaged across tokens.
-            for layer_idx, act in acts.items():
-                if act.grad is None:
-                    continue
-                score = (act.detach().abs() * act.grad.detach().abs()).sum(dim=(0, 1)).float().cpu()
-                accum[layer_idx] += score
-            counted += 1
-        finally:
-            for h in handles:
-                h.remove()
+def setup_logging():
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+    return logging.getLogger(__name__)
 
-    if counted == 0:
-        raise RuntimeError("scored 0 examples — check dataset")
-    return accum / counted
+
+def run(condition_name: str, dataset_names: list[str], out_root: Path, logger):
+    _extend_whitelists()
+    model, tokenizer = load_model_for_culnig(condition_name)
+    logger.info(f"Loaded model for condition={condition_name} on {model.device}")
+
+    dataset_names = sorted(dataset_names)
+
+    # Main dataset(s)
+    dataloader = upstream_score.load_dataset_neuron_scores(
+        dataset_names, tokenizer, batch_size=BATCH_SIZE,
+        target_countries=None, target_data="neuron",
+    )
+    raw_scores, total_probs = upstream_score.calculate_scores(
+        model, tokenizer, dataloader, logger
+    )
+    neuron_scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for (module_name, layer_idx, neuron_idx), per_country in raw_scores.items():
+        key = f"{module_name}_{layer_idx}_{neuron_idx}"
+        for country, score in per_country.items():
+            neuron_scores[key][country] += score
+
+    dataset_ids = defaultdict(list)
+    for item in dataloader.dataset:
+        if item["id"] not in dataset_ids[item["dataset_name"]]:
+            dataset_ids[item["dataset_name"]].append(item["id"])
+
+    out_dir = out_root / condition_name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{''.join(dataset_names)}_max_scores.json"
+    out_file.write_text(json.dumps({
+        "neuron_scores": neuron_scores,
+        "total_probabilities_per_country": dict(total_probs),
+        "dataset_ids": dict(dataset_ids),
+    }, indent=2))
+    logger.info(f"Wrote {out_file}")
+
+    # CountryRC second pass — same scoring loop, target countries restricted.
+    crc_dataloader = upstream_score.load_dataset_neuron_scores(
+        dataset_names=["countryrc"], tokenizer=tokenizer, batch_size=BATCH_SIZE,
+        target_countries=upstream_score.TARGET_COUNTRIES, target_data="neuron",
+    )
+    crc_raw, crc_probs = upstream_score.calculate_scores(
+        model, tokenizer, crc_dataloader, logger
+    )
+    crc_scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    for (module_name, layer_idx, neuron_idx), per_country in crc_raw.items():
+        key = f"{module_name}_{layer_idx}_{neuron_idx}"
+        for country, score in per_country.items():
+            crc_scores[key][country] += score
+    crc_ids = defaultdict(list)
+    for item in crc_dataloader.dataset:
+        if item["id"] not in crc_ids[item["dataset_name"]]:
+            crc_ids[item["dataset_name"]].append(item["id"])
+
+    crc_file = out_dir / "countryrc_max_scores.json"
+    crc_file.write_text(json.dumps({
+        "neuron_scores": crc_scores,
+        "total_probabilities_per_country": dict(crc_probs),
+        "dataset_ids": dict(crc_ids),
+    }, indent=2))
+    logger.info(f"Wrote {crc_file}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--condition", required=True,
+                        choices=["base", "sft", "dpo", "instruct"])
+    parser.add_argument("--dataset-names", nargs="+", required=True,
+                        help="e.g. `normad` or `normadcontrol` (single name per run).")
+    parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))
+    return parser.parse_args()
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--condition", required=True, choices=["base", "sft", "dpo", "instruct"])
-    parser.add_argument("--normad-path", default=str(PROJECT_ROOT / "data" / "NormAd"))
-    parser.add_argument("--normad-ctrl-path", default=str(PROJECT_ROOT / "data" / "NormAdctrl"))
-    parser.add_argument("--max-examples", type=int, default=2000,
-                        help="Upper bound — NormAd has ~2.3k scenarios.")
-    parser.add_argument("--out-dir", default=None)
-    args = parser.parse_args()
-
-    cond = resolve_condition(args.condition)
-    tokenizer, model = load_model_for_eval(cond)
-
-    # NB: CULNIG runs the same scoring twice — once on the cultural set, once on the
-    # culture-stripped control — then subtracts to isolate culture-specific neurons.
-    normad = load_from_disk(args.normad_path)
-    normad_ctrl = load_from_disk(args.normad_ctrl_path)
-
-    scores_main = score_one_split(model, tokenizer, normad, args.max_examples)
-    scores_ctrl = score_one_split(model, tokenizer, normad_ctrl, args.max_examples)
-
-    out_dir = Path(args.out_dir) if args.out_dir else (
-        PROJECT_ROOT / "outputs" / "neurons" / f"normad_{args.condition}"
-    )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    torch.save(scores_main, out_dir / "scores_normad.pt")
-    torch.save(scores_ctrl, out_dir / "scores_normad_ctrl.pt")
-    torch.save(scores_main - scores_ctrl, out_dir / "scores_delta.pt")
-
-    meta = {
-        "condition": args.condition,
-        "n_layers": int(scores_main.shape[0]),
-        "intermediate_size": int(scores_main.shape[1]),
-        "max_examples": args.max_examples,
-    }
-    (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
-    print(f"Wrote scores to {out_dir}")
+    set_seed(42)
+    args = parse_args()
+    logger = setup_logging()
+    run(args.condition, args.dataset_names, Path(args.out_root), logger)
 
 
 if __name__ == "__main__":
