@@ -1,0 +1,48 @@
+# SFT on Alpaca with QLoRA 4-bit, Llama 3.2 3B base.
+
+model_name_or_path: meta-llama/Llama-3.2-3B
+dataset_name: tatsu-lab/alpaca
+dataset_path: data/alpaca
+output_dir: checkpoints/sft
+
+# Training
+num_train_epochs: 3
+per_device_train_batch_size: 4
+gradient_accumulation_steps: 8  # effective batch = 32
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_seq_length: 512
+
+# Saving
+save_strategy: epoch          # one checkpoint per epoch
+save_total_limit: 3
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Quantization (4-bit NF4 + double quant + bf16 compute)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+# LoRA
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

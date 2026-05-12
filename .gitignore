@@ -1,0 +1,37 @@
+# Data and weights — never commit
+data/*/
+!data/*/.gitkeep
+models/*/
+!models/*/.gitkeep
+checkpoints/*/
+!checkpoints/*/.gitkeep
+outputs/behavioral/*.json
+outputs/neurons/**/*.pt
+outputs/neurons/**/*.json
+outputs/figures/*.png
+outputs/figures/*.pdf
+
+# CULNIG upstream clone — pulled separately
+culnig/_upstream/
+
+# SLURM artifacts
+slurm/*.out
+slurm/*.err
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Env
+.env
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db

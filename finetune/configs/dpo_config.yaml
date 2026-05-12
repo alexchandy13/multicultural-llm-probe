@@ -1,0 +1,60 @@
+# DPO on HH-RLHF with QLoRA 4-bit, Llama 3.2 3B base.
+# DPO is more hyperparameter-sensitive than SFT — monitor reward margin, stop early if it collapses.
+
+model_name_or_path: meta-llama/Llama-3.2-3B
+dataset_name: Anthropic/hh-rlhf
+dataset_path: data/hh-rlhf
+output_dir: checkpoints/dpo
+
+# Training
+num_train_epochs: 2
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16   # effective batch = 32
+learning_rate: 5.0e-5             # lower than SFT — DPO sensitivity
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_length: 512
+max_prompt_length: 256
+
+# DPO-specific
+beta: 0.1           # KL penalty, standard default
+loss_type: sigmoid
+
+# Saving
+save_strategy: epoch
+save_total_limit: 2
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Reward-margin early stop: if chosen-rejected mean margin goes negative for N consecutive
+# logging windows, bail out and use the previous epoch's adapter.
+early_stop:
+  enabled: true
+  patience_windows: 4
+
+# Quantization (same as SFT)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+# LoRA
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
