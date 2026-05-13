@@ -25,16 +25,35 @@ from evaluate._common import (
 )
 
 
-CHOICES = ["yes", "no", "neither"]
+CHOICES = ["yes", "no", "neutral"]
 
 PROMPT_TEMPLATE = (
     "You are evaluating cultural acceptability.\n"
     "Country: {country}\n"
     "Scenario: {scenario}\n"
     "Question: Is this action socially acceptable in this culture?\n"
-    "Answer with exactly one of: yes, no, neither.\n"
+    "Answer with exactly one of: yes, no, neutral.\n"
     "Answer:"
 )
+
+# NormAd ships country names lowercase + underscored (e.g. 'united_states_of_america',
+# 'south_korea'). Map to the canonical forms `culture_group` recognizes; anything
+# unmapped falls through and lands in the "Other" bucket.
+NORMAD_COUNTRY_MAP = {
+    "united_states_of_america": "US",
+    "united_kingdom": "UK",
+    "germany": "Germany",
+    "spain": "Spain",
+    "australia": "Australia",
+    "japan": "Japan",
+    "china": "China",
+    "india": "India",
+    "iran": "Iran",
+    "indonesia": "Indonesia",
+    "mexico": "Mexico",
+    "south_korea": "South_Korea",
+    "nigeria": "Nigeria",
+}
 
 
 def load_normad(path: Path):
@@ -65,30 +84,32 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str]) -> list[flo
 
 
 def gold_label(example: dict) -> str:
-    """NormAd labels vary across releases; normalize the common variants."""
-    for key in ("gold_label", "label", "answer", "normative"):
+    """Read NormAd's "Gold Label" field; normalize stale variants from old releases."""
+    for key in ("Gold Label", "gold_label", "label", "answer", "normative"):
         if key in example and example[key] is not None:
             v = str(example[key]).strip().lower()
             if v in CHOICES:
                 return v
-            if v in {"acceptable", "yes", "true", "1"}:
+            if v in {"acceptable", "true", "1"}:
                 return "yes"
-            if v in {"unacceptable", "no", "false", "0"}:
+            if v in {"unacceptable", "false", "0"}:
                 return "no"
-            if v in {"neutral", "neither", "unclear"}:
-                return "neither"
+            if v in {"neither", "unclear"}:
+                return "neutral"
     raise KeyError(f"could not find gold label in: {list(example)}")
 
 
 def country(example: dict) -> str:
-    for key in ("country", "Country", "culture"):
+    """Return the canonical country (e.g. 'US', 'South_Korea'); falls back to raw value."""
+    for key in ("Country", "country", "culture"):
         if key in example and example[key]:
-            return str(example[key]).strip()
+            raw = str(example[key]).strip()
+            return NORMAD_COUNTRY_MAP.get(raw.lower(), raw)
     return "Unknown"
 
 
 def scenario_text(example: dict) -> str:
-    for key in ("story", "scenario", "situation", "text"):
+    for key in ("Story", "story", "scenario", "situation", "text"):
         if key in example and example[key]:
             return str(example[key]).strip()
     return ""

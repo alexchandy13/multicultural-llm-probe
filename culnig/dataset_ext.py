@@ -100,19 +100,12 @@ def _normadcontrol_block(tokenizer, target_countries, target_data):
 
             stripped_story = strip_culture(examples["Story"])
             input_text = instruction.format(story=stripped_story, options=option_str)
-            try:
-                input_text = tokenizer.apply_chat_template(
-                    [{"role": "user", "content": input_text}],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                    enable_thinking=False,
-                )
-                add_special_tokens = False
-            except Exception:
-                add_special_tokens = True
-
+            # No chat template: caller strips tokenizer.chat_template to None so
+            # all four conditions (C1 base, C2 SFT, C3 DPO, C4 Instruct) see the
+            # same raw-text prompt format. Without this, C4 would be chat-formatted
+            # and C1-C3 raw-text, invalidating cross-condition comparisons.
             tokenized = tokenizer(
-                input_text, return_tensors="pt", add_special_tokens=add_special_tokens
+                input_text, return_tensors="pt", add_special_tokens=True
             )
             return {
                 "input_text": input_text,

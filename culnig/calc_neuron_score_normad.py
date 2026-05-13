@@ -37,50 +37,39 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import culnig.dataset_ext  # noqa: F401, E402
 
 # Now safe to import upstream pieces.
-import utils as upstream_utils  # noqa: E402
 from CULNIG import calc_neuron_score as upstream_score  # noqa: E402
 
-from evaluate._common import BASE_MODEL, INSTRUCT_MODEL, resolve_condition  # noqa: E402
+from evaluate._common import resolve_condition  # noqa: E402
 
 
-LLAMA_32_MODELS = ["meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.2-3B-Instruct"]
+LLAMA_32_MODELS = {"meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.2-3B-Instruct"}
+LLAMA_31_BRANCH = "meta-llama/Llama-3.1-8B-Instruct"
 BATCH_SIZE = upstream_score.BATCH_SIZE
 
 
-def _extend_whitelists():
-    """Add Llama 3.2 to upstream's hard-coded model whitelists.
+def _pin_name_or_path(model):
+    """Permanently set model.name_or_path so upstream's hard-coded whitelists accept it.
 
-    Upstream's `get_target_module` and `calculate_scores` both branch on
-    `model.name_or_path in [...]` — Llama 3.1 8B is listed, 3.2 3B is not.
-    Both architectures expose the same module names, so we extend the list.
+    Upstream reads model.name_or_path in three hot paths:
+      - utils.get_target_module (line 16): exact-match whitelist.
+      - utils.get_text_model (line 153): substring check — matches "Llama-3" already,
+        so we don't strictly need to swap for this one, but a single value keeps
+        downstream behavior uniform.
+      - CULNIG/calc_neuron_score.calculate_scores (lines 118/121): exact-match whitelist
+        INSIDE the per-batch / per-module loops. Hit on every forward.
+
+    Llama-3.2-3B is not in those exact-match lists. Its MLP/attention module names
+    are identical to Llama-3.1-8B-Instruct (same `q_proj`/`k_proj`/`v_proj`/`o_proj`/
+    `gate_proj`/`up_proj`/`down_proj` under `model.layers[i].mlp` and `.self_attn`),
+    so we pin name_or_path to the 3.1 string and reuse that branch.
+
+    Note: this is a **permanent** swap, not scoped. The reads happen inside loops,
+    so any swap-and-restore wrapper would have to bracket every read site —
+    pinning once at load is strictly simpler and equally correct. The original
+    value isn't preserved because nothing downstream needs it.
     """
-    # In utils.py the whitelist is in the function body — patch by replacement.
-    orig_get_target_module = upstream_utils.get_target_module
-
-    def patched_get_target_module(model, module, layer_idx):
-        name = model.name_or_path
-        if name in LLAMA_32_MODELS:
-            model.name_or_path = "meta-llama/Llama-3.1-8B-Instruct"  # share branch
-            try:
-                return orig_get_target_module(model, module, layer_idx)
-            finally:
-                model.name_or_path = name
-        return orig_get_target_module(model, module, layer_idx)
-
-    upstream_utils.get_target_module = patched_get_target_module
-    upstream_score.get_target_module = patched_get_target_module
-
-    # In calc_neuron_score.calculate_scores, the whitelist check on line ~118
-    # gates an `pass` branch (Llama-3.1 / Gemma) vs. phi-4-specific slicing.
-    # We monkey-patch by swapping `name_or_path` on the model object before the
-    # forward call — see `prepare_model_namepath` below.
-
-
-def prepare_model_namepath(model):
-    """Pin model.name_or_path to a Llama 3.1 branch so upstream's whitelist passes."""
     if model.name_or_path in LLAMA_32_MODELS:
-        model._original_name_or_path = model.name_or_path
-        model.name_or_path = "meta-llama/Llama-3.1-8B-Instruct"
+        model.name_or_path = LLAMA_31_BRANCH
 
 
 def load_model_for_culnig(condition_name: str):
@@ -89,6 +78,14 @@ def load_model_for_culnig(condition_name: str):
     tokenizer = AutoTokenizer.from_pretrained(cond.base, padding_side="left")
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
+
+    # Strip the chat template so every condition produces identical raw-text prompts.
+    # C4 (Instruct) ships a chat template; C1/C2/C3 (base) don't. If we let the
+    # template apply on C4, its prompts become chat-formatted and gradient scores
+    # are no longer comparable across conditions. Forcing chat_template=None makes
+    # upstream's `try: apply_chat_template ... except: pass` blocks fall back to
+    # raw text uniformly for every dataset (normad, normadcontrol, blend, etc.).
+    tokenizer.chat_template = None
 
     bnb = BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_quant_type="nf4",
@@ -104,9 +101,8 @@ def load_model_for_culnig(condition_name: str):
     if cond.adapter is not None:
         model = PeftModel.from_pretrained(model, str(cond.adapter))
         model = model.merge_and_unload()  # merge so gradients flow into base weights
-    # Pin name_or_path to a known-good branch so upstream's whitelist accepts it.
-    model.name_or_path = cond.base
-    prepare_model_namepath(model)
+    # See _pin_name_or_path docstring for why this is a permanent (not scoped) swap.
+    _pin_name_or_path(model)
     return model, tokenizer
 
 
@@ -116,7 +112,6 @@ def setup_logging():
 
 
 def run(condition_name: str, dataset_names: list[str], out_root: Path, logger):
-    _extend_whitelists()
     model, tokenizer = load_model_for_culnig(condition_name)
     logger.info(f"Loaded model for condition={condition_name} on {model.device}")
 
