@@ -4,7 +4,7 @@
 #SBATCH --gres=gpu:rtxa5000:1
 #SBATCH --time=12:00:00
 #SBATCH --mem=48G
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/sft.%j.out
 #SBATCH --error=slurm/sft.%j.err
 
