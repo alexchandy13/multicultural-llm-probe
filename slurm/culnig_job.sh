@@ -1,9 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=culture_culnig
-#SBATCH --partition=gpu
+#SBATCH --partition=class
+#SBATCH --account=class
+#SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa5000:1
 #SBATCH --time=10:00:00
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-3
 #SBATCH --output=slurm/culnig.%A_%a.out

@@ -1,6 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=culture_eval
-#SBATCH --partition=gpu
+#SBATCH --partition=class
+#SBATCH --account=class
+#SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa5000:1
 #SBATCH --time=06:00:00
 #SBATCH --mem=32G

@@ -1,6 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=culture_download
 #SBATCH --partition=class
+#SBATCH --account=class
+#SBATCH --qos=default
 #SBATCH --time=02:00:00
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=4

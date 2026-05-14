@@ -1,9 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=culture_dpo
-#SBATCH --partition=gpu
+#SBATCH --partition=class
+#SBATCH --account=class
+#SBATCH --qos=high
 #SBATCH --gres=gpu:rtxa5000:1
 #SBATCH --time=12:00:00
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/dpo.%j.out
 #SBATCH --error=slurm/dpo.%j.err
