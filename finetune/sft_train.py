@@ -90,7 +90,7 @@ def main():
         weight_decay=cfg["weight_decay"],
         max_grad_norm=cfg["max_grad_norm"],
         optim=cfg["optim"],
-        max_seq_length=cfg["max_seq_length"],
+        max_length=cfg["max_seq_length"],  # TRL renamed this kwarg
         save_strategy=cfg["save_strategy"],
         save_total_limit=cfg["save_total_limit"],
         logging_steps=cfg["logging_steps"],

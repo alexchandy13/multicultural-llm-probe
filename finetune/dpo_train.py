@@ -126,7 +126,8 @@ def main():
         max_grad_norm=cfg["max_grad_norm"],
         optim=cfg["optim"],
         max_length=cfg["max_length"],
-        max_prompt_length=cfg["max_prompt_length"],
+        # max_prompt_length was removed from DPOConfig in newer TRL; defaults to
+        # max_length // 2 = 256, which matches the plan's spec.
         beta=cfg["beta"],
         loss_type=cfg["loss_type"],
         save_strategy=cfg["save_strategy"],
