@@ -5,11 +5,11 @@ models/*/
 !models/*/.gitkeep
 checkpoints/*/
 !checkpoints/*/.gitkeep
-outputs/behavioral/*.json
+# Behavioral results, figures, and the final filtered neuron set ARE versioned —
+# small files and useful for paper writing. Large neuron intermediates are not.
 outputs/neurons/**/*.pt
-outputs/neurons/**/*.json
-outputs/figures/*.png
-outputs/figures/*.pdf
+outputs/neurons/**/*_max_scores.json
+outputs/neurons/**/scores_*.pt
 
 # CULNIG upstream clone — pulled separately
 culnig/_upstream/
