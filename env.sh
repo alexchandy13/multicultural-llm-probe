@@ -12,6 +12,7 @@ mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$HF_DATASETS_CACHE"
 export PYTHONPATH="$PROJECT_ROOT:${PYTHONPATH:-}"
 export TOKENIZERS_PARALLELISM=false
 export BITSANDBYTES_NOWELCOME=1
+export PYTHONUNBUFFERED=1   # flush stdout live so `tail -f *.out` shows progress
 
 # Conditions used everywhere downstream.
 export CONDITIONS="base sft dpo instruct"

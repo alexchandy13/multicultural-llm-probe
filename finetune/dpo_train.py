@@ -58,7 +58,11 @@ def load_hh(cfg: dict):
         ds = load_dataset(cfg["dataset_name"])
     train = ds["train"]
     mapped = train.map(split_hh_pair, remove_columns=train.column_names)
-    return mapped.filter(lambda x: x["prompt"] and x["chosen"] and x["rejected"])
+    filtered = mapped.filter(lambda x: x["prompt"] and x["chosen"] and x["rejected"])
+    cap = cfg.get("max_train_examples")
+    if cap and len(filtered) > cap:
+        filtered = filtered.shuffle(seed=cfg["seed"]).select(range(cap))
+    return filtered
 
 
 def build_bnb_config(qcfg: dict) -> BitsAndBytesConfig:

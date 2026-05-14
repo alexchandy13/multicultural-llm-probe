@@ -6,6 +6,10 @@ dataset_name: Anthropic/hh-rlhf
 dataset_path: data/hh-rlhf
 output_dir: checkpoints/dpo
 
+# Cap HH-RLHF size — full ~160k pairs × 2 epochs blows past the 12h SLURM cap.
+# 30k pairs × 2 epochs ≈ 6-7h on A5000 QLoRA, ample signal for DPO on a 3B model.
+max_train_examples: 30000
+
 # Training
 num_train_epochs: 2
 per_device_train_batch_size: 2
