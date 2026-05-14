@@ -149,7 +149,7 @@ def main():
         ref_model=None,
         args=dpo_args,
         train_dataset=train_ds,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,  # TRL/transformers renamed `tokenizer`
         peft_config=lora_cfg,
         callbacks=callbacks,
     )
