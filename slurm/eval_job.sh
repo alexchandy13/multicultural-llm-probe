@@ -19,5 +19,5 @@ read -ra CONDS <<< "$CONDITIONS"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval] condition=$COND"
 
-python evaluate/eval_normad.py --condition "$COND"
-python evaluate/eval_care.py   --condition "$COND"
+python3.12 evaluate/eval_normad.py --condition "$COND"
+python3.12 evaluate/eval_care.py   --condition "$COND"

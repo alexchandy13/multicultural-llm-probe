@@ -11,4 +11,4 @@
 set -euo pipefail
 source env.sh
 
-python finetune/sft_train.py --config finetune/configs/sft_config.yaml
+python3.12 finetune/sft_train.py --config finetune/configs/sft_config.yaml

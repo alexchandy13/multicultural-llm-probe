@@ -14,7 +14,7 @@ set -euo pipefail
 
 source env.sh
 
-python - <<'PY'
+python3.12 - <<'PY'
 import os, sys
 from pathlib import Path
 from datasets import load_dataset

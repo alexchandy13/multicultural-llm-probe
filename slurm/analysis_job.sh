@@ -12,6 +12,6 @@
 set -euo pipefail
 source env.sh
 
-python analysis/compare_conditions.py
-python analysis/neuron_attribution.py
-python analysis/visualize.py
+python3.12 analysis/compare_conditions.py
+python3.12 analysis/neuron_attribution.py
+python3.12 analysis/visualize.py

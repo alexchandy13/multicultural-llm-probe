@@ -11,4 +11,4 @@
 set -euo pipefail
 source env.sh
 
-python finetune/dpo_train.py --config finetune/configs/dpo_config.yaml
+python3.12 finetune/dpo_train.py --config finetune/configs/dpo_config.yaml
