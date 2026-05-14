@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=culture_analysis
-#SBATCH --partition=cpu
+#SBATCH --partition=class
 #SBATCH --time=01:00:00
 #SBATCH --mem=8G
 #SBATCH --cpus-per-task=2
