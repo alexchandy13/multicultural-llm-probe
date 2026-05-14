@@ -18,11 +18,11 @@ Does SFT vs. DPO differentially erode non-Western cultural norms and values in L
 ## Layout
 
 ```
-data/         HF + constructed datasets (NormAd, CARE, BLEnD, CountryRC, Alpaca, HH-RLHF, NormAdctrl)
+data/         HF + constructed datasets (NormAd, BLEnD, CountryRC, Alpaca, HH-RLHF, NormAdctrl)
 models/       Base + Instruct model weights
 checkpoints/  LoRA adapters per condition + epoch
 finetune/     SFT + DPO training scripts and configs
-evaluate/     NormAd + CARE eval, plus all-conditions wrapper
+evaluate/     NormAd eval (plus all-conditions wrapper). CARE dropped — see eval_all_conditions.py docstring.
 culnig/       CULNIG core (clone of ynklab/CULNIG) + NormAd extensions
 analysis/     Cross-condition comparison + neuron attribution + figures
 slurm/        Job scripts for download/train/eval/CULNIG on UMIACS Nexus
@@ -36,7 +36,7 @@ Step 0  env_setup            login node, no GPU
 Step 1  sft_job.sh           SFT on Alpaca, 3 ep, ~6-8h on A5000
 Step 2  construct_normad_ctrl.py    strip cultural prefixes (rule-based)
 Step 3  dpo_job.sh           DPO on HH-RLHF, 2 ep, parallel with Step 1 if quota allows
-Step 4  eval_job.sh          NormAd + CARE on all four conditions
+Step 4  eval_job.sh          NormAd on all four conditions
 Step 5  culnig_job.sh        gradient scoring on BLEnD (baseline) and NormAd (novel)
 Step 6  analysis/*.py        results table + 3 figures
 ```

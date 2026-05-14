@@ -31,9 +31,9 @@ def load(benchmark: str, cond: str) -> dict | None:
 
 
 def metric_keys(benchmark: str) -> tuple[str, str]:
-    if benchmark == "normad":
-        return "accuracy_overall", "accuracy_by_group"
-    return "win_rate_overall", "win_rate_by_group"
+    if benchmark != "normad":
+        raise ValueError(f"unsupported benchmark: {benchmark}")
+    return "accuracy_overall", "accuracy_by_group"
 
 
 def build_rows(benchmark: str):
@@ -105,7 +105,7 @@ def to_md(rows_by_bench: dict, path: Path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--benchmarks", nargs="+", default=["normad", "care"])
+    parser.add_argument("--benchmarks", nargs="+", default=["normad"])
     args = parser.parse_args()
 
     rows_by_bench = {b: build_rows(b) for b in args.benchmarks}

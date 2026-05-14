@@ -1,8 +1,13 @@
-"""Run NormAd + CARE across all four conditions and emit a unified results table.
+"""Run NormAd across all four conditions and emit a unified results table.
 
-Each (benchmark, condition) sub-eval is delegated to eval_normad.py / eval_care.py via
-subprocess so we don't keep four models in memory simultaneously. The final aggregate
-table lives at outputs/behavioral/summary.json + summary.md.
+Each (benchmark, condition) sub-eval is delegated to eval_normad.py via subprocess
+so we don't keep four models in memory simultaneously. The final aggregate table
+lives at outputs/behavioral/summary.json + summary.md.
+
+CARE was dropped from the plan: its only cultures are Arab/Chinese/Japanese (no
+Western coverage, so it can't answer the Western-vs-Non-Western RQ), its prompts
+are in non-English (out of Llama 3.2 3B's primary language), and the canonical
+eval requires an LLM judge. NormAd alone covers the primary contrast.
 """
 from __future__ import annotations
 
@@ -19,27 +24,27 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
 
 def run_one(benchmark: str, condition: str):
-    script = "eval_normad.py" if benchmark == "normad" else "eval_care.py"
-    cmd = [sys.executable, str(PROJECT_ROOT / "evaluate" / script), "--condition", condition]
+    if benchmark != "normad":
+        raise ValueError(f"unsupported benchmark: {benchmark}")
+    cmd = [sys.executable, str(PROJECT_ROOT / "evaluate" / "eval_normad.py"),
+           "--condition", condition]
     print("$", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
 
 def summarize():
     summary = {}
-    for benchmark in ("normad", "care"):
+    for benchmark in ("normad",):
         summary[benchmark] = {}
         for cond in conditions_from_env():
             path = BEHAVIORAL_DIR / f"{benchmark}_{cond}.json"
             if not path.exists():
                 continue
             data = json.loads(path.read_text())
-            metric_key = "accuracy_by_group" if benchmark == "normad" else "win_rate_by_group"
-            overall_key = "accuracy_overall" if benchmark == "normad" else "win_rate_overall"
             summary[benchmark][cond] = {
-                "overall": data.get(overall_key),
-                "Western": data.get(metric_key, {}).get("Western"),
-                "Non-Western": data.get(metric_key, {}).get("Non-Western"),
+                "overall": data.get("accuracy_overall"),
+                "Western": data.get("accuracy_by_group", {}).get("Western"),
+                "Non-Western": data.get("accuracy_by_group", {}).get("Non-Western"),
             }
 
     out_json = BEHAVIORAL_DIR / "summary.json"
@@ -63,7 +68,7 @@ def summarize():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-eval", action="store_true", help="Only re-summarize from existing JSON.")
-    parser.add_argument("--benchmarks", nargs="+", default=["normad", "care"])
+    parser.add_argument("--benchmarks", nargs="+", default=["normad"])
     parser.add_argument("--conditions", nargs="+", default=None)
     args = parser.parse_args()
 

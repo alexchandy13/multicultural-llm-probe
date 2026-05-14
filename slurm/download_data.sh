@@ -26,7 +26,6 @@ specs = [
     ("tatsu-lab/alpaca",            DATA / "alpaca"),
     ("Anthropic/hh-rlhf",           DATA / "hh-rlhf"),
     ("akhilayerukola/NormAd",       DATA / "NormAd"),
-    ("MichiganNLP/CARE",            DATA / "CARE"),
     ("Taise228/CountryRC",          DATA / "CountryRC"),
 ]
 

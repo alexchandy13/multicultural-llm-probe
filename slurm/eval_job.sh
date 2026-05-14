@@ -9,7 +9,7 @@
 #SBATCH --output=slurm/eval.%A_%a.out
 #SBATCH --error=slurm/eval.%A_%a.err
 
-# Array job: one task per condition. Each task runs NormAd + CARE for that condition.
+# Array job: one task per condition. Each task runs NormAd for that condition.
 # Indices map to CONDITIONS in env.sh.
 
 set -euo pipefail
@@ -20,4 +20,3 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval] condition=$COND"
 
 python3.12 evaluate/eval_normad.py --condition "$COND"
-python3.12 evaluate/eval_care.py   --condition "$COND"
