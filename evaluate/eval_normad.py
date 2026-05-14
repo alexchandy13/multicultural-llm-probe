@@ -58,10 +58,16 @@ NORMAD_COUNTRY_MAP = {
 
 def load_normad(path: Path):
     if path.exists() and any(path.iterdir()):
-        return load_from_disk(str(path))
-    # Public NormAd repo on HF.
-    ds = load_dataset("akhilayerukola/NormAd")
-    return ds["test"] if "test" in ds else ds["train"]
+        ds = load_from_disk(str(path))
+    else:
+        ds = load_dataset("akhilayerukola/NormAd")
+    # Both branches may return a DatasetDict; pick the best split.
+    if hasattr(ds, "keys"):
+        for split in ("test", "validation", "train"):
+            if split in ds:
+                return ds[split]
+        raise ValueError(f"no usable split in {list(ds.keys())}")
+    return ds
 
 
 @torch.no_grad()
