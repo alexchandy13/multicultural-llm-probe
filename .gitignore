@@ -10,6 +10,7 @@ checkpoints/*/
 outputs/neurons/**/*.pt
 outputs/neurons/**/*_max_scores.json
 outputs/neurons/**/scores_*.pt
+outputs/behavioral
 
 # CULNIG upstream clone — pulled separately
 culnig/_upstream/
