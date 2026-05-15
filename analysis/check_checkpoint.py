@@ -121,17 +121,34 @@ def load_and_check(ckpt: Path, base_id: str, use_4bit: bool):
     model = PeftModel.from_pretrained(base, str(ckpt))
     print("  adapter applied without error")
 
-    total = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    pct = 100 * trainable / total if total else 0.0
-    print(f"\n  total params:     {total:,}")
-    print(f"  trainable params: {trainable:,} ({pct:.3f}%)")
+    # Count by `lora_` name prefix — works regardless of requires_grad. The
+    # default PeftModel.from_pretrained loads adapters in inference mode
+    # (requires_grad=False on the LoRA params), so just counting trainable
+    # params would mis-flag a healthy inference-time load.
+    lora_total = 0
+    lora_trainable = 0
+    for name, p in model.named_parameters():
+        if "lora_" in name:
+            lora_total += p.numel()
+            if p.requires_grad:
+                lora_trainable += p.numel()
 
-    # Sanity check: a Llama 3.2 3B QLoRA (r=16, 7 modules) has ~24M trainable.
-    if trainable == 0:
-        print("  [warn] zero trainable params — adapter may have attached as inference-only")
-    elif trainable < 1_000_000:
-        print("  [warn] trainable param count is unusually low for a LoRA r=16 setup")
+    # Total model size for context. Note that with 4-bit base, .numel() on
+    # bitsandbytes Params4bit layers reports the packed (~half) count, so
+    # this won't match the model card's ~3.2B figure on a 3B model.
+    total = sum(p.numel() for p in model.parameters())
+    print(f"\n  total params (incl. packed 4-bit base):  {total:,}")
+    print(f"  LoRA params (total):     {lora_total:,}")
+    print(f"  LoRA params (trainable): {lora_trainable:,}")
+
+    if lora_total == 0:
+        print("  [warn] no LoRA params found — adapter did not attach correctly")
+    elif lora_total < 1_000_000:
+        print(f"  [warn] LoRA param count is unusually low ({lora_total:,}) for r=16 / 7 modules")
+    elif lora_trainable == 0:
+        print("  [info] LoRA loaded in inference mode (requires_grad=False on the LoRA params).")
+        print("         This is correct for eval-time loading. The training scripts re-enable")
+        print("         grad via prepare_model_for_kbit_training + PEFT's training path.")
 
 
 def main():
