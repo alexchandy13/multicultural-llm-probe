@@ -25,7 +25,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 DATA = Path("data")
 
 specs = [
-    ("tatsu-lab/alpaca",            DATA / "alpaca"),
+    # Alpaca dropped: SFT now reads HH-RLHF chosen responses so both SFT and DPO
+    # share the same source data (see finetune/sft_train.py docstring).
     ("Anthropic/hh-rlhf",           DATA / "hh-rlhf"),
     ("akhilayerukola/NormAd",       DATA / "NormAd"),
     ("Taise228/CountryRC",          DATA / "CountryRC"),

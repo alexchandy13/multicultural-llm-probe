@@ -28,8 +28,14 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
-CONDITIONS = ["base", "sft", "dpo", "instruct"]
-COND_LABELS = {"base": "C1: Base", "sft": "C2: SFT", "dpo": "C3: DPO", "instruct": "C4: Instruct"}
+CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+COND_LABELS = {
+    "base":     "C1: Base",
+    "sft":      "C2: SFT",
+    "dpo":      "C3: DPO",
+    "sftdpo":   "C4: SFT+DPO",
+    "instruct": "C5: Instruct",
+}
 
 
 def figure1_accuracy_bars():

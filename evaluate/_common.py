@@ -1,7 +1,9 @@
-"""Shared helpers for behavioral evaluation across all four conditions.
+"""Shared helpers for behavioral evaluation across all five conditions.
 
 Centralizes (a) the condition -> (base_model, adapter_path) resolution and
 (b) model loading with QLoRA 4-bit + optional LoRA adapter merge for inference.
+
+Conditions: base (C1), sft (C2), dpo (C3), sftdpo (C4), instruct (C5).
 """
 from __future__ import annotations
 
@@ -56,48 +58,78 @@ NON_WESTERN = {
 
 @dataclass
 class Condition:
-    name: str        # base | sft | dpo | instruct
+    name: str        # base | sft | dpo | sftdpo | instruct
     base: str        # HF model id for base weights
-    adapter: Optional[Path]   # LoRA adapter dir, or None
-    final_epoch: Optional[int]  # which epoch's checkpoint to use, or None for default
+    adapter: Optional[Path]                          # primary LoRA adapter, applied last
+    pre_merge_adapter: Optional[Path] = None         # adapter merged into base BEFORE primary
+    final_epoch: Optional[int] = None
+
+
+def _latest_checkpoint(parent: Path) -> Path:
+    """Pick the highest-numbered `checkpoint-N` subdir, falling back to `parent` itself."""
+    candidates = sorted(parent.glob("checkpoint-*"),
+                        key=lambda p: int(p.name.rsplit("-", 1)[-1]) if p.name.rsplit("-", 1)[-1].isdigit() else -1)
+    return candidates[-1] if candidates else parent
 
 
 def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2) -> Condition:
     if name == "base":
-        return Condition("base", BASE_MODEL, None, None)
+        return Condition("base", BASE_MODEL, None)
     if name == "instruct":
-        return Condition("instruct", INSTRUCT_MODEL, None, None)
+        return Condition("instruct", INSTRUCT_MODEL, None)
     if name == "sft":
-        adapter = PROJECT_ROOT / "checkpoints" / "sft" / f"checkpoint-epoch-{sft_epoch}"
-        if not adapter.exists():
-            adapter = PROJECT_ROOT / "checkpoints" / "sft"
-        return Condition("sft", BASE_MODEL, adapter, sft_epoch)
+        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
+        return Condition("sft", BASE_MODEL, adapter, final_epoch=sft_epoch)
     if name == "dpo":
-        adapter = PROJECT_ROOT / "checkpoints" / "dpo" / f"checkpoint-epoch-{dpo_epoch}"
-        if not adapter.exists():
-            adapter = PROJECT_ROOT / "checkpoints" / "dpo"
-        return Condition("dpo", BASE_MODEL, adapter, dpo_epoch)
+        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "dpo")
+        return Condition("dpo", BASE_MODEL, adapter, final_epoch=dpo_epoch)
+    if name == "sftdpo":
+        # The sftdpo adapter was trained on top of an SFT-merged base, so its
+        # weights are deltas from `base + SFT`, not from `base`. For correct
+        # inference we must merge the SFT adapter into the base first, then
+        # apply the sftdpo adapter on top.
+        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
+        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo")
+        return Condition(
+            "sftdpo", BASE_MODEL,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+        )
     raise ValueError(f"unknown condition: {name}")
 
 
 def load_model_for_eval(cond: Condition):
-    """4-bit quantized base + optional LoRA adapter, set to eval mode."""
+    """Load base + optional pre-merge adapter + optional primary adapter, set to eval mode.
+
+    Quantization rule:
+      - No pre_merge_adapter → load base in 4-bit (QLoRA-style, low memory).
+      - pre_merge_adapter set → load base in bf16 because `merge_and_unload()`
+        doesn't compose with bitsandbytes 4-bit. Llama 3.2 3B in bf16 (~6 GB)
+        plus a LoRA adapter still fits comfortably on A5000 24 GB for inference.
+    """
     tokenizer = AutoTokenizer.from_pretrained(cond.base)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        cond.base,
-        quantization_config=bnb,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-    )
+    if cond.pre_merge_adapter is not None:
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base, torch_dtype=torch.bfloat16, device_map="auto",
+        )
+        model = PeftModel.from_pretrained(model, str(cond.pre_merge_adapter))
+        model = model.merge_and_unload()
+    else:
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base, quantization_config=bnb, device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
+
     if cond.adapter is not None:
         model = PeftModel.from_pretrained(model, str(cond.adapter))
     model.eval()
@@ -113,5 +145,5 @@ def culture_group(country: str) -> str:
 
 
 def conditions_from_env() -> list[str]:
-    raw = os.environ.get("CONDITIONS", "base sft dpo instruct")
+    raw = os.environ.get("CONDITIONS", "base sft dpo sftdpo instruct")
     return raw.split()

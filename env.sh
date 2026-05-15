@@ -15,7 +15,7 @@ export BITSANDBYTES_NOWELCOME=1
 export PYTHONUNBUFFERED=1   # flush stdout live so `tail -f *.out` shows progress
 
 # Conditions used everywhere downstream.
-export CONDITIONS="base sft dpo instruct"
+export CONDITIONS="base sft dpo sftdpo instruct"
 
 # Cultures from NormAd; split for paper-side analysis.
 export WESTERN_CULTURES="US UK Germany Spain Australia"

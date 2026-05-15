@@ -10,68 +10,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 from collections import deque
 from pathlib import Path
 
 import torch
 import yaml
-from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, prepare_model_for_kbit_training
-from transformers import (
-    AutoModelForCausalLM,
-    AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainerCallback,
-)
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import DPOConfig, DPOTrainer
 
-
-HH_PROMPT_RE = re.compile(r"(\n\nHuman: |\n\nAssistant: )")
-
-
-def split_hh_pair(example: dict) -> dict:
-    """HH-RLHF stores chosen/rejected as full transcripts; split into (prompt, chosen, rejected).
-
-    Heuristic: find the last 'Assistant:' marker; everything before is prompt, after is response.
-    Both chosen and rejected share the same prompt, so we derive it from one side.
-    """
-    chosen = example["chosen"]
-    rejected = example["rejected"]
-    idx_c = chosen.rfind("\n\nAssistant:")
-    idx_r = rejected.rfind("\n\nAssistant:")
-    if idx_c == -1 or idx_r == -1:
-        return {"prompt": "", "chosen": "", "rejected": ""}
-    prompt = chosen[: idx_c + len("\n\nAssistant:")]
-    return {
-        "prompt": prompt,
-        "chosen": chosen[idx_c + len("\n\nAssistant:"):].strip(),
-        "rejected": rejected[idx_r + len("\n\nAssistant:"):].strip(),
-    }
-
-
-def load_hh(cfg: dict):
-    local = Path(cfg["dataset_path"])
-    if local.exists() and any(local.iterdir()):
-        ds = load_from_disk(str(local))
-    else:
-        ds = load_dataset(cfg["dataset_name"])
-    train = ds["train"]
-    mapped = train.map(split_hh_pair, remove_columns=train.column_names)
-    filtered = mapped.filter(lambda x: x["prompt"] and x["chosen"] and x["rejected"])
-    cap = cfg.get("max_train_examples")
-    if cap and len(filtered) > cap:
-        filtered = filtered.shuffle(seed=cfg["seed"]).select(range(cap))
-    return filtered
-
-
-def build_bnb_config(qcfg: dict) -> BitsAndBytesConfig:
-    return BitsAndBytesConfig(
-        load_in_4bit=qcfg["load_in_4bit"],
-        bnb_4bit_quant_type=qcfg["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=qcfg["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=getattr(torch, qcfg["bnb_4bit_compute_dtype"]),
-    )
+from finetune._common import build_bnb_config, load_hh_split
 
 
 class RewardMarginEarlyStop(TrainerCallback):
@@ -116,7 +64,7 @@ def main():
     model.config.use_cache = False
 
     lora_cfg = LoraConfig(**cfg["lora"])
-    train_ds = load_hh(cfg)
+    train_ds = load_hh_split(cfg)
 
     dpo_args = DPOConfig(
         output_dir=cfg["output_dir"],

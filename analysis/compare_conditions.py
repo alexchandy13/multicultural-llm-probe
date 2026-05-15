@@ -20,7 +20,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
-CONDITIONS = ["base", "sft", "dpo", "instruct"]
+CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
 
 
 def load(benchmark: str, cond: str) -> dict | None:

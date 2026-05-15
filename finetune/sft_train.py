@@ -1,4 +1,13 @@
-"""SFT on Alpaca with QLoRA 4-bit + LoRA adapters.
+"""SFT on HH-RLHF chosen responses with QLoRA 4-bit + LoRA adapters.
+
+NOTE: SFT now uses HH-RLHF, not Alpaca. The plan originally specified Alpaca for SFT
+and HH-RLHF for DPO, but that conflated two confounds: training method AND training
+data. To isolate the SFT-vs-DPO contrast at the heart of the RQ, both conditions
+now read the same HH-RLHF data via `load_hh_split` — SFT keeps only the (prompt,
+chosen) pairs and trains the standard next-token-prediction objective, while DPO
+uses the full (prompt, chosen, rejected) triples with the DPO objective. The same
+shuffle seed + max_train_examples cap is used in both configs so they literally
+see the same 30k examples in the same order.
 
 Usage:
     python finetune/sft_train.py --config finetune/configs/sft_config.yaml
@@ -10,47 +19,24 @@ from pathlib import Path
 
 import torch
 import yaml
-from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, prepare_model_for_kbit_training
-from transformers import AutoTokenizer, BitsAndBytesConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
 
-
-ALPACA_TEMPLATE_WITH_INPUT = (
-    "Below is an instruction that describes a task, paired with an input that provides "
-    "further context. Write a response that appropriately completes the request.\n\n"
-    "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}"
-)
-ALPACA_TEMPLATE_NO_INPUT = (
-    "Below is an instruction that describes a task. Write a response that appropriately "
-    "completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{output}"
-)
+from finetune._common import build_bnb_config, load_hh_split
 
 
-def format_alpaca(example: dict) -> dict:
-    if example.get("input"):
-        text = ALPACA_TEMPLATE_WITH_INPUT.format(**example)
-    else:
-        text = ALPACA_TEMPLATE_NO_INPUT.format(**example)
-    return {"text": text}
+def load_sft_chosen(cfg: dict):
+    """Load HH-RLHF and project to a single `text` field = '{prompt} {chosen}'.
 
-
-def load_alpaca(cfg: dict):
-    local = Path(cfg["dataset_path"])
-    if local.exists() and any(local.iterdir()):
-        ds = load_from_disk(str(local))
-    else:
-        ds = load_dataset(cfg["dataset_name"])
-    train = ds["train"] if "train" in ds else ds
-    return train.map(format_alpaca, remove_columns=train.column_names)
-
-
-def build_bnb_config(qcfg: dict) -> BitsAndBytesConfig:
-    return BitsAndBytesConfig(
-        load_in_4bit=qcfg["load_in_4bit"],
-        bnb_4bit_quant_type=qcfg["bnb_4bit_quant_type"],
-        bnb_4bit_use_double_quant=qcfg["bnb_4bit_use_double_quant"],
-        bnb_4bit_compute_dtype=getattr(torch, qcfg["bnb_4bit_compute_dtype"]),
+    HH-RLHF prompts already terminate with '\\n\\nAssistant:', so concatenating
+    with a space yields a well-formed transcript ending in the chosen response —
+    exactly what an SFT next-token loss should consume.
+    """
+    triples = load_hh_split(cfg)
+    return triples.map(
+        lambda x: {"text": f"{x['prompt']} {x['chosen']}"},
+        remove_columns=triples.column_names,
     )
 
 
@@ -77,7 +63,7 @@ def main():
 
     lora_cfg = LoraConfig(**cfg["lora"])
 
-    train_ds = load_alpaca(cfg)
+    train_ds = load_sft_chosen(cfg)
 
     sft_args = SFTConfig(
         output_dir=cfg["output_dir"],

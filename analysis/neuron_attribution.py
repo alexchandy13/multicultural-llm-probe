@@ -26,7 +26,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 
-CONDITIONS = ["base", "sft", "dpo", "instruct"]
+CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
 
 
 def load_neurons(source: str, cond: str) -> list[dict] | None:

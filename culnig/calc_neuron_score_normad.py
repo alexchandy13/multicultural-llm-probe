@@ -73,34 +73,54 @@ def _pin_name_or_path(model):
 
 
 def load_model_for_culnig(condition_name: str):
-    """QLoRA 4-bit base + optional LoRA adapter, matching upstream's expected interface."""
+    """Load base + optional pre-merge adapter + optional primary adapter, merging both.
+
+    Quantization rule:
+      - No pre_merge_adapter → 4-bit base (QLoRA-style, low memory).
+      - pre_merge_adapter set (C4 sftdpo) → bf16 base, because `merge_and_unload()`
+        doesn't compose with bitsandbytes 4-bit. Llama 3.2 3B in bf16 fits in
+        A5000 24 GB for gradient scoring (forward + backward on adapter-merged
+        base; no optimizer state, no LoRA params).
+    """
     cond = resolve_condition(condition_name)
     tokenizer = AutoTokenizer.from_pretrained(cond.base, padding_side="left")
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
 
     # Strip the chat template so every condition produces identical raw-text prompts.
-    # C4 (Instruct) ships a chat template; C1/C2/C3 (base) don't. If we let the
-    # template apply on C4, its prompts become chat-formatted and gradient scores
+    # C5 (Instruct) ships a chat template; C1-C4 (base + adapters) don't. If we let
+    # the template apply on C5, its prompts become chat-formatted and gradient scores
     # are no longer comparable across conditions. Forcing chat_template=None makes
     # upstream's `try: apply_chat_template ... except: pass` blocks fall back to
     # raw text uniformly for every dataset (normad, normadcontrol, blend, etc.).
     tokenizer.chat_template = None
 
-    bnb = BitsAndBytesConfig(
-        load_in_4bit=True, bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        cond.base,
-        quantization_config=bnb,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-        attn_implementation="sdpa",
-    )
+    if cond.pre_merge_adapter is not None:
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="sdpa",
+        )
+        model = PeftModel.from_pretrained(model, str(cond.pre_merge_adapter))
+        model = model.merge_and_unload()
+    else:
+        bnb = BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base,
+            quantization_config=bnb,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="sdpa",
+        )
+
     if cond.adapter is not None:
         model = PeftModel.from_pretrained(model, str(cond.adapter))
         model = model.merge_and_unload()  # merge so gradients flow into base weights
+
     # See _pin_name_or_path docstring for why this is a permanent (not scoped) swap.
     _pin_name_or_path(model)
     return model, tokenizer

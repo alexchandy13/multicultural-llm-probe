@@ -6,22 +6,25 @@ Cultural norm drift in LLMs: disentangling the effects of SFT vs. DPO with a val
 
 Does SFT vs. DPO differentially erode non-Western cultural norms and values in LLMs, and can this be explained at the neuron level using a values-based extension of CULNIG?
 
-## Four conditions
+## Five conditions
 
 | ID | Model | Training | Purpose |
 |----|-------|----------|---------|
 | C1 | Llama 3.2 3B base | — | Pre-alignment baseline |
-| C2 | Llama 3.2 3B base + Alpaca, 3 ep | SFT | Isolates SFT effect |
-| C3 | Llama 3.2 3B base + HH-RLHF, 2 ep | DPO | Isolates DPO effect |
-| C4 | Llama 3.2 3B Instruct (Meta) | SFT+DPO+RLHF | Real-world reference |
+| C2 | Llama 3.2 3B base + SFT on HH-RLHF chosen, 3 ep | SFT | Isolates SFT effect |
+| C3 | Llama 3.2 3B base + DPO on HH-RLHF, 2 ep | DPO | Isolates DPO effect |
+| C4 | Llama 3.2 3B base → SFT → DPO on HH-RLHF | sequential | Controlled SFT+DPO (real-world recipe) |
+| C5 | Llama 3.2 3B Instruct (Meta) | proprietary SFT+DPO+RLHF | Real-world reference |
+
+C2 and C3 share **the same HH-RLHF source data** (same 30k subsample, same seed) — so any contrast between them isolates the training method, not the data. C4 chains the two stages on top of each other on the same data, controlling what Meta's official Instruct release does with proprietary data.
 
 ## Layout
 
 ```
-data/         HF + constructed datasets (NormAd, BLEnD, CountryRC, Alpaca, HH-RLHF, NormAdctrl)
+data/         HF datasets (HH-RLHF, NormAd, BLEnD, CountryRC) + constructed NormAdctrl
 models/       Base + Instruct model weights
 checkpoints/  LoRA adapters per condition + epoch
-finetune/     SFT + DPO training scripts and configs
+finetune/     SFT, DPO, SFT+DPO training scripts and configs
 evaluate/     NormAd eval (plus all-conditions wrapper). CARE dropped — see eval_all_conditions.py docstring.
 culnig/       CULNIG core (clone of ynklab/CULNIG) + NormAd extensions
 analysis/     Cross-condition comparison + neuron attribution + figures
@@ -33,10 +36,11 @@ outputs/      Behavioral JSON results, neuron files, paper figures
 
 ```
 Step 0  env_setup            login node, no GPU
-Step 1  sft_job.sh           SFT on Alpaca, 3 ep, ~6-8h on A5000
+Step 1  sft_job.sh           SFT on HH-RLHF chosen (30k), 3 ep, ~3-5h on A5000
 Step 2  construct_normad_ctrl.py    strip cultural prefixes (rule-based)
-Step 3  dpo_job.sh           DPO on HH-RLHF, 2 ep, parallel with Step 1 if quota allows
-Step 4  eval_job.sh          NormAd on all four conditions
+Step 3  dpo_job.sh           DPO on HH-RLHF (30k), 2 ep, ~7-9h on A5000, parallel with Step 1
+Step 3b sftdpo_job.sh        DPO on top of SFT, 2 ep, ~7-9h on A5000 — depends on Step 1
+Step 4  eval_job.sh          NormAd on all five conditions (array 0-4)
 Step 5  culnig_job.sh        gradient scoring on BLEnD (baseline) and NormAd (novel)
 Step 6  analysis/*.py        results table + 3 figures
 ```
@@ -46,14 +50,16 @@ Step 6  analysis/*.py        results table + 3 figures
 ```bash
 source env.sh
 sbatch slurm/download_data.sh
-sbatch slurm/sft_job.sh
+
+# SFT and DPO in parallel; SFT+DPO chained on SFT's completion
+SFT_ID=$(sbatch --parsable slurm/sft_job.sh)
 sbatch slurm/dpo_job.sh
-# wait for both to finish, then:
+sbatch --dependency=afterok:$SFT_ID slurm/sftdpo_job.sh
+
+# wait for the training jobs, then:
 sbatch slurm/eval_job.sh
 sbatch slurm/culnig_job.sh
-python analysis/compare_conditions.py
-python analysis/neuron_attribution.py
-python analysis/visualize.py
+sbatch slurm/analysis_job.sh
 ```
 
 ## CULNIG extension
@@ -66,8 +72,8 @@ Two CULNIG runs are launched per condition:
 
 ## Hardware
 
-UMIACS Nexus, RTX A5000 (24GB), SLURM. QLoRA 4-bit + adapters only stays well under the 30GB storage quota.
+UMIACS Nexus, RTX A5000 (24GB), SLURM. QLoRA 4-bit + adapters only — five LoRA adapters total fit in well under 1 GB of disk.
 
 ## Fallback
 
-If fine-tuning collapses, the paper pivots to a C1-vs-C4-only comparison using stock models + original CULNIG. See plan §"Fallback Plan".
+If fine-tuning collapses, the paper pivots to a C1-vs-C5-only comparison using stock models + original CULNIG. See plan §"Fallback Plan".
