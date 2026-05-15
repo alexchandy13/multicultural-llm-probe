@@ -37,22 +37,65 @@ PROMPT_TEMPLATE = (
 )
 
 # NormAd ships country names lowercase + underscored (e.g. 'united_states_of_america',
-# 'south_korea'). Map to the canonical forms `culture_group` recognizes; anything
-# unmapped falls through and lands in the "Other" bucket.
+# 'south_korea'). Map raw -> canonical forms `culture_group` recognizes; anything
+# unmapped falls through and lands in the "Other" bucket. The expanded list covers
+# ~50 of NormAd's 75 countries — see evaluate/_common.py for grouping rationale.
 NORMAD_COUNTRY_MAP = {
+    # Western
     "united_states_of_america": "US",
     "united_kingdom": "UK",
     "germany": "Germany",
     "spain": "Spain",
     "australia": "Australia",
+    "canada": "Canada",
+    "ireland": "Ireland",
+    "new_zealand": "New_Zealand",
+    "france": "France",
+    "italy": "Italy",
+    "netherlands": "Netherlands",
+    "austria": "Austria",
+    "sweden": "Sweden",
+    "portugal": "Portugal",
+    "greece": "Greece",
+    # Non-Western — East/South/SE Asia
     "japan": "Japan",
     "china": "China",
     "india": "India",
-    "iran": "Iran",
     "indonesia": "Indonesia",
-    "mexico": "Mexico",
     "south_korea": "South_Korea",
+    "pakistan": "Pakistan",
+    "bangladesh": "Bangladesh",
+    "sri_lanka": "Sri_Lanka",
+    "nepal": "Nepal",
+    "afghanistan": "Afghanistan",
+    "thailand": "Thailand",
+    "vietnam": "Vietnam",
+    "philippines": "Philippines",
+    "malaysia": "Malaysia",
+    "singapore": "Singapore",
+    "cambodia": "Cambodia",
+    "laos": "Laos",
+    "myanmar": "Myanmar",
+    "hong_kong": "Hong_Kong",
+    "taiwan": "Taiwan",
+    # Non-Western — MENA + Sub-Saharan Africa
+    "iran": "Iran",
+    "egypt": "Egypt",
+    "lebanon": "Lebanon",
+    "iraq": "Iraq",
+    "syria": "Syria",
+    "saudi_arabia": "Saudi_Arabia",
+    "ethiopia": "Ethiopia",
+    "kenya": "Kenya",
+    "south_africa": "South_Africa",
     "nigeria": "Nigeria",
+    # Non-Western — Latin America
+    "mexico": "Mexico",
+    "brazil": "Brazil",
+    "argentina": "Argentina",
+    "chile": "Chile",
+    "colombia": "Colombia",
+    "peru": "Peru",
 }
 
 

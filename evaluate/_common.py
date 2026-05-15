@@ -20,10 +20,37 @@ INSTRUCT_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-WESTERN = {"US", "UK", "Germany", "Spain", "Australia"}
+# Expanded from the plan's 12-country list to ~50 of NormAd's 75 countries.
+# The plan's 12 are kept as a strict subset (see paper text). Cultural groupings
+# follow conventional anglosphere + Western/Northern Europe definitions for
+# Western, and Asia/MENA/Sub-Saharan Africa/Latin America for Non-Western.
+# Contested cases left in "Other": Eastern Europe, Russia/Ukraine, Israel/Türkiye,
+# Pacific Islands, Mauritius — to keep the W vs NW contrast clean.
+WESTERN = {
+    # Plan's original 5
+    "US", "UK", "Germany", "Spain", "Australia",
+    # Anglosphere
+    "Canada", "Ireland", "New_Zealand",
+    # Western / Northern Europe
+    "France", "Italy", "Netherlands", "Austria", "Sweden", "Portugal", "Greece",
+}
 NON_WESTERN = {
+    # Plan's original 8 (Nigeria absent from NormAd)
     "Japan", "China", "India", "Iran", "Indonesia",
     "Nigeria", "Mexico", "South_Korea", "South Korea",
+    # South Asia
+    "Pakistan", "Bangladesh", "Sri_Lanka", "Nepal", "Afghanistan",
+    # Southeast Asia
+    "Thailand", "Vietnam", "Philippines", "Malaysia", "Singapore",
+    "Cambodia", "Laos", "Myanmar",
+    # East Asia
+    "Hong_Kong", "Taiwan",
+    # Middle East / North Africa
+    "Egypt", "Lebanon", "Iraq", "Syria", "Saudi_Arabia",
+    # Sub-Saharan Africa
+    "Ethiopia", "Kenya", "South_Africa",
+    # Latin America
+    "Brazil", "Argentina", "Chile", "Colombia", "Peru",
 }
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -23,6 +24,26 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 CONDITION_ORDER = ["base", "sft", "dpo", "instruct"]
+
+# Import the live W/NW sets + NormAd country map so re-grouping always
+# tracks the current methodology, even on JSONs saved before the expansion.
+sys.path.insert(0, str(PROJECT_ROOT))
+from evaluate._common import WESTERN, NON_WESTERN
+from evaluate.eval_normad import NORMAD_COUNTRY_MAP
+
+
+def regroup(raw_country: str) -> tuple[str, str]:
+    """(canonical_country, group) — re-derives both from a saved prediction's `country`.
+
+    Handles both canonical-style values (e.g. "US") and raw NormAd lowercase
+    values (e.g. "france") that historical JSONs may contain.
+    """
+    canon = NORMAD_COUNTRY_MAP.get(raw_country.lower(), raw_country)
+    if canon in WESTERN:
+        return canon, "Western"
+    if canon in NON_WESTERN:
+        return canon, "Non-Western"
+    return canon, "Other"
 
 
 def load(cond: str) -> dict | None:
@@ -33,13 +54,14 @@ def load(cond: str) -> dict | None:
 
 
 def per_country(predictions: list[dict], group: str) -> dict[str, tuple[int, int]]:
-    """Return {country: (correct, total)} for predictions in the given group."""
+    """Return {country: (correct, total)} for predictions in the given (re-derived) group."""
     rows: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for p in predictions:
-        if p["group"] != group:
+        canon, g = regroup(p["country"])
+        if g != group:
             continue
-        rows[p["country"]][0] += int(p["gold"] == p["pred"])
-        rows[p["country"]][1] += 1
+        rows[canon][0] += int(p["gold"] == p["pred"])
+        rows[canon][1] += 1
     return {c: (r[0], r[1]) for c, r in rows.items()}
 
 
@@ -49,21 +71,26 @@ def fmt_pct(x):
 
 def print_condition(cond: str, data: dict):
     preds = data["predictions"]
+    # Always re-group from raw country using the live map, so historical JSONs
+    # automatically benefit when WESTERN/NON_WESTERN expands.
     groups: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for p in preds:
-        groups[p["group"]][0] += int(p["gold"] == p["pred"])
-        groups[p["group"]][1] += 1
+        _, g = regroup(p["country"])
+        groups[g][0] += int(p["gold"] == p["pred"])
+        groups[g][1] += 1
 
     total_n = sum(g[1] for g in groups.values())
     print(f"\n========== condition = {cond}  (n={total_n}, overall acc = {data['accuracy_overall']:.3f}) ==========")
 
-    print("\n  Group totals:")
+    print("\n  Group totals (re-grouped with current map):")
     for g, (c, n) in sorted(groups.items(), key=lambda x: -x[1][1]):
         print(f"    {g:12s} {n:5d}  ({100*n/total_n:5.1f}%)   acc = {c/n:.3f}")
 
-    w = data["accuracy_by_group"].get("Western")
-    nw = data["accuracy_by_group"].get("Non-Western")
-    gap = (w - nw) if (w is not None and nw is not None) else None
+    w_correct, w_n = groups.get("Western", [0, 0])
+    nw_correct, nw_n = groups.get("Non-Western", [0, 0])
+    w_acc = (w_correct / w_n) if w_n else None
+    nw_acc = (nw_correct / nw_n) if nw_n else None
+    gap = (w_acc - nw_acc) if (w_acc is not None and nw_acc is not None) else None
     print(f"\n  W − NW gap = {fmt_pct(gap)}")
 
     for g in ("Western", "Non-Western"):
