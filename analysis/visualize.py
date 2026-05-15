@@ -1,7 +1,7 @@
 """Generate the three paper figures.
 
 Figure 1 — Bar chart: NormAd accuracy by culture group (Western, Non-Western) across
-           the four conditions; shows the widening gap.
+           conditions; shows the widening gap.
 Figure 2 — Heatmap: NormAd-identified culture-neuron mean attribution score, by
            layer x condition; the "fading" visualization showing alignment suppression.
 Figure 3 — Stacked bar: NormAd-only vs. Shared vs. BLEnD-only neurons per condition;
@@ -28,19 +28,28 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
+# Default — primary HH-RLHF setup. `--setup` overrides on the CLI.
 CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
 COND_LABELS = {
-    "base":     "C1: Base",
-    "sft":      "C2: SFT",
-    "dpo":      "C3: DPO",
-    "sftdpo":   "C4: SFT+DPO",
-    "instruct": "C5: Instruct",
+    "base":           "C1: Base",
+    "sft":            "C2: SFT",
+    "sft_alpaca":     "C2a: SFT (Alpaca)",
+    "dpo":            "C3: DPO",
+    "sftdpo":         "C4: SFT+DPO",
+    "sftdpo_alpaca":  "C4a: SFT(Alp)+DPO",
+    "instruct":       "C5: Instruct",
+}
+
+SETUP_CONDITIONS = {
+    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
+    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
+    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
 }
 
 
-def figure1_accuracy_bars():
+def figure1_accuracy_bars(conditions, suffix=""):
     western, non_western = [], []
-    for cond in CONDITIONS:
+    for cond in conditions:
         path = BEHAVIORAL_DIR / f"normad_{cond}.json"
         if not path.exists():
             western.append(np.nan); non_western.append(np.nan); continue
@@ -49,29 +58,29 @@ def figure1_accuracy_bars():
         western.append(g.get("Western") or np.nan)
         non_western.append(g.get("Non-Western") or np.nan)
 
-    x = np.arange(len(CONDITIONS))
+    x = np.arange(len(conditions))
     w = 0.38
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig, ax = plt.subplots(figsize=(max(7, 1.2 * len(conditions)), 4))
     ax.bar(x - w / 2, western, w, label="Western", color="#4477AA")
     ax.bar(x + w / 2, non_western, w, label="Non-Western", color="#CC6677")
     ax.set_xticks(x)
-    ax.set_xticklabels([COND_LABELS[c] for c in CONDITIONS])
+    ax.set_xticklabels([COND_LABELS.get(c, c) for c in conditions], rotation=15, ha="right")
     ax.set_ylabel("NormAd accuracy")
     ax.set_title("Figure 1. NormAd accuracy by culture group across conditions")
     ax.legend()
     ax.grid(axis="y", linestyle=":", alpha=0.4)
     fig.tight_layout()
-    out = FIGURES_DIR / "fig1_normad_by_group.pdf"
+    out = FIGURES_DIR / f"fig1_normad_by_group{suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
 
 
-def figure2_neuron_heatmap():
+def figure2_neuron_heatmap(conditions, suffix=""):
     """Per-layer mean attribution score across conditions (NormAd-identified neurons)."""
     rows = []
     max_layer = 0
-    for cond in CONDITIONS:
+    for cond in conditions:
         path = NEURONS_DIR / cond / "all_neurons_normad_max.json"
         if not path.exists():
             rows.append(None); continue
@@ -86,28 +95,28 @@ def figure2_neuron_heatmap():
         print("[fig2] no neuron data; skipping")
         return
     n_layers = max_layer + 1
-    mat = np.full((len(CONDITIONS), n_layers), np.nan)
+    mat = np.full((len(conditions), n_layers), np.nan)
     for i, row in enumerate(rows):
         if row is None:
             continue
         for L, scores in row.items():
             mat[i, L] = float(np.mean(scores))
 
-    fig, ax = plt.subplots(figsize=(9, 3.5))
+    fig, ax = plt.subplots(figsize=(9, max(3.5, 0.5 * len(conditions))))
     im = ax.imshow(mat, aspect="auto", cmap="magma")
-    ax.set_yticks(range(len(CONDITIONS)))
-    ax.set_yticklabels([COND_LABELS[c] for c in CONDITIONS])
+    ax.set_yticks(range(len(conditions)))
+    ax.set_yticklabels([COND_LABELS.get(c, c) for c in conditions])
     ax.set_xlabel("Layer")
     ax.set_title("Figure 2. NormAd-identified culture-neuron attribution by layer")
     plt.colorbar(im, ax=ax, label="Mean (NormAd − NormAdctrl) attribution score")
     fig.tight_layout()
-    out = FIGURES_DIR / "fig2_neuron_heatmap.pdf"
+    out = FIGURES_DIR / f"fig2_neuron_heatmap{suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
 
 
-def figure3_overlap():
+def figure3_overlap(conditions, suffix=""):
     """Per-condition stacked bar of NormAd-only / shared / BLEnD-only neurons."""
     summary_path = NEURONS_DIR / "attribution_summary.json"
     if not summary_path.exists():
@@ -119,25 +128,28 @@ def figure3_overlap():
         print("[fig3] no cross-source overlap data; need both BLEnD and NormAd runs")
         return
 
-    conds = [c for c in CONDITIONS if c in cross]
+    conds = [c for c in conditions if c in cross]
+    if not conds:
+        print(f"[fig3] no cross-source data for conditions {conditions}; skipping")
+        return
     normad_only = [cross[c]["normad_only"] for c in conds]
     shared = [cross[c]["shared"] for c in conds]
     blend_only = [cross[c]["blend_only"] for c in conds]
 
     x = np.arange(len(conds))
-    fig, ax = plt.subplots(figsize=(7, 4))
+    fig, ax = plt.subplots(figsize=(max(7, 1.2 * len(conds)), 4))
     ax.bar(x, normad_only, label="NormAd only", color="#CC6677")
     ax.bar(x, shared, bottom=normad_only, label="Shared", color="#999933")
     ax.bar(x, blend_only,
            bottom=[a + b for a, b in zip(normad_only, shared)],
            label="BLEnD only", color="#4477AA")
     ax.set_xticks(x)
-    ax.set_xticklabels([COND_LABELS[c] for c in conds])
+    ax.set_xticklabels([COND_LABELS.get(c, c) for c in conds], rotation=15, ha="right")
     ax.set_ylabel("# culture neurons")
     ax.set_title("Figure 3. NormAd-identified vs. BLEnD-identified neuron overlap")
     ax.legend()
     fig.tight_layout()
-    out = FIGURES_DIR / "fig3_overlap.pdf"
+    out = FIGURES_DIR / f"fig3_overlap{suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
@@ -146,12 +158,22 @@ def figure3_overlap():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--figures", nargs="+", choices=["1", "2", "3", "all"], default=["all"])
+    parser.add_argument(
+        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
+        help="Which condition set to plot; same semantics as compare_conditions.py. "
+             "Non-default setups get a filename suffix (e.g. fig1_normad_by_group_alpaca.pdf) "
+             "so primary figures aren't overwritten.",
+    )
     args = parser.parse_args()
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    conditions = SETUP_CONDITIONS[args.setup]
+    suffix = "" if args.setup == "hhrlhf" else f"_{args.setup}"
+
     todo = {"1", "2", "3"} if "all" in args.figures else set(args.figures)
-    if "1" in todo: figure1_accuracy_bars()
-    if "2" in todo: figure2_neuron_heatmap()
-    if "3" in todo: figure3_overlap()
+    if "1" in todo: figure1_accuracy_bars(conditions, suffix)
+    if "2" in todo: figure2_neuron_heatmap(conditions, suffix)
+    if "3" in todo: figure3_overlap(conditions, suffix)
 
 
 if __name__ == "__main__":

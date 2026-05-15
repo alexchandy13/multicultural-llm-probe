@@ -20,7 +20,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
+# Default — the primary HH-RLHF setup. `--setup` overrides on the CLI.
 CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+
+SETUP_CONDITIONS = {
+    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
+    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
+    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
+}
 
 
 def load(benchmark: str, cond: str) -> dict | None:
@@ -36,7 +43,9 @@ def metric_keys(benchmark: str) -> tuple[str, str]:
     return "accuracy_overall", "accuracy_by_group"
 
 
-def build_rows(benchmark: str):
+def build_rows(benchmark: str, conditions: list[str] = None):
+    if conditions is None:
+        conditions = CONDITIONS
     overall_k, group_k = metric_keys(benchmark)
     base = load(benchmark, "base")
     base_overall = base[overall_k] if base else None
@@ -44,7 +53,7 @@ def build_rows(benchmark: str):
     base_nw = base[group_k]["Non-Western"] if base else None
 
     rows = []
-    for cond in CONDITIONS:
+    for cond in conditions:
         d = load(benchmark, cond)
         if d is None:
             rows.append({"condition": cond, "missing": True})
@@ -106,9 +115,16 @@ def to_md(rows_by_bench: dict, path: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmarks", nargs="+", default=["normad"])
+    parser.add_argument(
+        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
+        help="Which condition set to include. `hhrlhf` (default) reproduces "
+             "the primary results; `alpaca` swaps in the C2a/C4a Alpaca variants; "
+             "`both` reports the full union.",
+    )
     args = parser.parse_args()
 
-    rows_by_bench = {b: build_rows(b) for b in args.benchmarks}
+    conditions = SETUP_CONDITIONS[args.setup]
+    rows_by_bench = {b: build_rows(b, conditions) for b in args.benchmarks}
     csv_path = BEHAVIORAL_DIR / "table1.csv"
     md_path = BEHAVIORAL_DIR / "table1.md"
     to_csv(rows_by_bench, csv_path)

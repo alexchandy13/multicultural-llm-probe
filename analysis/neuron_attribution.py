@@ -26,7 +26,14 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 
+# Default — primary HH-RLHF setup. `--setup` overrides on the CLI.
 CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+
+SETUP_CONDITIONS = {
+    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
+    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
+    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
+}
 
 
 def load_neurons(source: str, cond: str) -> list[dict] | None:
@@ -61,7 +68,12 @@ def per_layer(neurons: list[dict]) -> dict[int, dict]:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", nargs="+", default=["normad", "blend"])
+    parser.add_argument(
+        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
+        help="Which condition set to analyze; same semantics as compare_conditions.py.",
+    )
     args = parser.parse_args()
+    conditions = SETUP_CONDITIONS[args.setup]
 
     summary = {"per_source": {}, "cross_source_overlap": {}}
     layer_rows = []
@@ -70,7 +82,7 @@ def main():
 
     for source in args.sources:
         per_cond = {}
-        for cond in CONDITIONS:
+        for cond in conditions:
             neurons = load_neurons(source, cond)
             if neurons is None:
                 per_cond[cond] = {"missing": True}
@@ -92,14 +104,14 @@ def main():
         if base_keys is not None:
             per_cond["jaccard_vs_base"] = {
                 cond: jaccard(keys_by_source_cond[(source, cond)], base_keys)
-                for cond in CONDITIONS
+                for cond in conditions
                 if cond != "base" and (source, cond) in keys_by_source_cond
             }
         summary["per_source"][source] = per_cond
 
     # Cross-source overlap (NormAd vs. BLEnD per condition)
     if "normad" in args.sources and "blend" in args.sources:
-        for cond in CONDITIONS:
+        for cond in conditions:
             n_keys = keys_by_source_cond.get(("normad", cond))
             b_keys = keys_by_source_cond.get(("blend", cond))
             if n_keys is not None and b_keys is not None:

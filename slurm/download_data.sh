@@ -25,9 +25,12 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 DATA = Path("data")
 
 specs = [
-    # Alpaca dropped: SFT now reads HH-RLHF chosen responses so both SFT and DPO
-    # share the same source data (see finetune/sft_train.py docstring).
+    # HH-RLHF: source for the primary SFT (chosen only) and DPO (full pairs).
     ("Anthropic/hh-rlhf",           DATA / "hh-rlhf"),
+    # Alpaca: source for the C2a robustness variant. SFT was trained on this
+    # offline from Nexus (checkpoint at checkpoints/sft_alpaca/), but we keep
+    # the data downloadable so the config is reproducible from this repo.
+    ("tatsu-lab/alpaca",            DATA / "alpaca"),
     ("akhilayerukola/NormAd",       DATA / "NormAd"),
     ("Taise228/CountryRC",          DATA / "CountryRC"),
 ]

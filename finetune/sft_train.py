@@ -1,16 +1,19 @@
-"""SFT on HH-RLHF chosen responses with QLoRA 4-bit + LoRA adapters.
+"""SFT with QLoRA 4-bit + LoRA adapters, dataset-driven.
 
-NOTE: SFT now uses HH-RLHF, not Alpaca. The plan originally specified Alpaca for SFT
-and HH-RLHF for DPO, but that conflated two confounds: training method AND training
-data. To isolate the SFT-vs-DPO contrast at the heart of the RQ, both conditions
-now read the same HH-RLHF data via `load_hh_split` — SFT keeps only the (prompt,
-chosen) pairs and trains the standard next-token-prediction objective, while DPO
-uses the full (prompt, chosen, rejected) triples with the DPO objective. The same
-shuffle seed + max_train_examples cap is used in both configs so they literally
-see the same 30k examples in the same order.
+Two supported source datasets:
+  - `Anthropic/hh-rlhf` (primary):  SFT on the chosen response of each pair, so SFT
+    and DPO read identical source data and any C2-vs-C3 contrast isolates the
+    training objective. See `load_hh_split` in finetune/_common.py.
+  - `tatsu-lab/alpaca` (robustness variant): SFT on generic instruction-response
+    pairs. Used for the C2a/C4a Alpaca robustness check — same training pipeline,
+    different SFT source.
+
+The dataset is selected by the `dataset_name` field in the config — no CLI flag or
+script branching at the call site. Existing HH-RLHF behavior is identical to before.
 
 Usage:
-    python finetune/sft_train.py --config finetune/configs/sft_config.yaml
+    python finetune/sft_train.py --config finetune/configs/sft_config.yaml         # HH-RLHF
+    python finetune/sft_train.py --config finetune/configs/sft_alpaca_config.yaml  # Alpaca
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ from pathlib import Path
 
 import torch
 import yaml
+from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, prepare_model_for_kbit_training
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
@@ -26,7 +30,36 @@ from trl import SFTTrainer, SFTConfig
 from finetune._common import build_bnb_config, load_hh_split
 
 
-def load_sft_chosen(cfg: dict):
+ALPACA_TEMPLATE_WITH_INPUT = (
+    "Below is an instruction that describes a task, paired with an input that provides "
+    "further context. Write a response that appropriately completes the request.\n\n"
+    "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}"
+)
+ALPACA_TEMPLATE_NO_INPUT = (
+    "Below is an instruction that describes a task. Write a response that appropriately "
+    "completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{output}"
+)
+
+
+def _format_alpaca(example: dict) -> dict:
+    if example.get("input"):
+        text = ALPACA_TEMPLATE_WITH_INPUT.format(**example)
+    else:
+        text = ALPACA_TEMPLATE_NO_INPUT.format(**example)
+    return {"text": text}
+
+
+def _load_alpaca(cfg: dict):
+    local = Path(cfg["dataset_path"])
+    if local.exists() and any(local.iterdir()):
+        ds = load_from_disk(str(local))
+    else:
+        ds = load_dataset(cfg["dataset_name"])
+    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+    return train.map(_format_alpaca, remove_columns=train.column_names)
+
+
+def _load_hh_chosen(cfg: dict):
     """Load HH-RLHF and project to a single `text` field = '{prompt} {chosen}'.
 
     HH-RLHF prompts already terminate with '\\n\\nAssistant:', so concatenating
@@ -37,6 +70,18 @@ def load_sft_chosen(cfg: dict):
     return triples.map(
         lambda x: {"text": f"{x['prompt']} {x['chosen']}"},
         remove_columns=triples.column_names,
+    )
+
+
+def load_train_dataset(cfg: dict):
+    """Dispatch on `dataset_name` to pick the right loader + text formatting."""
+    name = cfg.get("dataset_name", "")
+    if name.startswith("tatsu-lab/alpaca") or name == "alpaca":
+        return _load_alpaca(cfg)
+    if name.startswith("Anthropic/hh-rlhf") or name == "hh-rlhf":
+        return _load_hh_chosen(cfg)
+    raise ValueError(
+        f"Unknown SFT dataset: {name!r}. Supported: tatsu-lab/alpaca, Anthropic/hh-rlhf."
     )
 
 
@@ -63,7 +108,7 @@ def main():
 
     lora_cfg = LoraConfig(**cfg["lora"])
 
-    train_ds = load_sft_chosen(cfg)
+    train_ds = load_train_dataset(cfg)
 
     sft_args = SFTConfig(
         output_dir=cfg["output_dir"],

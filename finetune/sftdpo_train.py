@@ -14,7 +14,13 @@ Reuses `RewardMarginEarlyStop` from `dpo_train` and `load_hh_split` from
 `finetune._common` so the C4 condition sees the same 30k examples as C3.
 
 Usage:
+    # C4 — DPO on top of HH-RLHF SFT (default)
     python finetune/sftdpo_train.py --config finetune/configs/sftdpo_config.yaml
+
+    # C4a — DPO on top of Alpaca SFT (robustness variant)
+    python finetune/sftdpo_train.py \
+        --config finetune/configs/sftdpo_alpaca_config.yaml \
+        --sft-adapter-path checkpoints/sft_alpaca
 """
 from __future__ import annotations
 
@@ -79,9 +85,18 @@ def load_and_merge_sft(cfg: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument(
+        "--sft-adapter-path",
+        default=None,
+        help="Override `init_adapter_path` from the config. Used by the C4a "
+             "Alpaca variant to point at checkpoints/sft_alpaca instead of "
+             "checkpoints/sft. If omitted, the config's value is used.",
+    )
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
+    if args.sft_adapter_path:
+        cfg["init_adapter_path"] = args.sft_adapter_path
 
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name_or_path"])
     if tokenizer.pad_token is None:

@@ -1,9 +1,11 @@
-"""Shared helpers for behavioral evaluation across all five conditions.
+"""Shared helpers for behavioral evaluation across all conditions.
 
 Centralizes (a) the condition -> (base_model, adapter_path) resolution and
 (b) model loading with QLoRA 4-bit + optional LoRA adapter merge for inference.
 
-Conditions: base (C1), sft (C2), dpo (C3), sftdpo (C4), instruct (C5).
+Primary HH-RLHF setup: base (C1), sft (C2), dpo (C3), sftdpo (C4), instruct (C5).
+Alpaca robustness variant: sft_alpaca (C2a), sftdpo_alpaca (C4a) — SFT trained
+on Alpaca, then DPO on top using the same HH-RLHF data as the primary setup.
 """
 from __future__ import annotations
 
@@ -92,6 +94,22 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2) -> Cond
         sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo")
         return Condition(
             "sftdpo", BASE_MODEL,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+        )
+    if name == "sft_alpaca":
+        # C2a — Alpaca SFT robustness variant. Adapter path mirrors C2.
+        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
+        return Condition("sft_alpaca", BASE_MODEL, adapter, final_epoch=sft_epoch)
+    if name == "sftdpo_alpaca":
+        # C4a — same merged-base path as C4 but the SFT pre-merge is the
+        # Alpaca-trained adapter at checkpoints/sft_alpaca rather than the
+        # HH-RLHF one at checkpoints/sft.
+        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
+        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo_alpaca")
+        return Condition(
+            "sftdpo_alpaca", BASE_MODEL,
             adapter=sftdpo_adapter,
             pre_merge_adapter=sft_adapter,
             final_epoch=dpo_epoch,

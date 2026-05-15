@@ -18,6 +18,33 @@ Does SFT vs. DPO differentially erode non-Western cultural norms and values in L
 
 C2 and C3 share **the same HH-RLHF source data** (same 30k subsample, same seed) — so any contrast between them isolates the training method, not the data. C4 chains the two stages on top of each other on the same data, controlling what Meta's official Instruct release does with proprietary data.
 
+### Alpaca robustness variant
+
+To check robustness to the SFT dataset choice, we additionally train an
+Alpaca-based variant of SFT and SFT+DPO. The DPO-only condition is unchanged
+between setups since it always uses HH-RLHF.
+
+| Condition | Model | Training | Purpose |
+|----|-------|----------|---------|
+| C2a | Llama 3.2 3B + Alpaca, 3 ep | SFT on Alpaca | Robustness check for SFT data |
+| C4a | Llama 3.2 3B + Alpaca SFT + HH-RLHF DPO | Sequential, mixed-data | Robustness check for sequential pipeline |
+
+The Alpaca SFT checkpoint was trained on a prior run; only the SFT+DPO stage
+needs to run on Nexus:
+
+```bash
+sbatch slurm/sftdpo_alpaca_job.sh
+# wait for completion
+sbatch slurm/eval_alpaca_job.sh
+sbatch slurm/culnig_alpaca_job.sh
+python analysis/compare_conditions.py --setup both
+```
+
+The alpaca jobs (`*_alpaca_job.sh`) target the C2a/C4a conditions only — the
+primary `eval_job.sh` and `culnig_job.sh` continue to operate on the HH-RLHF
+conditions (C1–C5) unchanged. Analysis scripts accept `--setup {hhrlhf,alpaca,both}`,
+defaulting to `hhrlhf` so prior figures and tables are reproduced byte-identically.
+
 ## Layout
 
 ```
