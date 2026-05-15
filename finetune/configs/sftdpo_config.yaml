@@ -13,7 +13,7 @@
 # cleanly, so this script loads in bf16. See finetune/sftdpo_train.py docstring.
 
 model_name_or_path: meta-llama/Llama-3.2-3B
-init_adapter_path: checkpoints/sft/checkpoint-4878    # final SFT epoch — update if you re-train SFT with a different total step count
+init_adapter_path: checkpoints/sft    # parent dir — script auto-picks the highest-numbered checkpoint-N subdir
 
 dataset_name: Anthropic/hh-rlhf
 dataset_path: data/hh-rlhf

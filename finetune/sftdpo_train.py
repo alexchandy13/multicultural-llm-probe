@@ -31,6 +31,32 @@ from finetune._common import load_hh_split
 from finetune.dpo_train import RewardMarginEarlyStop
 
 
+def _resolve_sft_adapter(cfg_path: str) -> Path:
+    """Resolve the SFT checkpoint to merge. Accepts either:
+       - a specific checkpoint dir (e.g. `checkpoints/sft/checkpoint-2814`), or
+       - a parent dir (`checkpoints/sft`), in which case we pick the highest-
+         numbered `checkpoint-N` subdir. Robust to changes in dataset size /
+         epoch count between SFT runs.
+    """
+    p = Path(cfg_path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"SFT path not found at {p}. The SFT job must finish before this "
+            "script runs — use sbatch --dependency=afterok:<sft_jobid>."
+        )
+    # Specific checkpoint dir? Use it directly.
+    if (p / "adapter_model.safetensors").exists() or (p / "adapter_config.json").exists():
+        return p
+    # Parent dir — pick the latest checkpoint by step number.
+    candidates = sorted(
+        p.glob("checkpoint-*"),
+        key=lambda q: int(q.name.rsplit("-", 1)[-1]) if q.name.rsplit("-", 1)[-1].isdigit() else -1,
+    )
+    if not candidates:
+        raise FileNotFoundError(f"No checkpoint-* subdirs found in {p}")
+    return candidates[-1]
+
+
 def load_and_merge_sft(cfg: dict):
     """Load Llama base in bf16, attach the C2 SFT adapter, merge it into base weights.
 
@@ -42,12 +68,8 @@ def load_and_merge_sft(cfg: dict):
         torch_dtype=torch.bfloat16,
         device_map="auto",
     )
-    adapter_path = Path(cfg["init_adapter_path"])
-    if not adapter_path.exists():
-        raise FileNotFoundError(
-            f"SFT adapter not found at {adapter_path}. The SFT job must finish "
-            "before this script runs — use sbatch --dependency=afterok:<sft_jobid>."
-        )
+    adapter_path = _resolve_sft_adapter(cfg["init_adapter_path"])
+    print(f"[sftdpo] merging SFT adapter from {adapter_path}")
     model = PeftModel.from_pretrained(base, str(adapter_path))
     model = model.merge_and_unload()
     model.config.use_cache = False
