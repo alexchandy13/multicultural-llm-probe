@@ -121,6 +121,16 @@ def load_model_for_culnig(condition_name: str):
         model = PeftModel.from_pretrained(model, str(cond.adapter))
         model = model.merge_and_unload()  # merge so gradients flow into base weights
 
+    # The base model loads with all parameters frozen (4-bit weights have
+    # requires_grad=False; PEFT inference-mode merges also leave the result
+    # frozen). CULNIG's per-layer hooks call `output.retain_grad()`, which
+    # requires the activation to have requires_grad=True — that in turn
+    # requires the input embedding's output to carry grad. enable_input_require_grads()
+    # adds the forward hook on the embedding layer that makes this work without
+    # us needing to flip any parameter's requires_grad. This is the same trick
+    # `prepare_model_for_kbit_training` uses internally.
+    model.enable_input_require_grads()
+
     # See _pin_name_or_path docstring for why this is a permanent (not scoped) swap.
     _pin_name_or_path(model)
     return model, tokenizer
