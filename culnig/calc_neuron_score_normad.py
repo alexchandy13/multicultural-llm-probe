@@ -196,7 +196,8 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", required=True,
-                        choices=["base", "sft", "dpo", "instruct"])
+                        choices=["base", "sft", "dpo", "sftdpo", "instruct",
+                                 "sft_alpaca", "sftdpo_alpaca"])
     parser.add_argument("--dataset-names", nargs="+", required=True,
                         help="e.g. `normad` or `normadcontrol` (single name per run).")
     parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))

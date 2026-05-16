@@ -214,7 +214,11 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--condition", required=True, choices=["base", "sft", "dpo", "instruct"])
+    parser.add_argument(
+        "--condition",
+        required=True,
+        choices=["base", "sft", "dpo", "sftdpo", "instruct", "sft_alpaca", "sftdpo_alpaca"],
+    )
     parser.add_argument("--data-path", default=str(PROJECT_ROOT / "data" / "NormAd"))
     parser.add_argument(
         "--out-path",
