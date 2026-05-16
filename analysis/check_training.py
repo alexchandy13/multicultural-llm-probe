@@ -23,7 +23,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CKPTS_DIR = PROJECT_ROOT / "checkpoints"
 SLURM_DIR = PROJECT_ROOT / "slurm"
-TRAIN_CONDITIONS = ["sft", "dpo", "sftdpo"]
+TRAIN_CONDITIONS = ["sft", "dpo", "sftdpo", "sft_alpaca", "sftdpo_alpaca"]
 ERROR_REGEX = re.compile(r"error|traceback|nan|cuda out of memory|reward margin <= 0", re.IGNORECASE)
 
 

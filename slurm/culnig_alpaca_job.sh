@@ -30,7 +30,8 @@ python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-name
 python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names normadcontrol
 python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --dataset-names normad
 
-# 5a — BLEnD baseline (for cross-source overlap figure)
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blend
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blendcontrol
-python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --dataset-names blend
+# 5a — BLEnD baseline disabled here for symmetry with slurm/culnig_job.sh.
+# See that file's comment for re-enable instructions.
+# python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blend
+# python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blendcontrol
+# python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --dataset-names blend
