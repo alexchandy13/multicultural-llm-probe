@@ -24,6 +24,11 @@ export CONDITIONS="base sft dpo sftdpo instruct"
 # for convenience when running things manually on the login node.
 export CONDITIONS_ALPACA="sft_alpaca sftdpo_alpaca"
 
+# LIMA robustness variant — same pattern as CONDITIONS_ALPACA. The lima-variant
+# SLURM scripts (slurm/{eval,culnig}_lima_job.sh) define their own CONDS arrays
+# inline; this is here for convenience on the login node.
+export CONDITIONS_LIMA="sft_lima sftdpo_lima"
+
 # Cultures from NormAd; split for paper-side analysis.
 export WESTERN_CULTURES="US UK Germany Spain Australia"
 export NON_WESTERN_CULTURES="Japan China India Iran Indonesia Nigeria Mexico South_Korea"

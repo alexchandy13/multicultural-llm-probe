@@ -34,16 +34,21 @@ COND_LABELS = {
     "base":           "C1: Base",
     "sft":            "C2: SFT",
     "sft_alpaca":     "C2a: SFT (Alpaca)",
+    "sft_lima":       "C2b: SFT (LIMA)",
     "dpo":            "C3: DPO",
     "sftdpo":         "C4: SFT+DPO",
     "sftdpo_alpaca":  "C4a: SFT(Alp)+DPO",
+    "sftdpo_lima":    "C4b: SFT(LIMA)+DPO",
     "instruct":       "C5: Instruct",
 }
 
 SETUP_CONDITIONS = {
     "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
     "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
+    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
     "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
+    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
+               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
 }
 
 

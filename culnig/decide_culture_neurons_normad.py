@@ -40,7 +40,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", required=True,
                         choices=["base", "sft", "dpo", "sftdpo", "instruct",
-                                 "sft_alpaca", "sftdpo_alpaca"])
+                                 "sft_alpaca", "sftdpo_alpaca",
+                                 "sft_lima", "sftdpo_lima"])
     parser.add_argument("--dataset-names", nargs="+", default=["normad"])
     args = parser.parse_args()
 

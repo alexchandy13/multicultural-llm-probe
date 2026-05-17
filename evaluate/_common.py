@@ -114,6 +114,20 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2) -> Cond
             pre_merge_adapter=sft_adapter,
             final_epoch=dpo_epoch,
         )
+    if name == "sft_lima":
+        # C2b — LIMA SFT robustness variant. Adapter path mirrors C2 and C2a.
+        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_lima")
+        return Condition("sft_lima", BASE_MODEL, adapter, final_epoch=sft_epoch)
+    if name == "sftdpo_lima":
+        # C4b — merged-base path with LIMA SFT pre-merge instead of HH-RLHF or Alpaca.
+        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_lima")
+        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo_lima")
+        return Condition(
+            "sftdpo_lima", BASE_MODEL,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+        )
     raise ValueError(f"unknown condition: {name}")
 
 

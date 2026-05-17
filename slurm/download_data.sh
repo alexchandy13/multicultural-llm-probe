@@ -31,6 +31,8 @@ specs = [
     # offline from Nexus (checkpoint at checkpoints/sft_alpaca/), but we keep
     # the data downloadable so the config is reproducible from this repo.
     ("tatsu-lab/alpaca",            DATA / "alpaca"),
+    # LIMA: source for the C2b robustness variant. 1000 examples; trained on Nexus.
+    ("GAIR/lima",                   DATA / "lima"),
     ("akhilayerukola/NormAd",       DATA / "NormAd"),
     ("Taise228/CountryRC",          DATA / "CountryRC"),
 ]

@@ -23,7 +23,8 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
-CONDITION_ORDER = ["base", "sft", "dpo", "sftdpo", "instruct"]
+CONDITION_ORDER = ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
+                   "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"]
 
 # Import the live W/NW sets + NormAd country map so re-grouping always
 # tracks the current methodology, even on JSONs saved before the expansion.
