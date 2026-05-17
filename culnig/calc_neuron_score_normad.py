@@ -93,7 +93,7 @@ def load_model_for_culnig(condition_name: str):
     # are no longer comparable across conditions. Forcing chat_template=None makes
     # upstream's `try: apply_chat_template ... except: pass` blocks fall back to
     # raw text uniformly for every dataset (normad, normadcontrol, blend, etc.).
-    tokenizer.chat_template = None
+    tokenizer.chat_template = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
 
     if cond.pre_merge_adapter is not None:
         model = AutoModelForCausalLM.from_pretrained(
