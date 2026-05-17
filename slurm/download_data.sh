@@ -17,13 +17,15 @@ set -euo pipefail
 source env.sh
 
 python3.12 - <<'PY'
-import os, sys
+import json, os, sys
 from pathlib import Path
-from datasets import load_dataset
+from datasets import Dataset, load_dataset
+from huggingface_hub import hf_hub_download
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 DATA = Path("data")
 
+# Datasets that work with the standard load_dataset() path.
 specs = [
     # HH-RLHF: source for the primary SFT (chosen only) and DPO (full pairs).
     ("Anthropic/hh-rlhf",           DATA / "hh-rlhf"),
@@ -31,8 +33,6 @@ specs = [
     # offline from Nexus (checkpoint at checkpoints/sft_alpaca/), but we keep
     # the data downloadable so the config is reproducible from this repo.
     ("tatsu-lab/alpaca",            DATA / "alpaca"),
-    # LIMA: source for the C2b robustness variant. 1000 examples; trained on Nexus.
-    ("GAIR/lima",                   DATA / "lima"),
     ("akhilayerukola/NormAd",       DATA / "NormAd"),
     ("Taise228/CountryRC",          DATA / "CountryRC"),
 ]
@@ -42,6 +42,27 @@ for repo, target in specs:
     print(f"[download] {repo} -> {target}")
     ds = load_dataset(repo)
     ds.save_to_disk(str(target))
+
+# LIMA needs special handling: GAIR/lima ships a legacy Python loading script
+# (lima.py) that newer `datasets` versions (>=3.0) refuse to execute with the
+# error 'Dataset scripts are no longer supported'. We sidestep that by pulling
+# the raw train.jsonl directly via huggingface_hub, then materializing a
+# Dataset on disk in the same format _load_lima expects. Source for the C2b
+# robustness variant; 1000 examples.
+lima_target = DATA / "lima"
+lima_target.mkdir(parents=True, exist_ok=True)
+print(f"[download] GAIR/lima (via hf_hub_download) -> {lima_target}")
+try:
+    raw = hf_hub_download(
+        repo_id="GAIR/lima", filename="train.jsonl", repo_type="dataset",
+    )
+    with open(raw) as f:
+        rows = [json.loads(line) for line in f]
+    Dataset.from_list(rows).save_to_disk(str(lima_target))
+    print(f"[download] LIMA: {len(rows)} examples saved")
+except Exception as e:
+    print(f"[warn] LIMA download failed: {e}. C2b conditions will not work until "
+          "this is resolved.", file=sys.stderr)
 
 # BLEnD per its own download instructions — handled by CULNIG upstream; placeholder.
 print("[note] BLEnD: follow ynklab/CULNIG download instructions; expected at data/BLEnD")
