@@ -1,0 +1,9 @@
+cluster,centroid_sacsecval,centroid_resemaval,dist_from_english_centroid,n_countries,n_respondents,n_inferred,countries_iso,countries_normad
+EnglishSpeaking,0.4287,0.6218,0.0000,6,12540,1,AUS;CAN;GBR;NIR;NZL;USA,australia;canada;united_kingdom;new_zealand;united_states_of_america
+ProtestantEurope,0.4252,0.6667,0.0450,2,3673,0,DEU;NLD,germany;netherlands
+CatholicEurope,0.4889,0.5211,0.1173,3,3404,0,AND;CZE;SVK,czech_republic
+Confucian,0.4497,0.4518,0.1713,9,14805,0,CHN;HKG;JPN;KOR;MAC;MNG;SGP;TWN;VNM,china;hong_kong;japan;south_korea;singapore;taiwan;vietnam
+LatinAmerica,0.3752,0.4414,0.1882,13,17439,0,ARG;BOL;BRA;CHL;COL;ECU;GTM;MEX;NIC;PER;PRI;URY;VEN,argentina;brazil;chile;colombia;mexico;peru;venezuela
+Orthodox,0.3771,0.3949,0.2327,9,11301,2,ARM;CYP;GRC;KAZ;ROU;RUS;SRB;TJK;UKR,cyprus;greece;romania;russia;serbia;ukraine
+SouthAsia,0.2949,0.3417,0.3104,10,15750,2,BGD;IDN;IND;KGZ;MMR;MYS;PAK;PHL;THA;UZB,bangladesh;indonesia;india;myanmar;malaysia;pakistan;philippines;thailand
+AfricanIslamic,0.2649,0.3264,0.3378,14,18308,1,EGY;ETH;IRN;IRQ;JOR;KEN;LBN;LBY;MAR;MDV;NGA;TUN;TUR;ZWE,egypt;ethiopia;iran;iraq;jordan;kenya;lebanon;nigeria;türkiye;zimbabwe
