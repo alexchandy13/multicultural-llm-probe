@@ -1,10 +1,6 @@
 # Multicultural LLM Probe
 
-Cultural norm drift in LLMs: disentangling the effects of SFT vs. DPO with a values-based extension of CULNIG.
-
-## Research question
-
-Does SFT vs. DPO differentially erode non-Western cultural norms and values in LLMs, and can this be explained at the neuron level using a values-based extension of CULNIG?
+Cultural drift in LLMs: disentangling the effects of SFT vs. DPO with a values-based extension of CULNIG.
 
 ## Four conditions
 
@@ -15,7 +11,8 @@ Does SFT vs. DPO differentially erode non-Western cultural norms and values in L
 | C3 | `dpo`           | Llama 3.2 3B base + DPO on HH-RLHF, 2 ep | DPO | Isolates DPO effect |
 | C4 | `sftdpo` | C2 adapter merged into base, then DPO on HH-RLHF, 2 ep | Sequential | Real-world SFT→DPO recipe |
 
-SFT (C2) trains on `tatsu-lab/alpaca` (52K English instruction-response pairs). DPO (C3) and the DPO stage of C4 share the same HH-RLHF preference data (same 30K subsample, same seed) — so contrasts within {C3, C4} isolate the effect of having an SFT-initialized policy. C4 merges the C2 adapter into the base before applying DPO, replicating the canonical industry post-training recipe.
+SFT (C2) trains on `tatsu-lab/alpaca` (52K English instruction-response pairs). 
+DPO (C3) and the DPO stage of C4 share the same HH-RLHF preference data (same 30K subsample, same seed)
 
 ## Layout
 
@@ -47,6 +44,8 @@ Step 7  slurm/analysis_job.sh                Build IW coords + comparison tables
 
 The NormAdctrl control set is **not** a separate build step — `culnig/dataset_ext.py` constructs it in-flight during Step 6 by reusing every NormAd item but stripping the country tag from the prompt scaffold (see CULNIG extension below).
 
+`slurm/analysis_job.sh` is idempotent and bundles everything from the IW-coords build through every paper figure — re-run it any time the underlying outputs change. To regenerate a single figure ad hoc instead, call the corresponding script directly (e.g. `python3.12 analysis/heatmaps.py --figures asymmetry_attribution --subtract-control`).
+
 ## Quickstart on UMIACS Nexus
 
 ```bash
@@ -63,14 +62,6 @@ sbatch slurm/eval_job.sh
 sbatch slurm/culnig_job.sh
 sbatch slurm/analysis_job.sh
 ```
-
-## CULNIG extension
-
-**NormAdctrl** control set: same NormAd items, same yes/no/neutral options, same gradient flow into the same neurons — but the country signal is removed from the prompt scaffold. Specifically, the upstream NormAd template (`"...aligns with the social norms of that country.  country: {country}  Story: {story}"`) is replaced with a country-free variant (`"...aligns with common social norms.  Story: {story}"`). Per-cell attribution drops by ~5× under this control across all four conditions, and `decide_culture_neurons_normad.py` selects culture neurons by ranking on `delta = score(NormAd) − score(NormAdctrl)` per (neuron, country).
-
-A vestigial regex-based `strip_culture()` in `culnig/construct_normad_ctrl.py` was originally intended to also remove country/demonym mentions from the story prose, but NormAd's `Story` field is structurally culture-neutral (country info lives in a separate `Country` field), so the regex is a no-op in practice. The prompt-scaffold removal is what carries the control signal.
-
-`slurm/analysis_job.sh` is idempotent and bundles everything from the IW-coords build through every paper figure — re-run it any time the underlying outputs change. To regenerate a single figure ad hoc instead, call the corresponding script directly (e.g. `python3.12 analysis/heatmaps.py --figures asymmetry_attribution --subtract-control`).
 
 ## Hardware
 
