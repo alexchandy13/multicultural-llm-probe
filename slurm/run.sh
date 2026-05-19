@@ -2,8 +2,8 @@
 # One-command wrapper: sync repo, submit a SLURM job, wait for it, dump logs.
 #
 # Usage:
-#   slurm/run.sh                       # defaults to slurm/sft_job.sh
-#   slurm/run.sh slurm/dpo_job.sh      # any other job script
+#   slurm/run.sh                              # defaults to slurm/sft_job.sh
+#   slurm/run.sh slurm/dpo_job.sh             # any other job script
 #
 # Exits 0 if the job completed successfully, 1 otherwise. Handles both single
 # jobs (--output=...%j...) and array jobs (--output=...%A_%a...).

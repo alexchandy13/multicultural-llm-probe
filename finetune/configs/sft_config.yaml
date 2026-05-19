@@ -1,7 +1,7 @@
 # SFT on Alpaca (C2a) — robustness variant.
 #
 # This config exists primarily for documentation and reproducibility. The
-# Alpaca SFT checkpoint at `checkpoints/sft_alpaca/` was trained from a prior
+# Alpaca SFT checkpoint at `checkpoints/sft/` was trained from a prior
 # run (transferred from a local machine); this YAML records the exact recipe
 # so the run can be reproduced later if needed.
 #
@@ -12,7 +12,7 @@
 model_name_or_path: meta-llama/Llama-3.2-3B
 dataset_name: tatsu-lab/alpaca
 dataset_path: data/alpaca
-output_dir: checkpoints/sft_alpaca
+output_dir: checkpoints/sft
 
 # Alpaca is ~52k instruction-response pairs. No subsampling — full dataset
 # (matching the original plan's spec for C2a-style runs). If you want to cap

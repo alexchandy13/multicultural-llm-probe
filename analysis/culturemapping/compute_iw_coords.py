@@ -22,7 +22,7 @@ Methodology:
     from the US/anglosphere" metric for downstream analysis.
 
 Usage:
-    python3.12 analysis/compute_iw_coords.py
+    python3.12 analysis/culturemapping/compute_iw_coords.py
     # writes data/iw_coordinates.csv
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WVS_CSV = PROJECT_ROOT / "data" / "wvs" / "WVS_Cross-National_Wave_7_csv_v6_0.csv"
 OUT_CSV = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 

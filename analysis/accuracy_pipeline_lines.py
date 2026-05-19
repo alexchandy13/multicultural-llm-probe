@@ -13,11 +13,11 @@ US-distant — preserved behind --mode binary.
 X axis = conditions in order (default: Base → SFT-Alp → SFT+DPO-Alp), so the
 slope between adjacent points = the per-stage Δaccuracy for that cluster.
 
-Default pipeline matches the paper's alpaca framing:
-  Base → SFT-Alp → SFT+DPO-Alp
+Default pipeline matches the paper's four-condition framing:
+  Base → SFT → SFT+DPO
 
 Override via --conditions. Examples:
-  python3 analysis/accuracy_pipeline_lines.py --conditions base sft_alpaca dpo sftdpo_alpaca
+  python3 analysis/accuracy_pipeline_lines.py --conditions base sft dpo sftdpo
   python3 analysis/accuracy_pipeline_lines.py --mode binary
 
 Reads:
@@ -50,13 +50,13 @@ US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 US_SIMILAR_LABEL = "US-similar"   # merged-group key used in cluster mode
 
 COND_LABELS = {
-    "base":           "Base",
-    "sft_alpaca":     "SFT",
-    "dpo":            "DPO",
-    "sftdpo_alpaca":  "SFT+DPO",
+    "base":   "Base",
+    "sft":    "SFT",
+    "dpo":    "DPO",
+    "sftdpo": "SFT+DPO",
 }
 
-DEFAULT_PIPELINE = ["base", "sft_alpaca", "sftdpo_alpaca"]
+DEFAULT_PIPELINE = ["base", "sft", "sftdpo"]
 
 COLOR_US_SIMILAR = "#4477AA"   # blue — reserved for the merged US-similar group
 COLOR_US_DISTANT = "#CC6677"   # warm red — only used in binary mode
@@ -79,7 +79,7 @@ MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*", "h", "<"]
 def load_iw_data(path: Path) -> tuple[dict[str, str], dict[str, float]]:
     """Return (country->cluster, cluster->mean_dist_from_english)."""
     if not path.exists():
-        sys.exit(f"ERROR: {path} not found. Run analysis/compute_iw_coords.py first.")
+        sys.exit(f"ERROR: {path} not found. Run analysis/culturemapping/compute_iw_coords.py first.")
     country_to_cluster: dict[str, str] = {}
     cluster_dists: dict[str, list[float]] = defaultdict(list)
     with open(path) as f:
@@ -169,7 +169,7 @@ def main():
     parser.add_argument(
         "--conditions", nargs="+", default=None,
         help="Ordered list of conditions to plot on the X axis. "
-             "Default: base sft_alpaca sftdpo_alpaca.",
+             "Default: base sft sftdpo.",
     )
     parser.add_argument("--no-values", action="store_true",
                         help="Hide numeric accuracy annotations next to each point. "

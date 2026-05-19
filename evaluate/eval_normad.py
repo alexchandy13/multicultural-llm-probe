@@ -217,7 +217,7 @@ def main():
     parser.add_argument(
         "--condition",
         required=True,
-        choices=["base", "dpo", "sft_alpaca", "sftdpo_alpaca"],
+        choices=["base", "dpo", "sft", "sftdpo"],
     )
     parser.add_argument("--data-path", default=str(PROJECT_ROOT / "data" / "NormAd"))
     parser.add_argument(

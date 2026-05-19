@@ -7,9 +7,9 @@ For each named condition (default: all three trainable ones), reports:
   - Any error/traceback/NaN lines found in the corresponding SLURM stderr
 
 Usage:
-    python3.12 analysis/check_training.py                        # sft, dpo, sftdpo
-    python3.12 analysis/check_training.py sft dpo                # subset
-    python3.12 analysis/check_training.py --slurm-dir slurm      # alt log location
+    python3.12 health/check_training.py                        # sft, dpo, sftdpo
+    python3.12 health/check_training.py sft dpo                # subset
+    python3.12 health/check_training.py --slurm-dir slurm      # alt log location
 """
 from __future__ import annotations
 

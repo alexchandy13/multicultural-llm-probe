@@ -39,7 +39,7 @@ def setup_logging():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", required=True,
-                        choices=["base", "dpo", "sft_alpaca", "sftdpo_alpaca"])
+                        choices=["base", "dpo", "sft", "sftdpo"])
     parser.add_argument("--dataset-names", nargs="+", default=["normad"])
     args = parser.parse_args()
 

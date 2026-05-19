@@ -39,14 +39,14 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
 SETUP_CONDITIONS = {
-    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
+    "all": ["base", "sft", "dpo", "sftdpo"],
 }
 
 COND_LABELS = {
-    "base":           "C1: Base",
-    "sft_alpaca":     "C2: SFT",
-    "dpo":            "C3: DPO",
-    "sftdpo_alpaca":  "C4: SFT+DPO",
+    "base":   "C1: Base",
+    "sft":    "C2: SFT",
+    "dpo":    "C3: DPO",
+    "sftdpo": "C4: SFT+DPO",
 }
 
 # Consistent cluster colors across all panels.
@@ -65,7 +65,7 @@ CLUSTER_COLORS = {
 def load_iw_coords(path: Path):
     """Return (country_to_cluster dict, cluster_to_dist dict)."""
     if not path.exists():
-        sys.exit(f"ERROR: {path} not found. Run analysis/compute_iw_coords.py first.")
+        sys.exit(f"ERROR: {path} not found. Run analysis/culturemapping/compute_iw_coords.py first.")
     rows = []
     with open(path) as f:
         for r in csv.DictReader(f):

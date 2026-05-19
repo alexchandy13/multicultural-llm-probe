@@ -20,10 +20,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
-CONDITIONS = ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"]
+CONDITIONS = ["base", "sft", "dpo", "sftdpo"]
 
 SETUP_CONDITIONS = {
-    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
+    "all": ["base", "sft", "dpo", "sftdpo"],
 }
 
 

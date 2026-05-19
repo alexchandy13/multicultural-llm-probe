@@ -1,14 +1,14 @@
 """Print per-cluster country lists and centroid distances from English-Speaking,
 for manual validation of the I-W classification produced by compute_iw_coords.py.
 
-Input:  data/iw_coordinates.csv  (produced by analysis/compute_iw_coords.py)
+Input:  data/iw_coordinates.csv  (produced by analysis/culturemapping/compute_iw_coords.py)
 Outputs:
   - stdout: human-readable summary by cluster
   - data/iw_clusters_summary.csv: machine-readable summary (one row per cluster)
 
 Usage:
-    python3 analysis/validate_iw_clusters.py
-    python3 analysis/validate_iw_clusters.py --sort-by alphabetical
+    python3 analysis/culturemapping/validate_iw_clusters.py
+    python3 analysis/culturemapping/validate_iw_clusters.py --sort-by alphabetical
 """
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ from collections import defaultdict
 from pathlib import Path
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COORDS_CSV = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 SUMMARY_CSV = PROJECT_ROOT / "data" / "iw_clusters_summary.csv"
 
@@ -52,7 +52,7 @@ def main():
 
     coords_path = Path(args.coords)
     if not coords_path.exists():
-        print(f"ERROR: {coords_path} not found. Run analysis/compute_iw_coords.py first.",
+        print(f"ERROR: {coords_path} not found. Run analysis/culturemapping/compute_iw_coords.py first.",
               file=sys.stderr)
         sys.exit(1)
 

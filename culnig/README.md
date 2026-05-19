@@ -48,8 +48,11 @@ python culnig/calc_neuron_score_normad.py --condition sft --dataset-names blendc
 python culnig/decide_culture_neurons_normad.py --condition sft --dataset-names blend
 ```
 
-The SLURM wrapper [slurm/culnig_job.sh](../slurm/culnig_job.sh) runs all six commands
-as a 4-task array, one per condition.
+The SLURM wrapper [slurm/culnig_job.sh](../slurm/culnig_job.sh) runs the NormAd
+pipeline as a 4-task array, one per condition (base, sft, dpo, sftdpo).
+The BLEnD baseline (5a) is disabled by default and the three corresponding lines
+are commented out; re-enable by installing BLEnD metadata under
+`culnig/_upstream/data/BLEnD/` and uncommenting them.
 
 ## Output layout
 

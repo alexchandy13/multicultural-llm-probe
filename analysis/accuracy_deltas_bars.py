@@ -18,7 +18,7 @@ Default comparisons (matches the paper's 4-condition framing):
   3. SFT  → SFT+DPO                 (effect of adding DPO on top of SFT)
 
 Override defaults via --comparisons. Example:
-  python3 analysis/accuracy_deltas_bars.py --comparisons base:sft_alpaca base:dpo
+  python3 analysis/accuracy_deltas_bars.py --comparisons base:sft base:dpo
 
 Flags:
   --separate-files   also emit one PDF per comparison (in addition to the combined PDF)
@@ -50,16 +50,16 @@ FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 COND_LABELS = {
-    "base":           "Base",
-    "sft_alpaca":     "SFT",
-    "dpo":            "DPO",
-    "sftdpo_alpaca":  "SFT+DPO",
+    "base":   "Base",
+    "sft":    "SFT",
+    "dpo":    "DPO",
+    "sftdpo": "SFT+DPO",
 }
 
 DEFAULT_COMPARISONS = [
-    ("base", "sft_alpaca"),
+    ("base", "sft"),
     ("base", "dpo"),
-    ("sft_alpaca", "sftdpo_alpaca"),
+    ("sft", "sftdpo"),
 ]
 
 COLOR_US_SIMILAR = "#4477AA"
@@ -68,7 +68,7 @@ COLOR_US_DISTANT = "#CC6677"
 
 def load_country_to_cluster(path: Path) -> dict[str, str]:
     if not path.exists():
-        sys.exit(f"ERROR: {path} not found. Run analysis/compute_iw_coords.py first.")
+        sys.exit(f"ERROR: {path} not found. Run analysis/culturemapping/compute_iw_coords.py first.")
     out = {}
     with open(path) as f:
         for r in csv.DictReader(f):
@@ -117,7 +117,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--comparisons", nargs="+", default=None,
-        help="List of 'before:after' condition pairs (e.g. base:sft_alpaca). "
+        help="List of 'before:after' condition pairs (e.g. base:sft). "
              "Defaults to the paper's 3 canonical comparisons.",
     )
     parser.add_argument("--no-values", action="store_true",

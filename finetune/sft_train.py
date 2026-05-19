@@ -5,7 +5,7 @@ response pairs used for the SFT condition (C2). The DPO condition (C3) uses
 HH-RLHF preference pairs via the separate `finetune/dpo_train.py` script.
 
 Usage:
-    python finetune/sft_train.py --config finetune/configs/sft_alpaca_config.yaml
+    python finetune/sft_train.py --config finetune/configs/sft_config.yaml
 """
 from __future__ import annotations
 

@@ -3,7 +3,7 @@
 Centralizes (a) the condition -> (base_model, adapter_path) resolution and
 (b) model loading with QLoRA 4-bit + optional LoRA adapter merge for inference.
 
-Conditions: base (C1), sft_alpaca (C2), dpo (C3), sftdpo_alpaca (C4).
+Conditions: base (C1), sft (C2), dpo (C3), sftdpo (C4).
 SFT uses Alpaca; DPO uses HH-RLHF preferences; C4 = DPO on top of merged C2.
 """
 from __future__ import annotations
@@ -58,7 +58,7 @@ NON_WESTERN = {
 
 @dataclass
 class Condition:
-    name: str        # base | sft_alpaca | dpo | sftdpo_alpaca
+    name: str        # base | sft | dpo | sftdpo
     base: str        # HF model id for base weights
     adapter: Optional[Path]                          # primary LoRA adapter, applied last
     pre_merge_adapter: Optional[Path] = None         # adapter merged into base BEFORE primary
@@ -78,18 +78,18 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2) -> Cond
     if name == "dpo":
         adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "dpo")
         return Condition("dpo", BASE_MODEL, adapter, final_epoch=dpo_epoch)
-    if name == "sft_alpaca":
+    if name == "sft":
         # C2 — Alpaca-trained SFT adapter (only SFT variant retained).
-        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
-        return Condition("sft_alpaca", BASE_MODEL, adapter, final_epoch=sft_epoch)
-    if name == "sftdpo_alpaca":
+        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
+        return Condition("sft", BASE_MODEL, adapter, final_epoch=sft_epoch)
+    if name == "sftdpo":
         # C4 — DPO trained on top of the merged Alpaca SFT adapter. For correct
         # inference we merge the SFT adapter into the base first, then apply
         # the sftdpo adapter on top (its weights are deltas from base + SFT).
-        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
-        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo_alpaca")
+        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
+        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo")
         return Condition(
-            "sftdpo_alpaca", BASE_MODEL,
+            "sftdpo", BASE_MODEL,
             adapter=sftdpo_adapter,
             pre_merge_adapter=sft_adapter,
             final_epoch=dpo_epoch,
@@ -143,5 +143,5 @@ def culture_group(country: str) -> str:
 
 
 def conditions_from_env() -> list[str]:
-    raw = os.environ.get("CONDITIONS", "base sft_alpaca dpo sftdpo_alpaca")
+    raw = os.environ.get("CONDITIONS", "base sft dpo sftdpo")
     return raw.split()

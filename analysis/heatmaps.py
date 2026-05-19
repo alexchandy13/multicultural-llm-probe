@@ -54,19 +54,18 @@ Usage:
     python3 analysis/heatmaps.py --figures cluster_activation
     python3 analysis/heatmaps.py --setup all           # all 4 conditions
 
-    # Layer-count heatmap, custom condition set (alpaca pipeline)
+    # Layer-count heatmap, sequential pipeline only
     python3 analysis/heatmaps.py --figures layer_count \\
-        --conditions base sft_alpaca sftdpo_alpaca --out-suffix _alpaca_pipeline
+        --conditions base sft sftdpo --out-suffix _pipeline
 
     # Layer-count heatmap, SFT-alone vs DPO-alone
     python3 analysis/heatmaps.py --figures layer_count \\
-        --conditions sft_alpaca dpo --out-suffix _sft_vs_dpo
+        --conditions sft dpo --out-suffix _sft_vs_dpo
 
     # Group-split attribution heatmaps for the SFT-vs-DPO-vs-SFT+DPO story
     python3 analysis/heatmaps.py \\
         --figures group_attribution asymmetry_attribution \\
-        --conditions base sft_alpaca dpo sftdpo_alpaca \\
-        --out-suffix _alpaca_pipeline
+        --conditions base sft dpo sftdpo
 """
 from __future__ import annotations
 
@@ -93,14 +92,14 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 SETUP_CONDITIONS = {
-    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
+    "all": ["base", "sft", "dpo", "sftdpo"],
 }
 
 COND_LABELS = {
-    "base":           "Base",
-    "sft_alpaca":     "SFT",
-    "dpo":            "DPO",
-    "sftdpo_alpaca":  "SFT+DPO",
+    "base":   "Base",
+    "sft":    "SFT",
+    "dpo":    "DPO",
+    "sftdpo": "SFT+DPO",
 }
 
 # The modules that this project's CULNIG pipeline actually saves as culture
@@ -1031,7 +1030,7 @@ def main():
         "--conditions", nargs="+", default=None,
         help="Explicit ordered list of conditions, overriding --setup/--exclude. "
              "Use this to render a heatmap with a specific small subset of "
-             "conditions, e.g. --conditions base sft_alpaca sftdpo_alpaca.",
+             "conditions, e.g. --conditions base sft sftdpo.",
     )
     parser.add_argument(
         "--out-suffix", default=None,

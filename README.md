@@ -6,71 +6,46 @@ Cultural norm drift in LLMs: disentangling the effects of SFT vs. DPO with a val
 
 Does SFT vs. DPO differentially erode non-Western cultural norms and values in LLMs, and can this be explained at the neuron level using a values-based extension of CULNIG?
 
-## Five conditions
+## Four conditions
 
-| ID | Model | Training | Purpose |
-|----|-------|----------|---------|
-| C1 | Llama 3.2 3B base | — | Pre-alignment baseline |
-| C2 | Llama 3.2 3B base + SFT on HH-RLHF chosen, 3 ep | SFT | Isolates SFT effect |
-| C3 | Llama 3.2 3B base + DPO on HH-RLHF, 2 ep | DPO | Isolates DPO effect |
-| C4 | Llama 3.2 3B base → SFT → DPO on HH-RLHF | sequential | Controlled SFT+DPO (real-world recipe) |
-| C5 | Llama 3.2 3B Instruct (Meta) | proprietary SFT+DPO+RLHF | Real-world reference |
+| ID | Internal name | Model | Training | Purpose |
+|----|---------------|-------|----------|---------|
+| C1 | `base`          | Llama 3.2 3B base | — | Pre-alignment baseline |
+| C2 | `sft`    | Llama 3.2 3B base + SFT on Alpaca, 3 ep | SFT | Isolates SFT effect |
+| C3 | `dpo`           | Llama 3.2 3B base + DPO on HH-RLHF, 2 ep | DPO | Isolates DPO effect |
+| C4 | `sftdpo` | C2 adapter merged into base, then DPO on HH-RLHF, 2 ep | Sequential | Real-world SFT→DPO recipe |
 
-C2 and C3 share **the same HH-RLHF source data** (same 30k subsample, same seed) — so any contrast between them isolates the training method, not the data. C4 chains the two stages on top of each other on the same data, controlling what Meta's official Instruct release does with proprietary data.
-
-### Alpaca robustness variant
-
-To check robustness to the SFT dataset choice, we additionally train an
-Alpaca-based variant of SFT and SFT+DPO. The DPO-only condition is unchanged
-between setups since it always uses HH-RLHF.
-
-| Condition | Model | Training | Purpose |
-|----|-------|----------|---------|
-| C2a | Llama 3.2 3B + Alpaca, 3 ep | SFT on Alpaca | Robustness check for SFT data |
-| C4a | Llama 3.2 3B + Alpaca SFT + HH-RLHF DPO | Sequential, mixed-data | Robustness check for sequential pipeline |
-
-The Alpaca SFT checkpoint was trained on a prior run; only the SFT+DPO stage
-needs to run on Nexus:
-
-```bash
-sbatch slurm/sftdpo_alpaca_job.sh
-# wait for completion
-sbatch slurm/eval_alpaca_job.sh
-sbatch slurm/culnig_alpaca_job.sh
-python analysis/compare_conditions.py --setup both
-```
-
-The alpaca jobs (`*_alpaca_job.sh`) target the C2a/C4a conditions only — the
-primary `eval_job.sh` and `culnig_job.sh` continue to operate on the HH-RLHF
-conditions (C1–C5) unchanged. Analysis scripts accept `--setup {hhrlhf,alpaca,both}`,
-defaulting to `hhrlhf` so prior figures and tables are reproduced byte-identically.
+SFT (C2) trains on `tatsu-lab/alpaca` (52K English instruction-response pairs). DPO (C3) and the DPO stage of C4 share the same HH-RLHF preference data (same 30K subsample, same seed) — so contrasts within {C3, C4} isolate the effect of having an SFT-initialized policy. C4 merges the C2 adapter into the base before applying DPO, replicating the canonical industry post-training recipe.
 
 ## Layout
 
 ```
-data/         HF datasets (HH-RLHF, NormAd, BLEnD, CountryRC) + constructed NormAdctrl
-models/       Base + Instruct model weights
+data/         HF datasets (HH-RLHF, NormAd, Alpaca, CountryRC) + constructed NormAdctrl
+models/       Base model weights
 checkpoints/  LoRA adapters per condition + epoch
-finetune/     SFT, DPO, SFT+DPO training scripts and configs
-evaluate/     NormAd eval (plus all-conditions wrapper). CARE dropped — see eval_all_conditions.py docstring.
+finetune/     SFT (Alpaca), DPO (HH-RLHF), SFT+DPO training scripts and configs
+evaluate/     NormAd eval (plus all-conditions wrapper)
 culnig/       CULNIG core (clone of ynklab/CULNIG) + NormAd extensions
 analysis/     Cross-condition comparison + neuron attribution + figures
 slurm/        Job scripts for download/train/eval/CULNIG on UMIACS Nexus
 outputs/      Behavioral JSON results, neuron files, paper figures
+health/       Random checks used for debugging, checking validity of training
 ```
 
 ## Pipeline
 
 ```
-Step 0  env_setup            login node, no GPU
-Step 1  sft_job.sh           SFT on HH-RLHF chosen (30k), 3 ep, ~3-5h on A5000
-Step 2  construct_normad_ctrl.py    strip cultural prefixes (rule-based)
-Step 3  dpo_job.sh           DPO on HH-RLHF (30k), 2 ep, ~7-9h on A5000, parallel with Step 1
-Step 3b sftdpo_job.sh        DPO on top of SFT, 2 ep, ~7-9h on A5000 — depends on Step 1
-Step 4  eval_job.sh          NormAd on all five conditions (array 0-4)
-Step 5  culnig_job.sh        gradient scoring on BLEnD (baseline) and NormAd (novel)
-Step 6  analysis/*.py        results table + 3 figures
+Step 0  source env.sh                        Login node, no GPU
+Step 1  slurm/download_data.sh               Pre-fetch HH-RLHF, Alpaca, NormAd, CountryRC, base model
+Step 2  slurm/sft_job.sh                     SFT on Alpaca (52K), 3 ep, ~3-5h on A5000
+Step 3  slurm/dpo_job.sh                     DPO on HH-RLHF (30K), 2 ep, ~7-9h — parallel with Step 2
+Step 4  slurm/sftdpo_job.sh                  DPO on top of merged SFT adapter, 2 ep, ~7-9h — depends on Step 2
+Step 5  slurm/eval_job.sh                    NormAd eval, 4-task array, one per condition
+Step 6  slurm/culnig_job.sh                  CULNIG gradient scoring on (NormAd, NormAdctrl) per condition
+Step 7  slurm/analysis_job.sh                Build IW coords + comparison tables + paper figures (CPU-only)
 ```
+
+The NormAdctrl control set is **not** a separate build step — `culnig/dataset_ext.py` constructs it in-flight during Step 6 by reusing every NormAd item but stripping the country tag from the prompt scaffold (see CULNIG extension below).
 
 ## Quickstart on UMIACS Nexus
 
@@ -91,16 +66,12 @@ sbatch slurm/analysis_job.sh
 
 ## CULNIG extension
 
-The novel methodological contribution is `NormAdctrl`: NormAd scenarios with cultural context stripped. Without this, gradient-identified neurons bleed into general language understanding rather than culture-specific representation. Construction is rule-based regex on country/culture prefixes, with manual verification on 20-30 examples.
+**NormAdctrl** control set: same NormAd items, same yes/no/neutral options, same gradient flow into the same neurons — but the country signal is removed from the prompt scaffold. Specifically, the upstream NormAd template (`"...aligns with the social norms of that country.  country: {country}  Story: {story}"`) is replaced with a country-free variant (`"...aligns with common social norms.  Story: {story}"`). Per-cell attribution drops by ~5× under this control across all four conditions, and `decide_culture_neurons_normad.py` selects culture neurons by ranking on `delta = score(NormAd) − score(NormAdctrl)` per (neuron, country).
 
-Two CULNIG runs are launched per condition:
-- **5a:** Original BLEnD pipeline, unchanged. Baseline / fallback.
-- **5b:** Extended NormAd pipeline. Same gradient scoring logic; only the dataset and control set are swapped.
+A vestigial regex-based `strip_culture()` in `culnig/construct_normad_ctrl.py` was originally intended to also remove country/demonym mentions from the story prose, but NormAd's `Story` field is structurally culture-neutral (country info lives in a separate `Country` field), so the regex is a no-op in practice. The prompt-scaffold removal is what carries the control signal.
+
+`slurm/analysis_job.sh` is idempotent and bundles everything from the IW-coords build through every paper figure — re-run it any time the underlying outputs change. To regenerate a single figure ad hoc instead, call the corresponding script directly (e.g. `python3.12 analysis/heatmaps.py --figures asymmetry_attribution --subtract-control`).
 
 ## Hardware
 
-UMIACS Nexus, RTX A5000 (24GB), SLURM. QLoRA 4-bit + adapters only — five LoRA adapters total fit in well under 1 GB of disk.
-
-## Fallback
-
-If fine-tuning collapses, the paper pivots to a C1-vs-C5-only comparison using stock models + original CULNIG. See plan §"Fallback Plan".
+UMIACS Nexus, RTX A5000 (24GB), SLURM. QLoRA 4-bit + adapters only — four LoRA adapters total fit in well under 1 GB of disk.

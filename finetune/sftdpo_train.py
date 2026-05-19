@@ -15,7 +15,7 @@ Reuses `RewardMarginEarlyStop` from `dpo_train` and `load_hh_split` from
 `finetune._common` so the C4 condition sees the same HH-RLHF examples as C3.
 
 Usage:
-    python finetune/sftdpo_train.py --config finetune/configs/sftdpo_alpaca_config.yaml
+    python finetune/sftdpo_train.py --config finetune/configs/sftdpo_config.yaml
 """
 from __future__ import annotations
 

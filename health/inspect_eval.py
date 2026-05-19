@@ -8,9 +8,9 @@ Prints:
   - W vs. NW gap
 
 Usage:
-    python3.12 analysis/inspect_eval.py                  # all conditions found
-    python3.12 analysis/inspect_eval.py sft              # one condition
-    python3.12 analysis/inspect_eval.py base sft         # side-by-side
+    python3.12 health/inspect_eval.py                  # all conditions found
+    python3.12 health/inspect_eval.py sft              # one condition
+    python3.12 health/inspect_eval.py base sft         # side-by-side
 """
 from __future__ import annotations
 
