@@ -3,9 +3,8 @@
 Centralizes (a) the condition -> (base_model, adapter_path) resolution and
 (b) model loading with QLoRA 4-bit + optional LoRA adapter merge for inference.
 
-Primary HH-RLHF setup: base (C1), sft (C2), dpo (C3), sftdpo (C4), instruct (C5).
-Alpaca robustness variant: sft_alpaca (C2a), sftdpo_alpaca (C4a) — SFT trained
-on Alpaca, then DPO on top using the same HH-RLHF data as the primary setup.
+Conditions: base (C1), sft_alpaca (C2), dpo (C3), sftdpo_alpaca (C4).
+SFT uses Alpaca; DPO uses HH-RLHF preferences; C4 = DPO on top of merged C2.
 """
 from __future__ import annotations
 
@@ -20,7 +19,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 
 
 BASE_MODEL = "meta-llama/Llama-3.2-3B"
-INSTRUCT_MODEL = "meta-llama/Llama-3.2-3B-Instruct"
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -60,7 +58,7 @@ NON_WESTERN = {
 
 @dataclass
 class Condition:
-    name: str        # base | sft | dpo | sftdpo | instruct
+    name: str        # base | sft_alpaca | dpo | sftdpo_alpaca
     base: str        # HF model id for base weights
     adapter: Optional[Path]                          # primary LoRA adapter, applied last
     pre_merge_adapter: Optional[Path] = None         # adapter merged into base BEFORE primary
@@ -77,53 +75,21 @@ def _latest_checkpoint(parent: Path) -> Path:
 def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2) -> Condition:
     if name == "base":
         return Condition("base", BASE_MODEL, None)
-    if name == "instruct":
-        return Condition("instruct", INSTRUCT_MODEL, None)
-    if name == "sft":
-        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
-        return Condition("sft", BASE_MODEL, adapter, final_epoch=sft_epoch)
     if name == "dpo":
         adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "dpo")
         return Condition("dpo", BASE_MODEL, adapter, final_epoch=dpo_epoch)
-    if name == "sftdpo":
-        # The sftdpo adapter was trained on top of an SFT-merged base, so its
-        # weights are deltas from `base + SFT`, not from `base`. For correct
-        # inference we must merge the SFT adapter into the base first, then
-        # apply the sftdpo adapter on top.
-        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft")
-        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo")
-        return Condition(
-            "sftdpo", BASE_MODEL,
-            adapter=sftdpo_adapter,
-            pre_merge_adapter=sft_adapter,
-            final_epoch=dpo_epoch,
-        )
     if name == "sft_alpaca":
-        # C2a — Alpaca SFT robustness variant. Adapter path mirrors C2.
+        # C2 — Alpaca-trained SFT adapter (only SFT variant retained).
         adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
         return Condition("sft_alpaca", BASE_MODEL, adapter, final_epoch=sft_epoch)
     if name == "sftdpo_alpaca":
-        # C4a — same merged-base path as C4 but the SFT pre-merge is the
-        # Alpaca-trained adapter at checkpoints/sft_alpaca rather than the
-        # HH-RLHF one at checkpoints/sft.
+        # C4 — DPO trained on top of the merged Alpaca SFT adapter. For correct
+        # inference we merge the SFT adapter into the base first, then apply
+        # the sftdpo adapter on top (its weights are deltas from base + SFT).
         sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_alpaca")
         sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo_alpaca")
         return Condition(
             "sftdpo_alpaca", BASE_MODEL,
-            adapter=sftdpo_adapter,
-            pre_merge_adapter=sft_adapter,
-            final_epoch=dpo_epoch,
-        )
-    if name == "sft_lima":
-        # C2b — LIMA SFT robustness variant. Adapter path mirrors C2 and C2a.
-        adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_lima")
-        return Condition("sft_lima", BASE_MODEL, adapter, final_epoch=sft_epoch)
-    if name == "sftdpo_lima":
-        # C4b — merged-base path with LIMA SFT pre-merge instead of HH-RLHF or Alpaca.
-        sft_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sft_lima")
-        sftdpo_adapter = _latest_checkpoint(PROJECT_ROOT / "checkpoints" / "sftdpo_lima")
-        return Condition(
-            "sftdpo_lima", BASE_MODEL,
             adapter=sftdpo_adapter,
             pre_merge_adapter=sft_adapter,
             final_epoch=dpo_epoch,
@@ -177,5 +143,5 @@ def culture_group(country: str) -> str:
 
 
 def conditions_from_env() -> list[str]:
-    raw = os.environ.get("CONDITIONS", "base sft dpo sftdpo instruct")
+    raw = os.environ.get("CONDITIONS", "base sft_alpaca dpo sftdpo_alpaca")
     return raw.split()

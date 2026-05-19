@@ -12,14 +12,13 @@ stay readable regardless of how small or large the per-comparison effect is.
 after the alignment step; negative = accuracy dropped. The visual contrast between
 the two bars shows whether alignment shifted the US-similar / US-distant balance.
 
-Default comparisons (matches the paper's 5-condition alpaca-pipeline framing):
-  1. Base → SFT-Alp                 (effect of SFT alone)
+Default comparisons (matches the paper's 4-condition framing):
+  1. Base → SFT                     (effect of SFT alone)
   2. Base → DPO                     (effect of DPO alone)
-  3. SFT-Alp → SFT+DPO-Alp          (effect of adding DPO on top of SFT)
-  4. Base → Instruct                (effect of Meta's full pipeline)
+  3. SFT  → SFT+DPO                 (effect of adding DPO on top of SFT)
 
 Override defaults via --comparisons. Example:
-  python3 analysis/accuracy_deltas_bars.py --comparisons base:sft base:dpo
+  python3 analysis/accuracy_deltas_bars.py --comparisons base:sft_alpaca base:dpo
 
 Flags:
   --separate-files   also emit one PDF per comparison (in addition to the combined PDF)
@@ -52,21 +51,15 @@ US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 COND_LABELS = {
     "base":           "Base",
-    "sft":            "SFT (HH-RLHF)",
     "sft_alpaca":     "SFT",
-    "sft_lima":       "SFT-LIMA",
     "dpo":            "DPO",
-    "sftdpo":         "SFT-HH+DPO",
     "sftdpo_alpaca":  "SFT+DPO",
-    "sftdpo_lima":    "SFT+DPO-LIMA",
-    "instruct":       "Instruct",
 }
 
 DEFAULT_COMPARISONS = [
     ("base", "sft_alpaca"),
     ("base", "dpo"),
     ("sft_alpaca", "sftdpo_alpaca"),
-    ("base", "instruct"),
 ]
 
 COLOR_US_SIMILAR = "#4477AA"
@@ -125,7 +118,7 @@ def main():
     parser.add_argument(
         "--comparisons", nargs="+", default=None,
         help="List of 'before:after' condition pairs (e.g. base:sft_alpaca). "
-             "Defaults to the paper's 4 canonical comparisons.",
+             "Defaults to the paper's 3 canonical comparisons.",
     )
     parser.add_argument("--no-values", action="store_true",
                         help="Hide numeric value annotations on top of bars.")

@@ -23,8 +23,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
-CONDITION_ORDER = ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-                   "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"]
+CONDITION_ORDER = ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"]
 
 # Import the live W/NW sets + NormAd country map so re-grouping always
 # tracks the current methodology, even on JSONs saved before the expansion.
@@ -119,7 +118,7 @@ def print_condition(cond: str, data: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("conditions", nargs="*",
-                        help="One or more of base / sft / dpo / instruct. "
+                        help="One or more of base / sft_alpaca / dpo / sftdpo_alpaca. "
                              "Default: every JSON found under outputs/behavioral/.")
     args = parser.parse_args()
 

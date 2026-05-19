@@ -7,7 +7,7 @@
 #SBATCH --time=10:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-4
+#SBATCH --array=0-3
 #SBATCH --output=slurm/culnig.%A_%a.out
 #SBATCH --error=slurm/culnig.%A_%a.err
 

@@ -20,16 +20,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
-# Default — the primary HH-RLHF setup. `--setup` overrides on the CLI.
-CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+CONDITIONS = ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"]
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 
@@ -119,10 +113,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmarks", nargs="+", default=["normad"])
     parser.add_argument(
-        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
-        help="Which condition set to include. `hhrlhf` (default) reproduces "
-             "the primary results; `alpaca` swaps in the C2a/C4a Alpaca variants; "
-             "`both` reports the full union.",
+        "--setup", choices=list(SETUP_CONDITIONS), default="all",
+        help="Which condition set to include. Only 'all' is available.",
     )
     args = parser.parse_args()
 

@@ -15,8 +15,8 @@ Outputs:
   outputs/figures/cluster_accuracy_scatter_<cond>.pdf (one per condition, with --per-condition)
 
 Usage:
-    python3 analysis/cluster_accuracy_scatter.py                     # all 9 conds, one grid
-    python3 analysis/cluster_accuracy_scatter.py --exclude sftdpo_lima
+    python3 analysis/cluster_accuracy_scatter.py                     # all 4 conds, one grid
+    python3 analysis/cluster_accuracy_scatter.py --exclude dpo
     python3 analysis/cluster_accuracy_scatter.py --per-condition     # one PDF per condition
 """
 from __future__ import annotations
@@ -39,24 +39,14 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 COND_LABELS = {
     "base":           "C1: Base",
-    "sft":            "C2: SFT (HH-RLHF)",
-    "sft_alpaca":     "C2a: SFT (Alpaca)",
-    "sft_lima":       "C2b: SFT (LIMA)",
+    "sft_alpaca":     "C2: SFT",
     "dpo":            "C3: DPO",
-    "sftdpo":         "C4: SFT+DPO",
-    "sftdpo_alpaca":  "C4a: SFT(Alp)+DPO",
-    "sftdpo_lima":    "C4b: SFT(LIMA)+DPO",
-    "instruct":       "C5: Instruct",
+    "sftdpo_alpaca":  "C4: SFT+DPO",
 }
 
 # Consistent cluster colors across all panels.
@@ -269,7 +259,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--setup", choices=list(SETUP_CONDITIONS), default="all")
     parser.add_argument("--exclude", nargs="+", default=[],
-                        help="Conditions to drop from the setup, e.g. --exclude sftdpo_lima")
+                        help="Conditions to drop from the setup, e.g. --exclude dpo")
     parser.add_argument("--per-condition", action="store_true",
                         help="Emit one PDF per condition instead of a single grid")
     args = parser.parse_args()

@@ -1,24 +1,11 @@
-"""SFT with QLoRA 4-bit + LoRA adapters, dataset-driven.
+"""SFT with QLoRA 4-bit + LoRA adapters, on the Alpaca instruction dataset.
 
-Three supported source datasets:
-  - `Anthropic/hh-rlhf` (primary):  SFT on the chosen response of each pair, so SFT
-    and DPO read identical source data and any C2-vs-C3 contrast isolates the
-    training objective. See `load_hh_split` in finetune/_common.py.
-  - `tatsu-lab/alpaca` (robustness variant): SFT on generic instruction-response
-    pairs. Used for the C2a/C4a Alpaca robustness check — same training pipeline,
-    different SFT source.
-  - `GAIR/lima` (second robustness variant): 1000 high-quality human-curated
-    instruction-response pairs from Zhou et al. 2023. Used for the C2b/C4b LIMA
-    robustness check — tests whether the SFT effect on cultural neurons holds
-    under a small, quality-curated alternative to Alpaca's GPT-3.5-generated data.
-
-The dataset is selected by the `dataset_name` field in the config — no CLI flag or
-script branching at the call site. Existing HH-RLHF / Alpaca behavior is unchanged.
+The only supported SFT source is `tatsu-lab/alpaca` — generic English instruction-
+response pairs used for the SFT condition (C2). The DPO condition (C3) uses
+HH-RLHF preference pairs via the separate `finetune/dpo_train.py` script.
 
 Usage:
-    python finetune/sft_train.py --config finetune/configs/sft_config.yaml         # HH-RLHF
-    python finetune/sft_train.py --config finetune/configs/sft_alpaca_config.yaml  # Alpaca
-    python finetune/sft_train.py --config finetune/configs/sft_lima_config.yaml    # LIMA
+    python finetune/sft_train.py --config finetune/configs/sft_alpaca_config.yaml
 """
 from __future__ import annotations
 
@@ -32,7 +19,7 @@ from peft import LoraConfig, prepare_model_for_kbit_training
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
 
-from finetune._common import build_bnb_config, load_hh_split
+from finetune._common import build_bnb_config
 
 
 ALPACA_TEMPLATE_WITH_INPUT = (
@@ -64,69 +51,12 @@ def _load_alpaca(cfg: dict):
     return train.map(_format_alpaca, remove_columns=train.column_names)
 
 
-def _load_hh_chosen(cfg: dict):
-    """Load HH-RLHF and project to a single `text` field = '{prompt} {chosen}'.
-
-    HH-RLHF prompts already terminate with '\\n\\nAssistant:', so concatenating
-    with a space yields a well-formed transcript ending in the chosen response —
-    exactly what an SFT next-token loss should consume.
-    """
-    triples = load_hh_split(cfg)
-    return triples.map(
-        lambda x: {"text": f"{x['prompt']} {x['chosen']}"},
-        remove_columns=triples.column_names,
-    )
-
-
-# LIMA stores each example as `conversations`: a list with even length, alternating
-# [user_msg, assistant_response, user_msg, assistant_response, ...]. Most rows are
-# single-turn (2 elements); a small fraction are multi-turn. We render to plain
-# instruction/response text using an Alpaca-style template, then concatenate
-# additional turns for multi-turn rows.
-LIMA_FIRST_TURN_TEMPLATE = (
-    "Below is an instruction that describes a task. Write a response that appropriately "
-    "completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{output}"
-)
-LIMA_CONTINUATION_TEMPLATE = (
-    "\n\n### Instruction:\n{instruction}\n\n### Response:\n{output}"
-)
-
-
-def _format_lima(example: dict) -> dict:
-    convs = example.get("conversations") or []
-    # Even length required (paired user/assistant turns). Skip malformed rows.
-    if not convs or len(convs) % 2 != 0:
-        return {"text": ""}
-    text = LIMA_FIRST_TURN_TEMPLATE.format(instruction=convs[0], output=convs[1])
-    for i in range(2, len(convs), 2):
-        text += LIMA_CONTINUATION_TEMPLATE.format(instruction=convs[i], output=convs[i + 1])
-    return {"text": text}
-
-
-def _load_lima(cfg: dict):
-    local = Path(cfg["dataset_path"])
-    if local.exists() and any(local.iterdir()):
-        ds = load_from_disk(str(local))
-    else:
-        ds = load_dataset(cfg["dataset_name"])
-    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
-    formatted = train.map(_format_lima, remove_columns=train.column_names)
-    # Drop any rows that hit the malformed-skip path above.
-    return formatted.filter(lambda x: bool(x["text"]))
-
-
 def load_train_dataset(cfg: dict):
-    """Dispatch on `dataset_name` to pick the right loader + text formatting."""
     name = cfg.get("dataset_name", "")
     if name.startswith("tatsu-lab/alpaca") or name == "alpaca":
         return _load_alpaca(cfg)
-    if name.startswith("Anthropic/hh-rlhf") or name == "hh-rlhf":
-        return _load_hh_chosen(cfg)
-    if name.startswith("GAIR/lima") or name == "lima":
-        return _load_lima(cfg)
     raise ValueError(
-        f"Unknown SFT dataset: {name!r}. "
-        "Supported: tatsu-lab/alpaca, Anthropic/hh-rlhf, GAIR/lima."
+        f"Unsupported SFT dataset: {name!r}. Only tatsu-lab/alpaca is supported."
     )
 
 

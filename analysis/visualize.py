@@ -28,27 +28,16 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
-# Default — primary HH-RLHF setup. `--setup` overrides on the CLI.
-CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+CONDITIONS = ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"]
 COND_LABELS = {
     "base":           "C1: Base",
-    "sft":            "C2: SFT",
-    "sft_alpaca":     "C2a: SFT (Alpaca)",
-    "sft_lima":       "C2b: SFT (LIMA)",
+    "sft_alpaca":     "C2: SFT",
     "dpo":            "C3: DPO",
-    "sftdpo":         "C4: SFT+DPO",
-    "sftdpo_alpaca":  "C4a: SFT(Alp)+DPO",
-    "sftdpo_lima":    "C4b: SFT(LIMA)+DPO",
-    "instruct":       "C5: Instruct",
+    "sftdpo_alpaca":  "C4: SFT+DPO",
 }
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 
@@ -164,16 +153,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--figures", nargs="+", choices=["1", "2", "3", "all"], default=["all"])
     parser.add_argument(
-        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
-        help="Which condition set to plot; same semantics as compare_conditions.py. "
-             "Non-default setups get a filename suffix (e.g. fig1_normad_by_group_alpaca.pdf) "
-             "so primary figures aren't overwritten.",
+        "--setup", choices=list(SETUP_CONDITIONS), default="all",
+        help="Which condition set to plot. Only 'all' is available — kept as a "
+             "flag for parity with sibling scripts.",
     )
     args = parser.parse_args()
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
     conditions = SETUP_CONDITIONS[args.setup]
-    suffix = "" if args.setup == "hhrlhf" else f"_{args.setup}"
+    suffix = "" if args.setup == "all" else f"_{args.setup}"
 
     todo = {"1", "2", "3"} if "all" in args.figures else set(args.figures)
     if "1" in todo: figure1_accuracy_bars(conditions, suffix)

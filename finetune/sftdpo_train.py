@@ -1,8 +1,9 @@
-"""Sequential SFT+DPO training (C4) — DPO on top of an existing SFT adapter.
+"""Sequential SFT+DPO training (C4) — DPO on top of the Alpaca SFT adapter.
 
-Loads Llama 3.2 3B base, attaches the SFT LoRA adapter from C2, merges it into
-the base weights (so the DPO step starts from an SFT-fine-tuned model), then
-trains a fresh LoRA adapter with the DPO objective on the same HH-RLHF data.
+Loads Llama 3.2 3B base, attaches the SFT LoRA adapter from C2 (Alpaca-trained),
+merges it into the base weights (so the DPO step starts from an SFT-fine-tuned
+model), then trains a fresh LoRA adapter with the DPO objective on HH-RLHF
+preference data.
 
 NB on quantization: standalone SFT and DPO use QLoRA 4-bit. This script does
 *not*, because `PeftModel.merge_and_unload()` doesn't compose with bitsandbytes
@@ -11,16 +12,10 @@ load the base in bf16 instead. Llama 3.2 3B in bf16 + DPO training fits within
 A5000 24 GB by a comfortable margin, so the practical cost is small.
 
 Reuses `RewardMarginEarlyStop` from `dpo_train` and `load_hh_split` from
-`finetune._common` so the C4 condition sees the same 30k examples as C3.
+`finetune._common` so the C4 condition sees the same HH-RLHF examples as C3.
 
 Usage:
-    # C4 — DPO on top of HH-RLHF SFT (default)
-    python finetune/sftdpo_train.py --config finetune/configs/sftdpo_config.yaml
-
-    # C4a — DPO on top of Alpaca SFT (robustness variant)
-    python finetune/sftdpo_train.py \
-        --config finetune/configs/sftdpo_alpaca_config.yaml \
-        --sft-adapter-path checkpoints/sft_alpaca
+    python finetune/sftdpo_train.py --config finetune/configs/sftdpo_alpaca_config.yaml
 """
 from __future__ import annotations
 
@@ -88,9 +83,9 @@ def main():
     parser.add_argument(
         "--sft-adapter-path",
         default=None,
-        help="Override `init_adapter_path` from the config. Used by the C4a "
-             "Alpaca variant to point at checkpoints/sft_alpaca instead of "
-             "checkpoints/sft. If omitted, the config's value is used.",
+        help="Override `init_adapter_path` from the config (the path to the "
+             "C2 SFT LoRA adapter to merge in). If omitted, the config's "
+             "value is used.",
     )
     args = parser.parse_args()
 

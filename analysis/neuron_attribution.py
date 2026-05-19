@@ -26,16 +26,10 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 
-# Default — primary HH-RLHF setup. `--setup` overrides on the CLI.
-CONDITIONS = ["base", "sft", "dpo", "sftdpo", "instruct"]
+CONDITIONS = ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"]
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 
@@ -72,8 +66,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sources", nargs="+", default=["normad", "blend"])
     parser.add_argument(
-        "--setup", choices=list(SETUP_CONDITIONS), default="hhrlhf",
-        help="Which condition set to analyze; same semantics as compare_conditions.py.",
+        "--setup", choices=list(SETUP_CONDITIONS), default="all",
+        help="Which condition set to analyze. Only 'all' is available.",
     )
     args = parser.parse_args()
     conditions = SETUP_CONDITIONS[args.setup]

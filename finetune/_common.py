@@ -1,9 +1,9 @@
-"""Shared utilities for SFT and DPO training scripts.
+"""Shared utilities for the DPO training script.
 
-Lives here so that the SFT chosen-only path and the DPO triple path read HH-RLHF
-through the same `split_hh_pair` parser — guaranteeing both conditions train on
-identical (prompt, chosen[, rejected]) data and any difference is purely the
-training objective.
+`load_hh_split` and `split_hh_pair` parse HH-RLHF chosen/rejected transcripts into
+(prompt, chosen, rejected) triples. Used by `finetune/dpo_train.py` and
+`finetune/sftdpo_train.py` to read preference data; SFT (Alpaca) does not touch
+HH-RLHF and so does not call these helpers.
 """
 from __future__ import annotations
 
@@ -41,8 +41,7 @@ def split_hh_pair(example: dict) -> dict:
 def load_hh_split(cfg: dict):
     """Return a HF Dataset of (prompt, chosen, rejected) triples, filtered + optionally capped.
 
-    Both SFT and DPO use this to ensure they see exactly the same examples in the
-    same order (controlled by `seed`). SFT discards the `rejected` field downstream.
+    Used by DPO and SFT+DPO to consume HH-RLHF preference data.
     """
     local = Path(cfg["dataset_path"])
     if local.exists() and any(local.iterdir()):

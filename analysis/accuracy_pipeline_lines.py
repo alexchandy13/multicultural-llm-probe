@@ -17,9 +17,8 @@ Default pipeline matches the paper's alpaca framing:
   Base → SFT-Alp → SFT+DPO-Alp
 
 Override via --conditions. Examples:
-  python3 analysis/accuracy_pipeline_lines.py --conditions base sft dpo sftdpo
+  python3 analysis/accuracy_pipeline_lines.py --conditions base sft_alpaca dpo sftdpo_alpaca
   python3 analysis/accuracy_pipeline_lines.py --mode binary
-  python3 analysis/accuracy_pipeline_lines.py --conditions base sft_lima sftdpo_lima
 
 Reads:
   data/iw_coordinates.csv               ← per-country I-W cluster (+ distance)
@@ -52,14 +51,9 @@ US_SIMILAR_LABEL = "US-similar"   # merged-group key used in cluster mode
 
 COND_LABELS = {
     "base":           "Base",
-    "sft":            "SFT-HH",
     "sft_alpaca":     "SFT",
-    "sft_lima":       "SFT-LIMA",
     "dpo":            "DPO",
-    "sftdpo":         "SFT-HH+DPO",
     "sftdpo_alpaca":  "SFT+DPO",
-    "sftdpo_lima":    "SFT+DPO-LIMA",
-    "instruct":       "Instruct",
 }
 
 DEFAULT_PIPELINE = ["base", "sft_alpaca", "sftdpo_alpaca"]

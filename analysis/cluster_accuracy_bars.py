@@ -18,8 +18,7 @@ Outputs:
 
 Usage:
     python3 analysis/cluster_accuracy_bars.py
-    python3 analysis/cluster_accuracy_bars.py --exclude sftdpo_lima
-    python3 analysis/cluster_accuracy_bars.py --setup hhrlhf
+    python3 analysis/cluster_accuracy_bars.py --exclude dpo
 """
 from __future__ import annotations
 
@@ -41,24 +40,14 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 COND_LABELS = {
     "base":           "C1\nBase",
-    "sft":            "C2\nSFT",
-    "sft_alpaca":     "C2a\nSFT-Alp",
-    "sft_lima":       "C2b\nSFT-LIMA",
+    "sft_alpaca":     "C2\nSFT",
     "dpo":            "C3\nDPO",
-    "sftdpo":         "C4\nSFT+DPO",
-    "sftdpo_alpaca":  "C4a\nSFT(Alp)+DPO",
-    "sftdpo_lima":    "C4b\nSFT(LIMA)+DPO",
-    "instruct":       "C5\nInstruct",
+    "sftdpo_alpaca":  "C4\nSFT+DPO",
 }
 
 # Definition of the binary US-similarity split. Edit to taste — e.g., add

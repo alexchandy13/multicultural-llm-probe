@@ -14,20 +14,9 @@ export TOKENIZERS_PARALLELISM=false
 export BITSANDBYTES_NOWELCOME=1
 export PYTHONUNBUFFERED=1   # flush stdout live so `tail -f *.out` shows progress
 
-# Conditions used everywhere downstream.
-export CONDITIONS="base sft dpo sftdpo instruct"
-
-# Alpaca robustness variant — separate from CONDITIONS so the primary eval/CULNIG
-# SLURM scripts (which read $CONDITIONS) keep targeting the HH-RLHF conditions.
-# The alpaca-variant SLURM scripts (slurm/{eval,culnig}_alpaca_job.sh) define their
-# own CONDS arrays inline rather than reading from this, but the variable is here
-# for convenience when running things manually on the login node.
-export CONDITIONS_ALPACA="sft_alpaca sftdpo_alpaca"
-
-# LIMA robustness variant — same pattern as CONDITIONS_ALPACA. The lima-variant
-# SLURM scripts (slurm/{eval,culnig}_lima_job.sh) define their own CONDS arrays
-# inline; this is here for convenience on the login node.
-export CONDITIONS_LIMA="sft_lima sftdpo_lima"
+# The four conditions used everywhere downstream:
+#   base, sft_alpaca (C2), dpo (C3), sftdpo_alpaca (C4).
+export CONDITIONS="base sft_alpaca dpo sftdpo_alpaca"
 
 # Cultures from NormAd; split for paper-side analysis.
 export WESTERN_CULTURES="US UK Germany Spain Australia"

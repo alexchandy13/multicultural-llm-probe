@@ -23,7 +23,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CKPTS_DIR = PROJECT_ROOT / "checkpoints"
 SLURM_DIR = PROJECT_ROOT / "slurm"
-TRAIN_CONDITIONS = ["sft", "dpo", "sftdpo", "sft_alpaca", "sftdpo_alpaca"]
+TRAIN_CONDITIONS = ["sft_alpaca", "dpo", "sftdpo_alpaca"]
 ERROR_REGEX = re.compile(r"error|traceback|nan|cuda out of memory|reward margin <= 0", re.IGNORECASE)
 
 
@@ -94,7 +94,7 @@ def verdict(cond: str, trajectory: dict) -> str:
     q4 = sum(losses[-max(1, len(losses) // 4):]) / max(1, len(losses) // 4)
     loss_dropped = q4 < q1
 
-    if cond in ("dpo", "sftdpo"):
+    if cond in ("dpo", "sftdpo_alpaca"):
         if not margins:
             return "?  loss looks " + ("OK" if loss_dropped else "FLAT/RISING") + ", but no reward margins logged"
         final_margin = sum(margins[-max(1, len(margins) // 5):]) / max(1, len(margins) // 5)

@@ -52,7 +52,7 @@ Four heatmaps, all written to outputs/figures/:
 Usage:
     python3 analysis/heatmaps.py                       # all 4 figures, --setup all
     python3 analysis/heatmaps.py --figures cluster_activation
-    python3 analysis/heatmaps.py --setup hhrlhf        # only the primary 5 conditions
+    python3 analysis/heatmaps.py --setup all           # all 4 conditions
 
     # Layer-count heatmap, custom condition set (alpaca pipeline)
     python3 analysis/heatmaps.py --figures layer_count \\
@@ -93,24 +93,14 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 SETUP_CONDITIONS = {
-    "hhrlhf": ["base", "sft", "dpo", "sftdpo", "instruct"],
-    "alpaca": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca", "instruct"],
-    "lima":   ["base", "sft_lima", "dpo", "sftdpo_lima", "instruct"],
-    "both":   ["base", "sft", "sft_alpaca", "dpo", "sftdpo", "sftdpo_alpaca", "instruct"],
-    "all":    ["base", "sft", "sft_alpaca", "sft_lima", "dpo",
-               "sftdpo", "sftdpo_alpaca", "sftdpo_lima", "instruct"],
+    "all": ["base", "sft_alpaca", "dpo", "sftdpo_alpaca"],
 }
 
 COND_LABELS = {
     "base":           "Base",
-    "sft":            "C2\nSFT-HH",
     "sft_alpaca":     "SFT",
-    "sft_lima":       "C2b\nSFT-LIMA",
     "dpo":            "DPO",
-    "sftdpo":         "C4\nSFT-HH+DPO",
     "sftdpo_alpaca":  "SFT+DPO",
-    "sftdpo_lima":    "C4b\nSFT(LIMA)+DPO",
-    "instruct":       "C5\nInstruct",
 }
 
 # The modules that this project's CULNIG pipeline actually saves as culture
@@ -986,7 +976,7 @@ def main():
     parser.add_argument(
         "--exclude", nargs="+", default=[],
         help="Condition names to drop from the chosen --setup. "
-             "E.g., --exclude sftdpo_lima to skip C4b.",
+             "E.g., --exclude dpo to skip the DPO column.",
     )
     parser.add_argument(
         "--figures", nargs="+",
