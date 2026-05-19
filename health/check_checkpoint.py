@@ -19,13 +19,13 @@ If anything fails, prints likely causes to stderr.
 
 Usage:
     # The common case — verify the Alpaca SFT checkpoint
-    python3.12 analysis/check_checkpoint.py checkpoints/sft_alpaca
+    python3.12 analysis/check_checkpoint.py checkpoints/sft
 
     # Specify a different base (e.g. to check a Llama-3.1 adapter):
     python3.12 analysis/check_checkpoint.py --base meta-llama/Llama-3.1-8B-Instruct path/to/ckpt
 
     # Skip 4-bit if bitsandbytes is misbehaving:
-    python3.12 analysis/check_checkpoint.py --no-quant checkpoints/sft_alpaca
+    python3.12 analysis/check_checkpoint.py --no-quant checkpoints/sft
 """
 from __future__ import annotations
 
