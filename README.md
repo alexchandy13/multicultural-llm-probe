@@ -1,4 +1,4 @@
-# Multicultural LLM Probe
+# Cultural Norm Drift in LLMs: Disentangling the Effects of SFT and DPO
 
 Cultural drift in LLMs: disentangling the effects of SFT vs. DPO with a values-based extension of CULNIG.
 
