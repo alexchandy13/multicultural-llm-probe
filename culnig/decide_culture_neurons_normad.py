@@ -41,12 +41,20 @@ def main():
     parser.add_argument("--condition", required=True,
                         choices=["base", "dpo", "sft", "sftdpo"])
     parser.add_argument("--dataset-names", nargs="+", default=["normad"])
+    parser.add_argument(
+        "--model-size", default="3b", choices=["3b", "8b"],
+        help="Base model size. Reads scores from outputs/neurons/{condition}"
+             "{_size_suffix}/ and writes selected neurons there. Must match the "
+             "size used during calc_neuron_score_normad.py.",
+    )
     args = parser.parse_args()
 
     logger = setup_logging()
     dataset_names = sorted(args.dataset_names)
-    cond_dir = NEURONS_ROOT / args.condition
-    logger.info(f"Deciding culture neurons for condition={args.condition} datasets={dataset_names}")
+    size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
+    cond_dir = NEURONS_ROOT / f"{args.condition}{size_sfx}"
+    logger.info(f"Deciding culture neurons for condition={args.condition} "
+                f"size={args.model_size} datasets={dataset_names}")
 
     mlp_scores = defaultdict(float)
     attn_scores = defaultdict(float)

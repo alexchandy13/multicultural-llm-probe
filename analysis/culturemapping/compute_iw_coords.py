@@ -282,35 +282,73 @@ def main():
             d["resemaval"] - eng_centroid[1],
         )
 
-    # Write output CSV, sorted by distance ascending (US-similar first).
+    # === Augmentation pass ===========================================
+    # WVS Wave 7 only surveyed ~60 countries; many NormAd countries with known
+    # I-W cluster assignments (Ireland, Sweden, France, Italy, Spain, Portugal,
+    # Saudi Arabia, Afghanistan, …) are absent. We emit rows for every
+    # (ISO, cluster) entry in IW_CLUSTERS that has a NORMAD_NAME mapping but
+    # was missing from WVS, with empty coord fields. Downstream scripts that
+    # only need cluster membership (e.g. analysis/significance_tests.py) work
+    # immediately; scripts that need coords filter on non-empty.
+    augmented = 0
+    for alpha, cluster in IW_CLUSTERS.items():
+        if alpha in countries:
+            continue
+        if alpha not in NORMAD_NAME:
+            continue
+        countries[alpha] = {
+            "cluster": cluster,
+            "cluster_inferred": False,
+            "sacsecval": None,
+            "resemaval": None,
+            "dist_from_english": None,
+            "n": 0,
+            "_augmented": True,
+        }
+        augmented += 1
+    print(f"\nAugmented with {augmented} NormAd countries missing from WVS Wave 7 "
+          f"(empty coords, cluster from published I-W map).", file=sys.stderr)
+
+    # Write output CSV, sorted by distance ascending (augmented rows at the end).
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    rows = sorted(countries.items(), key=lambda kv: kv[1]["dist_from_english"])
+    rows = sorted(
+        countries.items(),
+        key=lambda kv: (kv[1].get("dist_from_english") is None,
+                        kv[1].get("dist_from_english") or 0.0),
+    )
     with open(out_path, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["country_iso", "normad_country", "cluster", "cluster_inferred",
                     "sacsecval", "resemaval", "dist_from_english", "n_respondents"])
         for alpha, d in rows:
+            def fmt(v):
+                return f"{v:.4f}" if v is not None else ""
             w.writerow([
                 alpha,
                 NORMAD_NAME.get(alpha, ""),
                 d["cluster"],
                 "yes" if d.get("cluster_inferred") else "no",
-                f"{d['sacsecval']:.4f}",
-                f"{d['resemaval']:.4f}",
-                f"{d['dist_from_english']:.4f}",
+                fmt(d["sacsecval"]),
+                fmt(d["resemaval"]),
+                fmt(d["dist_from_english"]),
                 d["n"],
             ])
-    print(f"\nWrote {out_path} ({len(rows)} countries)", file=sys.stderr)
+    print(f"\nWrote {out_path} ({len(rows)} countries; {augmented} augmented)",
+          file=sys.stderr)
 
-    # Print per-cluster summary to stderr.
+    # Print per-cluster summary to stderr. Filter to countries with non-null
+    # distance (i.e., exclude augmented rows that lack WVS coords).
     print(f"\nCluster summary (mean dist from EnglishSpeaking centroid):", file=sys.stderr)
     by_cluster = defaultdict(list)
     for alpha, d in countries.items():
-        by_cluster[d["cluster"]].append(d["dist_from_english"])
+        if d.get("dist_from_english") is not None:
+            by_cluster[d["cluster"]].append(d["dist_from_english"])
     for cluster in sorted(by_cluster, key=lambda c: sum(by_cluster[c]) / len(by_cluster[c])):
         ds = by_cluster[cluster]
-        print(f"  {cluster:18s}  mean dist = {sum(ds)/len(ds):.3f}  (n={len(ds)} countries)",
+        n_in_cluster = sum(1 for a, dd in countries.items() if dd["cluster"] == cluster)
+        print(f"  {cluster:18s}  mean dist = {sum(ds)/len(ds):.3f}  "
+              f"(n={n_in_cluster} countries; {len(ds)} with coords)",
               file=sys.stderr)
 
 

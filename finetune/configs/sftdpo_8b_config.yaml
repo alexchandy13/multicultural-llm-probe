@@ -1,0 +1,68 @@
+# C4 at 8B — DPO on top of the merged Alpaca SFT adapter, on Llama 3.1 8B.
+#
+# Mirrors sftdpo_config.yaml (3B) with:
+#   1. base model swapped to Llama-3.1-8B
+#   2. init_adapter_path → checkpoints/sft_8b (the 8B SFT run)
+#   3. output_dir → checkpoints/sftdpo_8b
+#   4. per-device batch halved (2 → 1) and grad-accum doubled (16 → 32) for
+#      8B memory headroom. Same as dpo_8b_config.yaml.
+#
+# NB: no `quantization:` block. merge_and_unload() doesn't compose with 4-bit,
+# so this script loads in bf16. Llama 3.1 8B in bf16 ≈ 16 GB; fits on A5000
+# 24 GB for DPO training (forward+backward on the merged base + small fresh
+# LoRA on top).
+
+model_name_or_path: meta-llama/Llama-3.1-8B
+init_adapter_path: checkpoints/sft_8b
+
+dataset_name: Anthropic/hh-rlhf
+dataset_path: data/hh-rlhf
+output_dir: checkpoints/sftdpo_8b
+
+# Same HH-RLHF subsample as 3B and as dpo_8b_config.
+max_train_examples: 30000
+
+# Training (mirrors 3B sftdpo_config exactly, with batch + accum rescaled)
+num_train_epochs: 2
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 32
+learning_rate: 5.0e-5
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_length: 512
+max_prompt_length: 256
+
+# DPO-specific
+beta: 0.1
+loss_type: sigmoid
+
+# Saving
+save_strategy: epoch
+save_total_limit: 2
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Reward-margin early stop (same patience as 3B)
+early_stop:
+  enabled: true
+  patience_windows: 4
+
+# LoRA — fresh adapter on top of merged 8B SFT weights.
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

@@ -72,39 +72,40 @@ def _pin_name_or_path(model):
         model.name_or_path = LLAMA_31_BRANCH
 
 
-def load_model_for_culnig(condition_name: str):
+def load_model_for_culnig(condition_name: str, model_size: str = "3b",
+                          precision: str = "matched_bf16"):
     """Load base + optional pre-merge adapter + optional primary adapter, merging both.
 
-    Quantization rule:
-      - No pre_merge_adapter → 4-bit base (QLoRA-style, low memory).
-      - pre_merge_adapter set (C4 sftdpo) → bf16 base, because `merge_and_unload()`
-        doesn't compose with bitsandbytes 4-bit. Llama 3.2 3B in bf16 fits in
-        A5000 24 GB for gradient scoring (forward + backward on adapter-merged
-        base; no optimizer state, no LoRA params).
+    `precision` controls quantization regime (same semantics as
+    evaluate._common.load_model_for_eval):
+      - 'matched_bf16' (default): every condition in bf16. Eliminates the
+        precision confound that arises from the C4 merge step forcing bf16
+        while C1/C2/C3 could otherwise use 4-bit. Use this for any cross-
+        condition mechanistic analysis (Jaccard, attribution comparisons).
+      - 'qlora_4bit': C1/C2/C3 in 4-bit, C4 in bf16 (original behavior).
+
+    Memory: at 3B bf16 ≈ 6 GB; at 8B bf16 ≈ 16 GB. Both fit on A5000 24 GB
+    for gradient scoring (forward + backward on the adapter-merged base).
     """
-    cond = resolve_condition(condition_name)
+    cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer = AutoTokenizer.from_pretrained(cond.base, padding_side="left")
     if not tokenizer.pad_token:
         tokenizer.pad_token = tokenizer.eos_token
 
     # Strip the chat template so every condition produces identical raw-text prompts.
-    # C5 (Instruct) ships a chat template; C1-C4 (base + adapters) don't. If we let
-    # the template apply on C5, its prompts become chat-formatted and gradient scores
-    # are no longer comparable across conditions. Forcing chat_template=None makes
-    # upstream's `try: apply_chat_template ... except: pass` blocks fall back to
-    # raw text uniformly for every dataset (normad, normadcontrol, blend, etc.).
+    # If a condition ships a chat template (e.g. an Instruct variant), its prompts
+    # become chat-formatted and gradient scores are no longer comparable across
+    # conditions. Forcing a pass-through template makes upstream's
+    # `try: apply_chat_template ... except: pass` blocks fall back to raw text
+    # uniformly for every dataset (normad, normadcontrol, blend, etc.).
     tokenizer.chat_template = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
 
-    if cond.pre_merge_adapter is not None:
-        model = AutoModelForCausalLM.from_pretrained(
-            cond.base,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-            attn_implementation="sdpa",
-        )
-        model = PeftModel.from_pretrained(model, str(cond.pre_merge_adapter))
-        model = model.merge_and_unload()
-    else:
+    use_4bit = (
+        precision == "qlora_4bit"
+        and cond.pre_merge_adapter is None
+    )
+
+    if use_4bit:
         bnb = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True, bnb_4bit_compute_dtype=torch.bfloat16,
@@ -116,6 +117,17 @@ def load_model_for_culnig(condition_name: str):
             torch_dtype=torch.bfloat16,
             attn_implementation="sdpa",
         )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            attn_implementation="sdpa",
+        )
+
+    if cond.pre_merge_adapter is not None:
+        model = PeftModel.from_pretrained(model, str(cond.pre_merge_adapter))
+        model = model.merge_and_unload()
 
     if cond.adapter is not None:
         model = PeftModel.from_pretrained(model, str(cond.adapter))
@@ -141,9 +153,13 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-def run(condition_name: str, dataset_names: list[str], out_root: Path, logger):
-    model, tokenizer = load_model_for_culnig(condition_name)
-    logger.info(f"Loaded model for condition={condition_name} on {model.device}")
+def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
+        model_size: str = "3b", precision: str = "matched_bf16"):
+    model, tokenizer = load_model_for_culnig(
+        condition_name, model_size=model_size, precision=precision
+    )
+    logger.info(f"Loaded model for condition={condition_name} "
+                f"(model_size={model_size}, precision={precision}) on {model.device}")
 
     dataset_names = sorted(dataset_names)
 
@@ -166,7 +182,10 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger):
         if item["id"] not in dataset_ids[item["dataset_name"]]:
             dataset_ids[item["dataset_name"]].append(item["id"])
 
-    out_dir = out_root / condition_name
+    # Suffix the per-condition output dir with the model size so different
+    # base models don't clobber each other on disk (e.g. outputs/neurons/sft_8b/).
+    size_sfx = "" if model_size == "3b" else f"_{model_size}"
+    out_dir = out_root / f"{condition_name}{size_sfx}"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{''.join(dataset_names)}_max_scores.json"
     out_file.write_text(json.dumps({
@@ -210,6 +229,17 @@ def parse_args():
     parser.add_argument("--dataset-names", nargs="+", required=True,
                         help="e.g. `normad` or `normadcontrol` (single name per run).")
     parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))
+    parser.add_argument(
+        "--model-size", default="3b", choices=["3b", "8b"],
+        help="Base model size. '3b'=Llama-3.2-3B (default), '8b'=Llama-3.1-8B. "
+             "Per-condition output dir is suffixed with the size when not 3b.",
+    )
+    parser.add_argument(
+        "--precision", default="matched_bf16",
+        choices=["matched_bf16", "qlora_4bit"],
+        help="'matched_bf16' (default): all conditions in bf16. 'qlora_4bit': "
+             "C1/C2/C3 in 4-bit (legacy regime).",
+    )
     return parser.parse_args()
 
 
@@ -217,7 +247,10 @@ def main():
     set_seed(42)
     args = parse_args()
     logger = setup_logging()
-    run(args.condition, args.dataset_names, Path(args.out_root), logger)
+    run(
+        args.condition, args.dataset_names, Path(args.out_root), logger,
+        model_size=args.model_size, precision=args.precision,
+    )
 
 
 if __name__ == "__main__":

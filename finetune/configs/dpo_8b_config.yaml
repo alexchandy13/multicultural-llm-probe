@@ -1,0 +1,69 @@
+# DPO on HH-RLHF for Llama 3.1 8B (C3 at 8B).
+#
+# Identical recipe to dpo_config.yaml (3B), with three changes:
+#   1. base model swapped to Llama-3.1-8B
+#   2. output_dir suffixed with _8b
+#   3. per-device batch halved (2 → 1) and grad-accum doubled (16 → 32) to
+#      keep effective batch = 32 within A5000 24 GB. DPO needs two forward
+#      passes per step (policy + reference), so it's more memory-hungry than
+#      SFT at the same scale.
+
+model_name_or_path: meta-llama/Llama-3.1-8B
+dataset_name: Anthropic/hh-rlhf
+dataset_path: data/hh-rlhf
+output_dir: checkpoints/dpo_8b
+
+# Same HH-RLHF subsample as 3B run so DPO data is identical across scales.
+max_train_examples: 30000
+
+# Training
+num_train_epochs: 2
+per_device_train_batch_size: 1     # halved from 3B for 8B + DPO 2× forward
+gradient_accumulation_steps: 32    # doubled to keep effective batch = 32
+learning_rate: 5.0e-5
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_length: 512
+max_prompt_length: 256
+
+# DPO-specific
+beta: 0.1
+loss_type: sigmoid
+
+# Saving
+save_strategy: epoch
+save_total_limit: 2
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Reward-margin early stop (same patience as 3B)
+early_stop:
+  enabled: true
+  patience_windows: 4
+
+# Quantization (same as SFT 8B)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+# LoRA (same recipe as 3B)
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

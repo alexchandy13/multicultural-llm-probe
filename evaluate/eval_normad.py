@@ -164,9 +164,10 @@ def scenario_text(example: dict) -> str:
     return ""
 
 
-def evaluate_one(condition_name: str, data_path: Path, out_path: Path):
-    cond = resolve_condition(condition_name)
-    tokenizer, model = load_model_for_eval(cond)
+def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
+                 model_size: str = "3b", precision: str = "matched_bf16"):
+    cond = resolve_condition(condition_name, model_size=model_size)
+    tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
 
     correct = defaultdict(int)
@@ -219,18 +220,43 @@ def main():
         required=True,
         choices=["base", "dpo", "sft", "sftdpo"],
     )
+    parser.add_argument(
+        "--model-size",
+        default="3b",
+        choices=["3b", "8b"],
+        help="Which base model to load. '3b' = Llama-3.2-3B (default), "
+             "'8b' = Llama-3.1-8B. Outputs for non-3B sizes are written with "
+             "a size suffix (e.g. normad_sft_8b.json) so 3B artifacts are not "
+             "overwritten.",
+    )
+    parser.add_argument(
+        "--precision",
+        default="matched_bf16",
+        choices=["matched_bf16", "qlora_4bit"],
+        help="'matched_bf16' (default): all 4 conditions in bf16 → eliminates "
+             "cross-condition precision confound. 'qlora_4bit': C1/C2/C3 in "
+             "4-bit and C4 in bf16 (legacy regime; kept for back-compat).",
+    )
     parser.add_argument("--data-path", default=str(PROJECT_ROOT / "data" / "NormAd"))
     parser.add_argument(
         "--out-path",
         default=None,
-        help="Defaults to outputs/behavioral/normad_{condition}.json",
+        help="Defaults to outputs/behavioral/normad_{condition}{size_suffix}.json",
     )
     args = parser.parse_args()
 
+    size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     out = Path(args.out_path) if args.out_path else (
-        PROJECT_ROOT / "outputs" / "behavioral" / f"normad_{args.condition}.json"
+        PROJECT_ROOT / "outputs" / "behavioral"
+        / f"normad_{args.condition}{size_sfx}.json"
     )
-    evaluate_one(args.condition, Path(args.data_path), out)
+    evaluate_one(
+        args.condition,
+        Path(args.data_path),
+        out,
+        model_size=args.model_size,
+        precision=args.precision,
+    )
 
 
 if __name__ == "__main__":

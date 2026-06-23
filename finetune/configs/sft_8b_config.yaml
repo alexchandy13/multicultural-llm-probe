@@ -1,0 +1,56 @@
+# SFT on Alpaca for Llama 3.1 8B (C2 at 8B).
+#
+# Identical recipe to sft_config.yaml (3B), with three changes:
+#   1. base model swapped to Llama-3.1-8B
+#   2. output_dir suffixed with _8b so 3B and 8B checkpoints coexist
+#   3. per-device batch size halved (4 → 2) and grad-accum doubled (8 → 16)
+#      to keep effective batch = 32 while staying within A5000 24 GB at 8B.
+#      8B in 4-bit NF4 + LoRA training is ~12 GB; with bf16 activations and
+#      gradient checkpointing this fits a per-device batch of 2 at seq 512.
+
+model_name_or_path: meta-llama/Llama-3.1-8B
+dataset_name: tatsu-lab/alpaca
+dataset_path: data/alpaca
+output_dir: checkpoints/sft_8b
+
+# Training
+num_train_epochs: 3
+per_device_train_batch_size: 2     # halved from 3B for 8B memory headroom
+gradient_accumulation_steps: 16    # doubled to keep effective batch = 32
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_seq_length: 512
+
+# Saving
+save_strategy: epoch
+save_total_limit: 3
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Quantization (same as 3B)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: nf4
+  bnb_4bit_use_double_quant: true
+  bnb_4bit_compute_dtype: bfloat16
+
+# LoRA (same recipe as 3B)
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
