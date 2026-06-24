@@ -32,8 +32,12 @@ lr_scheduler_type: cosine
 weight_decay: 0.0
 max_grad_norm: 1.0
 optim: paged_adamw_8bit
-max_length: 512
-max_prompt_length: 256
+# max_length/max_prompt_length tightened from 3B's (512, 256) to give a few GB
+# headroom on A5000 24 GB. At 8B the bf16-loaded base alone is ~16 GB; reducing
+# seq length is the cheapest way to keep peak activation memory down without
+# changing the optimization recipe.
+max_length: 384
+max_prompt_length: 192
 
 # DPO-specific
 beta: 0.1
