@@ -4,12 +4,15 @@
 #SBATCH --account=class
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa5000:1
+#SBATCH --nodelist=tron47
 #SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-3
 #SBATCH --output=slurm/eval_8b.%A_%a.out
 #SBATCH --error=slurm/eval_8b.%A_%a.err
+
+# See sft_8b_job.sh for why --nodelist=tron47 (only A5000 with python3.12).
 
 # Array job — eval all 4 conditions at 8B. Indices map to CONDITIONS in env.sh.
 # Outputs go to outputs/behavioral/normad_{condition}_8b.json (size suffix
