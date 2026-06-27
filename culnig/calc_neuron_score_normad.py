@@ -54,7 +54,12 @@ PIN_TO_LLAMA_31_BRANCH = {
     "meta-llama/Llama-3.1-8B-Instruct",
 }
 LLAMA_31_BRANCH = "meta-llama/Llama-3.1-8B-Instruct"
-BATCH_SIZE = upstream_score.BATCH_SIZE
+# Upstream default is 16; we override to 1 because Llama-3.1-8B in bf16 (~16 GB)
+# + forward + backward + per-neuron attribution accumulators pushes A5000's 24 GB
+# right to the limit. At BATCH_SIZE=1 each forward keeps activation memory low
+# enough that the gradient pass also fits. CULNIG is bottlenecked on backward
+# memory, not throughput — going to 1 is the cheapest fix.
+BATCH_SIZE = 1
 
 
 def _pin_name_or_path(model):
