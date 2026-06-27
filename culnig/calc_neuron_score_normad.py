@@ -42,7 +42,17 @@ from CULNIG import calc_neuron_score as upstream_score  # noqa: E402
 from evaluate._common import resolve_condition  # noqa: E402
 
 
-LLAMA_32_MODELS = {"meta-llama/Llama-3.2-3B", "meta-llama/Llama-3.2-3B-Instruct"}
+# Models whose architecture matches Llama-3.1-8B-Instruct module-for-module
+# (same q/k/v/o_proj + gate/up/down_proj names under the same parent path).
+# Upstream CULNIG's hard-coded whitelist only accepts a few exact strings; we
+# pin every member of this set to LLAMA_31_BRANCH at load time so the
+# upstream branch fires for all of them.
+PIN_TO_LLAMA_31_BRANCH = {
+    "meta-llama/Llama-3.2-3B",
+    "meta-llama/Llama-3.2-3B-Instruct",
+    "meta-llama/Llama-3.1-8B",
+    "meta-llama/Llama-3.1-8B-Instruct",
+}
 LLAMA_31_BRANCH = "meta-llama/Llama-3.1-8B-Instruct"
 BATCH_SIZE = upstream_score.BATCH_SIZE
 
@@ -68,7 +78,7 @@ def _pin_name_or_path(model):
     pinning once at load is strictly simpler and equally correct. The original
     value isn't preserved because nothing downstream needs it.
     """
-    if model.name_or_path in LLAMA_32_MODELS:
+    if model.name_or_path in PIN_TO_LLAMA_31_BRANCH:
         model.name_or_path = LLAMA_31_BRANCH
 
 
