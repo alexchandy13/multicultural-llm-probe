@@ -22,6 +22,13 @@ export TOKENIZERS_PARALLELISM=false
 export BITSANDBYTES_NOWELCOME=1
 export PYTHONUNBUFFERED=1   # flush stdout live so `tail -f *.out` shows progress
 
+# Allow PyTorch's CUDA allocator to grow segments instead of holding a fixed
+# pool. Necessary for CULNIG at 8B on A5000 24 GB: forward + backward + per-
+# neuron attribution accumulators just barely fit, and fragmentation causes
+# late-run OOMs (we saw an OOM at batch 1200/1262 on sftdpo). expandable
+# segments give the allocator room to repack as tensors are freed.
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 # The four conditions used everywhere downstream:
 #   base, sft (C2), dpo (C3), sftdpo (C4).
 export CONDITIONS="base sft dpo sftdpo"
