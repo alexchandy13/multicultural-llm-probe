@@ -4,7 +4,15 @@
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PROJECT_ROOT
 
-export HF_HOME="$HOME/.cache/huggingface"
+# HF cache location. On Nexus, redirect to scratch (the 30GB home quota can't
+# hold a single 16GB Llama-3.1-8B download); locally, fall back to the standard
+# user-cache path. The check is path existence: if /fs/nexus-scratch/$USER
+# exists we're on Nexus and route there, otherwise use home.
+if [ -d "/fs/nexus-scratch/$USER" ]; then
+    export HF_HOME="/fs/nexus-scratch/$USER/hf_cache"
+else
+    export HF_HOME="$HOME/.cache/huggingface"
+fi
 export TRANSFORMERS_CACHE="$HF_HOME/hub"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
 mkdir -p "$HF_HOME" "$TRANSFORMERS_CACHE" "$HF_DATASETS_CACHE"
