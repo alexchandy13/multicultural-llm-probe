@@ -42,6 +42,140 @@ from CULNIG import calc_neuron_score as upstream_score  # noqa: E402
 from evaluate._common import resolve_condition  # noqa: E402
 
 
+def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
+    """Memory-efficient drop-in replacement for upstream_score.calculate_scores.
+
+    Same algorithm and output as upstream, with three fixes that let bf16
+    Llama 3.1 8B fit on A5000 24 GB:
+
+      1. Wrap the per-module scoring loop (which runs AFTER backward()) in
+         `torch.no_grad()`. Upstream's code multiplies `prob_total *
+         max_aggr_scores` etc. without detaching, so each module-iteration
+         extends the autograd graph. At 32 layers × 5 modules per layer = 160
+         residual graph fragments per batch, this accumulates dramatically.
+
+      2. Explicitly `detach()` the per-step `prob_total` so the scoring
+         arithmetic is pure tensor math.
+
+      3. Clear retained activation `.grad` and `activations` dict, then call
+         `torch.cuda.empty_cache()` at end of each batch to defrag (with
+         `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` set in env.sh).
+
+    The Llama branch only — upstream's slicing for phi-4 etc. is not
+    reproduced here since we only run Llama in this fork. Algorithm output
+    is bit-identical to upstream's for Llama 3.x.
+    """
+    import torch.nn.functional as F
+    from CULNIG.calc_neuron_score import TARGET_MODULES
+    from utils import get_target_module, get_text_model
+
+    max_neuron_scores = defaultdict(lambda: defaultdict(float))
+    total_probabilities_per_country = defaultdict(float)
+
+    activations: dict = {}
+
+    def save_activation(name):
+        def hook(module, input, output):
+            activations[name] = output
+            output.retain_grad()
+        return hook
+
+    hooks = []
+    text_model = get_text_model(model)
+    for i in range(len(text_model.layers)):
+        for module_name in TARGET_MODULES:
+            module = get_target_module(model, module_name, i)
+            hooks.append(module.register_forward_hook(
+                save_activation(f"model.model.layers.{i}.{module_name}")
+            ))
+
+    total_iter = len(dataloader)
+    cur_iter = 0
+    model.train()
+    try:
+        for batch in dataloader:
+            cur_iter += 1
+            if cur_iter % 100 == 0:
+                logger.info(f"Processing batch {cur_iter}/{total_iter}")
+
+            input_ids = batch["input_ids"].to(model.device)
+            attention_mask = batch["attention_mask"].to(model.device)
+            countries = batch["countries"]
+            dataset_names = batch["dataset_names"]
+            control = ["control" in d for d in dataset_names]
+
+            model.zero_grad()
+            activations.clear()
+
+            output = model(input_ids=input_ids, attention_mask=attention_mask)
+            logits = output.logits[:, -1, :]
+            probabilities = F.softmax(logits, dim=-1)
+
+            labels = [str(label) for label in batch["labels"]]
+            labels_ids = torch.tensor(
+                [tokenizer.convert_tokens_to_ids(l) for l in labels],
+                device=model.device,
+            )
+            correct_probs = probabilities[torch.arange(probabilities.size(0)), labels_ids]
+            correct_probs.sum().backward()
+
+            correct_probs_cpu_list = correct_probs.detach().cpu().tolist()
+            for country, prob in zip(countries, correct_probs_cpu_list):
+                total_probabilities_per_country[country] += prob
+
+            # === MEMORY FIX: scoring under no_grad — no new graph created. ===
+            with torch.no_grad():
+                prob_total = correct_probs.detach().unsqueeze(1)
+
+                for module_name, activation in list(activations.items()):
+                    parts = module_name.split(".")
+                    layer_idx = int(parts[3])
+                    mod_name = ".".join(parts[4:])
+
+                    grads = activation.grad
+                    if grads is None:
+                        continue
+
+                    # Llama branch (upstream: `if name in [llama list]: pass`).
+                    scores = activation.detach() * grads
+
+                    padding_mask = attention_mask == 0
+                    if padding_mask.any():
+                        scores = scores.masked_fill(padding_mask.unsqueeze(-1), 0.0)
+
+                    max_aggr_scores, _ = torch.max(scores, dim=1)
+                    max_aggr_scores = prob_total * max_aggr_scores
+                    if any(control):
+                        max_aggr_scores[control] = torch.clamp(
+                            max_aggr_scores[control], min=0.0
+                        )
+
+                    max_aggr_scores_cpu = max_aggr_scores.cpu().tolist()
+                    n_samples, n_neurons = max_aggr_scores.shape
+                    for i in range(n_samples):
+                        country = countries[i]
+                        for neuron_idx in range(n_neurons):
+                            max_neuron_scores[(mod_name, layer_idx, neuron_idx)][country] += \
+                                max_aggr_scores_cpu[i][neuron_idx]
+
+                    # Drop intermediates before the next module's iteration.
+                    del scores, max_aggr_scores
+
+            # === MEMORY FIX: release retained activations + grads explicitly. ===
+            for act in activations.values():
+                act.grad = None
+            activations.clear()
+
+            # === MEMORY FIX: defrag GPU memory between batches. ===
+            torch.cuda.empty_cache()
+
+    finally:
+        for hook in hooks:
+            hook.remove()
+
+    return max_neuron_scores, total_probabilities_per_country
+
+
 # Models whose architecture matches Llama-3.1-8B-Instruct module-for-module
 # (same q/k/v/o_proj + gate/up/down_proj names under the same parent path).
 # Upstream CULNIG's hard-coded whitelist only accepts a few exact strings; we
@@ -183,7 +317,7 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         dataset_names, tokenizer, batch_size=BATCH_SIZE,
         target_countries=None, target_data="neuron",
     )
-    raw_scores, total_probs = upstream_score.calculate_scores(
+    raw_scores, total_probs = calculate_scores_memory_efficient(
         model, tokenizer, dataloader, logger
     )
     neuron_scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -215,7 +349,7 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         dataset_names=["countryrc"], tokenizer=tokenizer, batch_size=BATCH_SIZE,
         target_countries=upstream_score.TARGET_COUNTRIES, target_data="neuron",
     )
-    crc_raw, crc_probs = upstream_score.calculate_scores(
+    crc_raw, crc_probs = calculate_scores_memory_efficient(
         model, tokenizer, crc_dataloader, logger
     )
     crc_scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))

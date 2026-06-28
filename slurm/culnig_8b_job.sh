@@ -29,6 +29,6 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_8b] condition=$COND"
 
 # 5b — NormAd novel extension
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --dataset-names normad
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --dataset-names normadcontrol
+python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad
+python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
 python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size 8b --dataset-names normad
