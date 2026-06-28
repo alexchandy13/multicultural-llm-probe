@@ -4,7 +4,7 @@
 #SBATCH --account=class
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa5000:1
-#SBATCH --nodelist=tron46,tron47,tron48
+#SBATCH --exclude=tron[49-61]
 #SBATCH --time=48:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
