@@ -20,6 +20,25 @@
 
 set -euo pipefail
 
+# If --summary is the first arg, skip submission and just print the table.
+if [ "${1:-}" = "--summary" ]; then
+    GPU="${2:-rtxa5000}"
+    LO="${3:-46}"
+    HI="${4:-61}"
+    echo "=== Probe results for ${GPU} on tron${LO}..tron${HI} ==="
+    for n in $(seq "$LO" "$HI"); do
+        NODE="tron$(printf %02d $n)"
+        f="slurm/node_checks/${NODE}.out"
+        if [ -f "$f" ]; then
+            status=$(grep "^python3.12:" "$f" 2>/dev/null | awk '{print $2}')
+            echo "  ${NODE}: ${status:-NO_DATA}"
+        else
+            echo "  ${NODE}: NOT_RUN"
+        fi
+    done
+    exit 0
+fi
+
 GPU="${1:-rtxa5000}"
 LO="${2:-46}"
 HI="${3:-61}"
@@ -56,24 +75,4 @@ done
 
 echo "submitted probes for ${GPU} on tron${LO}..tron${HI}"
 echo "wait ~2-3 minutes, then run:"
-echo "    bash slurm/check_python_on_nodes.sh --summary ${GPU} ${LO} ${HI}"
-echo
-echo "or pass --summary as the first arg to this script to see results below"
-
-# If invoked with --summary as 1st arg, print the table for the given range.
-if [ "${1:-}" = "--summary" ]; then
-    GPU="${2:-rtxa5000}"
-    LO="${3:-46}"
-    HI="${4:-61}"
-    echo "=== Probe results for ${GPU} on tron${LO}..tron${HI} ==="
-    for n in $(seq "$LO" "$HI"); do
-        NODE="tron$(printf %02d $n)"
-        f="slurm/node_checks/${NODE}.out"
-        if [ -f "$f" ]; then
-            status=$(grep "^python3.12:" "$f" 2>/dev/null | awk '{print $2}')
-            echo "  ${NODE}: ${status:-NO_DATA}"
-        else
-            echo "  ${NODE}: NOT_RUN"
-        fi
-    done
-fi
+echo "    slurm/check_python_on_nodes.sh --summary ${GPU} ${LO} ${HI}"
