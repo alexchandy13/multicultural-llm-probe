@@ -1,17 +1,12 @@
-# Data and weights — never commit
-data/*/
-!data/*/.gitkeep
-models/*/
-!models/*/.gitkeep
-checkpoints/*/
-!checkpoints/*/.gitkeep
-# Behavioral results, figures, and the final filtered neuron set ARE versioned —
-# small files and useful for paper writing. Large neuron intermediates are not.
-outputs/neurons/**/*.pt
-outputs/neurons/**/*_max_scores.json
-outputs/neurons/**/scores_*.pt
-outputs/neurons/**/all_neurons_normad_max.json
-outputs/behavioral/*.json
+# Data, weights, checkpoints, outputs — never commit. The whole directories
+# are excluded so that on HPC these can safely be symlinks to scratch without
+# git seeing them. .gitkeep stubs no longer needed since `data/`,
+# `checkpoints/`, and `outputs/` are reconstructed at first run by the
+# training/eval/CULNIG scripts themselves.
+data/
+models/
+checkpoints/
+outputs/
 
 # CULNIG upstream clone — pulled separately
 culnig/_upstream/
