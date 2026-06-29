@@ -1,10 +1,9 @@
 #!/bin/bash
 #SBATCH --job-name=culture_culnig_8b
-#SBATCH --partition=class
-#SBATCH --account=class
+#SBATCH --partition=clip
+#SBATCH --account=clip
 #SBATCH --qos=medium
-#SBATCH --gres=gpu:rtxa5000:1
-#SBATCH --exclude=tron[49-61]
+#SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --time=48:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
@@ -12,23 +11,20 @@
 #SBATCH --output=slurm/culnig_8b.%A_%a.out
 #SBATCH --error=slurm/culnig_8b.%A_%a.err
 
-# See sft_8b_job.sh for why --nodelist=tron47 (only A5000 with python3.12).
-
-# Array job — CULNIG gradient scoring at 8B for all 4 conditions. Indices map
-# to CONDITIONS in env.sh. Output dirs are outputs/neurons/{cond}_8b/.
-#
-# Memory bump (32G → 64G) covers Llama 3.1 8B in bf16 (~16 GB on GPU) plus
-# host-side tensor copies during the per-batch backward pass.
-# Time bump (10h → 20h) covers ~2-3× slower per-batch time at 8B vs 3B.
+# CULNIG gradient scoring at 8B on CLIP A6000 (48GB — plenty of headroom for
+# bf16 base + retained activations + grads). Array indices map to CONDITIONS
+# in env.sh. Output dirs are outputs/neurons/{cond}_8b/.
 
 set -euo pipefail
 source env.sh
+source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
+conda activate llm
 
 read -ra CONDS <<< "$CONDITIONS"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_8b] condition=$COND"
 
-# 5b — NormAd novel extension
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
-python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size 8b --dataset-names normad
+# NormAd novel extension — score, control, then select
+python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad
+python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
+python culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size 8b --dataset-names normad
