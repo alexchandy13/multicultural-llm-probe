@@ -33,8 +33,8 @@ def split_hh_pair(example: dict) -> dict:
     prompt = chosen[: idx_c + len("\n\nAssistant:")]
     return {
         "prompt": prompt,
-        "chosen": chosen[idx_c + len("\n\nAssistant:"):].strip(),
-        "rejected": rejected[idx_r + len("\n\nAssistant:"):].strip(),
+        "chosen": chosen[idx_c + len("\n\nAssistant:"):],
+        "rejected": rejected[idx_r + len("\n\nAssistant:"):],
     }
 
 
