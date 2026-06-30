@@ -20,4 +20,4 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-python finetune/sft_train.py --config finetune/configs/sft_8b_config.yaml
+python finetune/sft_train.py --config finetune/configs/sft_8b_config.yaml "$@"

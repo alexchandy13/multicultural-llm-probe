@@ -45,6 +45,7 @@ class RewardMarginEarlyStop(TrainerCallback):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
+    parser.add_argument("--qlora", action="store_true", help="Use QLoRA 4-bit instead of bf16")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
@@ -53,14 +54,28 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    bnb = build_bnb_config(cfg["quantization"])
-    model = AutoModelForCausalLM.from_pretrained(
-        cfg["model_name_or_path"],
-        quantization_config=bnb,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-    )
-    model = prepare_model_for_kbit_training(model)
+    if args.qlora or "quantization" in cfg:
+        # QLoRA 4-bit path — lower VRAM, slightly slower due to dequantization overhead.
+        bnb = build_bnb_config(cfg.get("quantization", {
+            "load_in_4bit": True,
+            "bnb_4bit_quant_type": "nf4",
+            "bnb_4bit_use_double_quant": True,
+            "bnb_4bit_compute_dtype": "bfloat16",
+        }))
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["model_name_or_path"],
+            quantization_config=bnb,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        # bf16 path — matches sftdpo_train.py precision for a fair condition comparison.
+        model = AutoModelForCausalLM.from_pretrained(
+            cfg["model_name_or_path"],
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+        )
     model.config.use_cache = False
 
     lora_cfg = LoraConfig(**cfg["lora"])

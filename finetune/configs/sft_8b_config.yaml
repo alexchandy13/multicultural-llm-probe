@@ -4,9 +4,9 @@
 #   1. base model swapped to Llama-3.1-8B
 #   2. output_dir suffixed with _8b so 3B and 8B checkpoints coexist
 #   3. per-device batch size halved (4 → 2) and grad-accum doubled (8 → 16)
-#      to keep effective batch = 32 while staying within A5000 24 GB at 8B.
-#      8B in 4-bit NF4 + LoRA training is ~12 GB; with bf16 activations and
-#      gradient checkpointing this fits a per-device batch of 2 at seq 512.
+#      to keep effective batch = 32 while staying within A6000 48 GB at 8B.
+# Loads in bf16 (no quantization block) to match dpo/sftdpo precision.
+# To revert to QLoRA 4-bit, re-add a `quantization:` block (see git history).
 
 model_name_or_path: meta-llama/Llama-3.1-8B
 dataset_name: tatsu-lab/alpaca
@@ -31,13 +31,6 @@ save_total_limit: 3
 logging_steps: 25
 report_to: none
 seed: 42
-
-# Quantization (same as 3B)
-quantization:
-  load_in_4bit: true
-  bnb_4bit_quant_type: nf4
-  bnb_4bit_use_double_quant: true
-  bnb_4bit_compute_dtype: bfloat16
 
 # LoRA (same recipe as 3B)
 lora:

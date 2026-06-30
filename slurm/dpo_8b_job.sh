@@ -18,4 +18,4 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-python finetune/dpo_train.py --config finetune/configs/dpo_8b_config.yaml
+python finetune/dpo_train.py --config finetune/configs/dpo_8b_config.yaml "$@"

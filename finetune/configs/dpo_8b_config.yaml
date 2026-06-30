@@ -4,9 +4,11 @@
 #   1. base model swapped to Llama-3.1-8B
 #   2. output_dir suffixed with _8b
 #   3. per-device batch halved (2 → 1) and grad-accum doubled (16 → 32) to
-#      keep effective batch = 32 within A5000 24 GB. DPO needs two forward
+#      keep effective batch = 32 within A6000 48 GB. DPO needs two forward
 #      passes per step (policy + reference), so it's more memory-hungry than
 #      SFT at the same scale.
+# Loads in bf16 (no quantization block) to match sftdpo_8b precision.
+# To revert to QLoRA 4-bit, re-add a `quantization:` block (see git history).
 
 model_name_or_path: meta-llama/Llama-3.1-8B
 dataset_name: Anthropic/hh-rlhf
@@ -44,13 +46,6 @@ seed: 42
 early_stop:
   enabled: true
   patience_windows: 4
-
-# Quantization (same as SFT 8B)
-quantization:
-  load_in_4bit: true
-  bnb_4bit_quant_type: nf4
-  bnb_4bit_use_double_quant: true
-  bnb_4bit_compute_dtype: bfloat16
 
 # LoRA (same recipe as 3B)
 lora:
