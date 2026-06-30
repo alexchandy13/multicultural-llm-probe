@@ -24,4 +24,4 @@ source env.sh
 
 python3.12 finetune/sftdpo_train.py \
     --config finetune/configs/sftdpo_config.yaml \
-    --sft-adapter-path checkpoints/sft
+    --sft-adapter-path checkpoints/sft_3b
