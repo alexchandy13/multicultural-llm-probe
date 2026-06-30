@@ -6,26 +6,16 @@ model), then trains a fresh LoRA adapter with the DPO objective on HH-RLHF
 preference data.
 
 NB on quantization: standalone SFT and DPO use QLoRA 4-bit. This script does
-*not* (by default), because `PeftModel.merge_and_unload()` doesn't compose with
-bitsandbytes 4-bit cleanly. We load the base in bf16 instead. Llama 3.2 3B in
-bf16 + DPO training fits within A5000 24 GB by a comfortable margin.
-
-For large MoE models (e.g. Llama-4-Scout-17B-16E) where loading in bf16 is
-infeasible (~218 GB for 109B params), pass --stack-adapters. In that mode the
-base is loaded in 4-bit, the SFT adapter is attached and frozen, and a fresh DPO
-LoRA adapter is added on top via PEFT multi-adapter stacking. The config must
-include a `quantization` block in this case.
+*not*, because `PeftModel.merge_and_unload()` doesn't compose with bitsandbytes
+4-bit cleanly (the merge would leave the model in a mixed-precision state). We
+load the base in bf16 instead. Llama 3.2 3B in bf16 + DPO training fits within
+A5000 24 GB by a comfortable margin, so the practical cost is small.
 
 Reuses `RewardMarginEarlyStop` from `dpo_train` and `load_hh_split` from
 `finetune._common` so the C4 condition sees the same HH-RLHF examples as C3.
 
 Usage:
-    # 3B / 8B — merge path (default)
     python finetune/sftdpo_train.py --config finetune/configs/sftdpo_config.yaml
-
-    # Scout / large MoE — stacked-adapter path
-    python finetune/sftdpo_train.py --config finetune/configs/sftdpo_scout_config.yaml \\
-        --stack-adapters
 """
 from __future__ import annotations
 
@@ -34,11 +24,11 @@ from pathlib import Path
 
 import torch
 import yaml
-from peft import LoraConfig, PeftModel, get_peft_model
+from peft import LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOConfig, DPOTrainer
 
-from finetune._common import build_bnb_config, load_hh_split
+from finetune._common import load_hh_split
 from finetune.dpo_train import RewardMarginEarlyStop
 
 
@@ -87,58 +77,15 @@ def load_and_merge_sft(cfg: dict):
     return model
 
 
-def load_and_stack_sft(cfg: dict):
-    """Load base in 4-bit, attach SFT adapter (frozen), add fresh DPO LoRA on top.
-
-    Used instead of load_and_merge_sft() for large MoE models (e.g. Scout)
-    where materializing the full model in bf16 exceeds available VRAM.
-
-    The SFT adapter weights are frozen; only the DPO adapter trains. DPOTrainer
-    with ref_model=None disables all LoRA adapters to get the frozen reference,
-    which approximates the SFT-merged base as closely as practical without the
-    full merge.
-    """
-    from peft import prepare_model_for_kbit_training
-
-    bnb = build_bnb_config(cfg["quantization"])
-    base = AutoModelForCausalLM.from_pretrained(
-        cfg["model_name_or_path"],
-        quantization_config=bnb,
-        device_map="auto",
-        torch_dtype=torch.bfloat16,
-    )
-    base = prepare_model_for_kbit_training(base)
-    base.config.use_cache = False
-
-    adapter_path = _resolve_sft_adapter(cfg["init_adapter_path"])
-    print(f"[sftdpo-stack] loading frozen SFT adapter from {adapter_path}")
-    model = PeftModel.from_pretrained(base, str(adapter_path), adapter_name="sft")
-
-    # Add a fresh trainable DPO adapter on top of the frozen SFT adapter.
-    lora_cfg = LoraConfig(**cfg["lora"], adapter_name="dpo")
-    model.add_adapter("dpo", lora_cfg)
-    model.set_adapter("dpo")
-    for name, param in model.named_parameters():
-        if "sft" in name:
-            param.requires_grad = False
-
-    return model, None  # None signals caller not to apply a fresh peft_config
-
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument(
         "--sft-adapter-path",
         default=None,
-        help="Override `init_adapter_path` from the config.",
-    )
-    parser.add_argument(
-        "--stack-adapters",
-        action="store_true",
-        help="Use 4-bit QLoRA with PEFT adapter stacking instead of merge_and_unload(). "
-             "Required for large MoE models where loading in bf16 is infeasible. "
-             "The config must include a `quantization` block.",
+        help="Override `init_adapter_path` from the config (the path to the "
+             "C2 SFT LoRA adapter to merge in). If omitted, the config's "
+             "value is used.",
     )
     args = parser.parse_args()
 
@@ -150,16 +97,8 @@ def main():
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    if args.stack_adapters:
-        if "quantization" not in cfg:
-            raise ValueError(
-                "--stack-adapters requires a `quantization` block in the config. "
-                "See finetune/configs/sftdpo_scout_config.yaml for an example."
-            )
-        model, lora_cfg = load_and_stack_sft(cfg)
-    else:
-        model = load_and_merge_sft(cfg)
-        lora_cfg = LoraConfig(**cfg["lora"])
+    model = load_and_merge_sft(cfg)
+    lora_cfg = LoraConfig(**cfg["lora"])
     train_ds = load_hh_split(cfg)
 
     dpo_args = DPOConfig(
