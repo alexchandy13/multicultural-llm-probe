@@ -20,5 +20,7 @@
 
 set -euo pipefail
 source env.sh
+source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
+conda activate llm
 
-python3.12 finetune/sft_train.py --config finetune/configs/sft_config.yaml
+python finetune/sft_train.py --config finetune/configs/sft_config.yaml

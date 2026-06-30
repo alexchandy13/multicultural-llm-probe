@@ -21,7 +21,9 @@
 
 set -euo pipefail
 source env.sh
+source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
+conda activate llm
 
-python3.12 finetune/sftdpo_train.py \
+python finetune/sftdpo_train.py \
     --config finetune/configs/sftdpo_config.yaml \
     --sft-adapter-path checkpoints/sft_3b
