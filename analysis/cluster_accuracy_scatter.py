@@ -29,6 +29,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -69,7 +71,7 @@ def load_iw_coords(path: Path):
     rows = []
     with open(path) as f:
         for r in csv.DictReader(f):
-            if not r["normad_country"]:
+            if not r["normad_country"] or not r["sacsecval"]:
                 continue
             rows.append({
                 "country": r["normad_country"],
@@ -103,9 +105,9 @@ def load_iw_coords(path: Path):
     return country_to_cluster, cluster_to_dist
 
 
-def per_cluster_accuracy(cond: str, country_to_cluster: dict) -> dict[str, tuple[float, int]]:
+def per_cluster_accuracy(cond: str, country_to_cluster: dict, size_suffix: str = "") -> dict[str, tuple[float, int]]:
     """Return {cluster: (accuracy, n)} for one condition's NormAd JSON."""
-    path = BEHAVIORAL_DIR / f"normad_{cond}.json"
+    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
     if not path.exists():
         return {}
     preds = json.loads(path.read_text()).get("predictions", [])
@@ -198,7 +200,7 @@ def draw_panel(ax, cond: str, cluster_to_dist: dict[str, float],
 
 
 def draw_combined(conditions: list[str], country_to_cluster, cluster_to_dist,
-                  out_path: Path):
+                  out_path: Path, size_suffix: str = ""):
     """Multi-panel grid: one scatter per condition, shared axes."""
     n = len(conditions)
     cols = min(3, n)
@@ -208,7 +210,7 @@ def draw_combined(conditions: list[str], country_to_cluster, cluster_to_dist,
     for i, cond in enumerate(conditions):
         r, c = divmod(i, cols)
         ax = axes[r][c]
-        cluster_acc = per_cluster_accuracy(cond, country_to_cluster)
+        cluster_acc = per_cluster_accuracy(cond, country_to_cluster, size_suffix)
         draw_panel(ax, cond, cluster_to_dist, cluster_acc)
         if c == 0:
             ax.set_ylabel("NormAd accuracy")
@@ -235,10 +237,10 @@ def draw_combined(conditions: list[str], country_to_cluster, cluster_to_dist,
 
 
 def draw_per_condition(conditions: list[str], country_to_cluster, cluster_to_dist,
-                       suffix: str):
+                       suffix: str, size_suffix: str = ""):
     """One PDF per condition."""
     for cond in conditions:
-        cluster_acc = per_cluster_accuracy(cond, country_to_cluster)
+        cluster_acc = per_cluster_accuracy(cond, country_to_cluster, size_suffix)
         fig, ax = plt.subplots(figsize=(5.5, 4.5))
         draw_panel(ax, cond, cluster_to_dist, cluster_acc)
         ax.set_xlabel("Distance from EnglishSpeaking centroid")
@@ -262,8 +264,11 @@ def main():
                         help="Conditions to drop from the setup, e.g. --exclude dpo")
     parser.add_argument("--per-condition", action="store_true",
                         help="Emit one PDF per condition instead of a single grid")
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     args = parser.parse_args()
 
+    size_suffix = "_8b" if args.model_size == "8b" else ""
+    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = [c for c in SETUP_CONDITIONS[args.setup] if c not in args.exclude]
     if not conditions:
@@ -272,14 +277,15 @@ def main():
     suffix = "" if (args.setup == "all" and not args.exclude) else f"_{args.setup}"
     if args.exclude:
         suffix += "_no_" + "_".join(sorted(args.exclude))
+    suffix += fig_size_suffix
 
     country_to_cluster, cluster_to_dist = load_iw_coords(IW_COORDS)
 
     if args.per_condition:
-        draw_per_condition(conditions, country_to_cluster, cluster_to_dist, suffix)
+        draw_per_condition(conditions, country_to_cluster, cluster_to_dist, suffix, size_suffix)
     else:
         out = FIGURES_DIR / f"cluster_accuracy_scatter{suffix}.pdf"
-        draw_combined(conditions, country_to_cluster, cluster_to_dist, out)
+        draw_combined(conditions, country_to_cluster, cluster_to_dist, out, size_suffix)
 
 
 if __name__ == "__main__":

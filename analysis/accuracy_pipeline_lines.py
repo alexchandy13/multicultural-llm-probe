@@ -37,6 +37,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -99,6 +101,7 @@ def pooled_accuracy_by_group(
     cond: str,
     country_to_cluster: dict[str, str],
     mode: str,
+    size_suffix: str = "",
 ) -> dict[str, float]:
     """Return {group_label: accuracy} for one condition.
 
@@ -109,7 +112,7 @@ def pooled_accuracy_by_group(
     Accuracy is pooled across all predictions in each group (matching the
     convention in accuracy_deltas_bars.py and the original two-line plot).
     """
-    path = BEHAVIORAL_DIR / f"normad_{cond}.json"
+    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
     if not path.exists():
         return {}
     preds = json.loads(path.read_text()).get("predictions", [])
@@ -181,8 +184,11 @@ def main():
                         help="Force Y axis to start at 0 (default: auto-zoomed to data range).")
     parser.add_argument("--out-suffix", default="",
                         help="Suffix appended to the output PDF filename.")
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     args = parser.parse_args()
 
+    size_suffix = "_8b" if args.model_size == "8b" else ""
+    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = args.conditions if args.conditions else DEFAULT_PIPELINE
     if len(conditions) < 2:
@@ -196,7 +202,7 @@ def main():
         lambda: [float("nan")] * len(conditions)
     )
     for j, cond in enumerate(conditions):
-        groups = pooled_accuracy_by_group(cond, country_to_cluster, args.mode)
+        groups = pooled_accuracy_by_group(cond, country_to_cluster, args.mode, size_suffix)
         if not groups:
             print(f"[warn] no data for condition {cond!r}; will appear as NaN",
                   file=sys.stderr)
@@ -294,7 +300,7 @@ def main():
     ax.set_xlim(-0.4, len(conditions) - 0.6)
 
     fig.tight_layout()
-    out = FIGURES_DIR / f"accuracy_pipeline_lines{args.out_suffix}.pdf"
+    out = FIGURES_DIR / f"accuracy_pipeline_lines{fig_size_suffix}{args.out_suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")

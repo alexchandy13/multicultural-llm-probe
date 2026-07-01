@@ -30,6 +30,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -70,13 +72,13 @@ def load_country_to_cluster(path: Path) -> dict[str, str]:
     return out
 
 
-def accuracy_by_group(cond: str, country_to_cluster: dict) -> dict[str, tuple[float, int, float]]:
+def accuracy_by_group(cond: str, country_to_cluster: dict, size_suffix: str = "") -> dict[str, tuple[float, int, float]]:
     """Return {group: (accuracy, n_predictions, sem)} for one condition.
 
     SEM is the standard error of accuracy across COUNTRIES (not predictions) in
     the group, giving a sense of within-group variability.
     """
-    path = BEHAVIORAL_DIR / f"normad_{cond}.json"
+    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
     if not path.exists():
         return {}
     preds = json.loads(path.read_text()).get("predictions", [])
@@ -113,6 +115,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--setup", choices=list(SETUP_CONDITIONS), default="all")
     parser.add_argument("--exclude", nargs="+", default=[])
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     parser.add_argument("--no-errorbars", action="store_true",
                         help="Hide SEM error bars on top of each bar.")
     args = parser.parse_args()
@@ -122,9 +125,12 @@ def main():
     if not conditions:
         sys.exit("No conditions left after --exclude")
 
+    size_suffix = "_8b" if args.model_size == "8b" else ""
+    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
     suffix = "" if (args.setup == "all" and not args.exclude) else f"_{args.setup}"
     if args.exclude:
         suffix += "_no_" + "_".join(sorted(args.exclude))
+    suffix += fig_size_suffix
 
     country_to_cluster = load_country_to_cluster(IW_COORDS)
 
@@ -132,7 +138,7 @@ def main():
     sim_accs, sim_sems, sim_ns = [], [], []
     dist_accs, dist_sems, dist_ns = [], [], []
     for cond in conditions:
-        groups = accuracy_by_group(cond, country_to_cluster)
+        groups = accuracy_by_group(cond, country_to_cluster, size_suffix)
         s = groups.get("US-similar", (np.nan, 0, 0.0))
         d = groups.get("US-distant", (np.nan, 0, 0.0))
         sim_accs.append(s[0]); sim_ns.append(s[1]); sim_sems.append(s[2])

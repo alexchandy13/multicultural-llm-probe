@@ -76,6 +76,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
@@ -85,6 +87,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
+
+_SIZE_SUFFIX = ""  # set to "_8b" via --model-size 8b
+_N_LAYERS = 28     # 28 for Llama 3.2 3B, 32 for Llama 3.1 8B
 IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 
 # Same definition used by the cluster_accuracy_bars / accuracy_deltas_bars
@@ -162,7 +167,7 @@ def _layer_axis_figsize(n_conditions: int, transpose: bool,
 
 def load_neurons(cond: str) -> list[dict] | None:
     """Return the list of selected culture neurons for a condition, or None if missing."""
-    path = NEURONS_DIR / cond / "all_neurons_normad_max.json"
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "all_neurons_normad_max.json"
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("top_neurons", [])
@@ -170,7 +175,7 @@ def load_neurons(cond: str) -> list[dict] | None:
 
 def load_per_country_scores(cond: str) -> dict | None:
     """Return raw per-neuron per-country scores from normad_max_scores.json."""
-    path = NEURONS_DIR / cond / "normad_max_scores.json"
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "normad_max_scores.json"
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("neuron_scores", {})
@@ -184,7 +189,7 @@ def load_per_country_control_scores(cond: str) -> dict | None:
     that decide_culture_neurons_normad.py does at the all-countries-collapsed
     level when computing the saved scalar `attribute_score`.
     """
-    path = NEURONS_DIR / cond / "normadcontrol_max_scores.json"
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "normadcontrol_max_scores.json"
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("neuron_scores", {})
@@ -200,7 +205,7 @@ def per_country_item_counts() -> dict[str, int]:
     """
     # Prefer base; fall back to any available condition. We just need the
     # country→item-count map, which is invariant across conditions.
-    candidates = ["base"] + [d.name for d in sorted(BEHAVIORAL_DIR.glob("normad_*.json"))]
+    candidates = [f"base{_SIZE_SUFFIX}"] + [d.name for d in sorted(BEHAVIORAL_DIR.glob(f"normad_*{_SIZE_SUFFIX}.json"))]
     counts: dict[str, int] = defaultdict(int)
     for stem in candidates:
         path = BEHAVIORAL_DIR / f"normad_{stem}.json" if not stem.endswith(".json") else BEHAVIORAL_DIR / stem
@@ -223,7 +228,7 @@ def load_iw_coords(path: Path) -> tuple[dict[str, str], list[str]] | None:
     rows = []
     with open(path) as f:
         for r in csv.DictReader(f):
-            if not r["normad_country"]:
+            if not r["normad_country"] or not r["dist_from_english"]:
                 continue
             rows.append({
                 "country": r["normad_country"],
@@ -241,7 +246,7 @@ def load_iw_coords(path: Path) -> tuple[dict[str, str], list[str]] | None:
 
 def figure_layer_count(conditions: list[str], suffix: str, transpose: bool = False):
     """Heatmap of culture-neuron count per (layer × condition)."""
-    n_layers = 28  # Llama 3.2 3B
+    n_layers = _N_LAYERS  # Llama 3.2 3B
     matrix = np.full((n_layers, len(conditions)), np.nan)
     for j, cond in enumerate(conditions):
         neurons = load_neurons(cond)
@@ -267,7 +272,7 @@ def figure_layer_count(conditions: list[str], suffix: str, transpose: bool = Fal
 
 def figure_layer_attribution(conditions: list[str], suffix: str, transpose: bool = False):
     """Heatmap of mean attribute_score per (layer × condition) — the 'fading' picture."""
-    n_layers = 28
+    n_layers = _N_LAYERS
     matrix = np.full((n_layers, len(conditions)), np.nan)
     for j, cond in enumerate(conditions):
         neurons = load_neurons(cond)
@@ -478,7 +483,7 @@ def figure_group_attribution(conditions: list[str], suffix: str,
               "skipping group_attribution heatmap", file=sys.stderr)
         return
 
-    n_layers = 28
+    n_layers = _N_LAYERS
     sim_matrix = np.full((n_layers, len(conditions)), np.nan)
     dist_matrix = np.full((n_layers, len(conditions)), np.nan)
     for j, cond in enumerate(conditions):
@@ -547,7 +552,7 @@ def figure_group_attribution_per_condition(conditions: list[str], suffix: str,
               "skipping group_attribution_per_condition", file=sys.stderr)
         return
 
-    n_layers = 28
+    n_layers = _N_LAYERS
     per_cond: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for cond in conditions:
         sim, dist = _compute_layer_group_attribution(
@@ -891,7 +896,7 @@ def figure_asymmetry_attribution(conditions: list[str], suffix: str,
               "skipping asymmetry_attribution heatmap", file=sys.stderr)
         return
 
-    n_layers = 28
+    n_layers = _N_LAYERS
     diff = np.full((n_layers, len(conditions)), np.nan)
     for j, cond in enumerate(conditions):
         sim, dist = _compute_layer_group_attribution(
@@ -1038,7 +1043,13 @@ def main():
              "producing multiple variants of the same figure type (e.g. two "
              "different --conditions sets) so they don't overwrite.",
     )
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     args = parser.parse_args()
+
+    global _SIZE_SUFFIX, _N_LAYERS
+    _SIZE_SUFFIX = "_8b" if args.model_size == "8b" else ""
+    _N_LAYERS = 32 if args.model_size == "8b" else 28
+    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1057,6 +1068,7 @@ def main():
         suffix = "" if (args.setup == "all" and not args.exclude) else f"_{args.setup}"
         if args.exclude:
             suffix += "_no_" + "_".join(sorted(args.exclude))
+    suffix += fig_size_suffix
 
     todo = ({"layer_count", "layer_attribution", "module_distribution", "cluster_activation"}
             if "all" in args.figures else set(args.figures))

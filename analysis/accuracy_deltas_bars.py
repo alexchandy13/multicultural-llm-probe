@@ -38,6 +38,8 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -77,12 +79,12 @@ def load_country_to_cluster(path: Path) -> dict[str, str]:
     return out
 
 
-def group_accuracy(cond: str, country_to_cluster: dict) -> dict[str, float]:
+def group_accuracy(cond: str, country_to_cluster: dict, size_suffix: str = "") -> dict[str, float]:
     """Return {'US-similar': acc, 'US-distant': acc} for one condition.
 
     Accuracy is pooled across all predictions in the group (not country-mean).
     """
-    path = BEHAVIORAL_DIR / f"normad_{cond}.json"
+    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
     if not path.exists():
         return {}
     preds = json.loads(path.read_text()).get("predictions", [])
@@ -115,6 +117,7 @@ def label_for_comparison(before: str, after: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     parser.add_argument(
         "--comparisons", nargs="+", default=None,
         help="List of 'before:after' condition pairs (e.g. base:sft). "
@@ -129,6 +132,8 @@ def main():
                              "(off by default — each panel auto-scales independently).")
     args = parser.parse_args()
 
+    size_suffix = "_8b" if args.model_size == "8b" else ""
+    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     comparisons = parse_comparisons(args.comparisons) if args.comparisons else DEFAULT_COMPARISONS
 
@@ -138,7 +143,7 @@ def main():
     needed_conds = {c for pair in comparisons for c in pair}
     cond_accs: dict[str, dict[str, float]] = {}
     for cond in needed_conds:
-        cond_accs[cond] = group_accuracy(cond, country_to_cluster)
+        cond_accs[cond] = group_accuracy(cond, country_to_cluster, size_suffix)
         if not cond_accs[cond]:
             print(f"[warn] no data for condition {cond!r}; will appear as NaN", file=sys.stderr)
 
@@ -210,7 +215,7 @@ def main():
         r, c = divmod(i, cols)
         axes[r][c].set_visible(False)
     fig.tight_layout()
-    out = FIGURES_DIR / "accuracy_deltas_combined.pdf"
+    out = FIGURES_DIR / f"accuracy_deltas_combined{fig_size_suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
@@ -224,7 +229,7 @@ def main():
                        force_y_lim=y_lim)
             ax.set_ylabel("Δ NormAd accuracy (after − before)")
             fig.tight_layout()
-            out = FIGURES_DIR / f"accuracy_delta_{before}_to_{after}.pdf"
+            out = FIGURES_DIR / f"accuracy_delta_{before}_to_{after}{fig_size_suffix}.pdf"
             fig.savefig(out, bbox_inches="tight")
             plt.close(fig)
             print(f"Wrote {out}")

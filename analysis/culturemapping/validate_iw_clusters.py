@@ -30,6 +30,8 @@ def load_coords(path: Path) -> list[dict]:
     with open(path) as f:
         reader = csv.DictReader(f)
         for r in reader:
+            if r["sacsecval"] == "":
+                continue  # skip augmented rows without WVS coords
             r["sacsecval"] = float(r["sacsecval"])
             r["resemaval"] = float(r["resemaval"])
             r["dist_from_english"] = float(r["dist_from_english"])
