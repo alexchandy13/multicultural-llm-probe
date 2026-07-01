@@ -24,9 +24,11 @@ Outputs:
 
 Usage:
     python3 analysis/neuron_overlap.py
+    python3 analysis/neuron_overlap.py --model-size 8b
 """
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from collections import defaultdict
@@ -49,10 +51,10 @@ MLP_MODULES = {"mlp.gate_proj"}
 ATTN_MODULES = {"self_attn.q_proj", "self_attn.k_proj", "self_attn.v_proj"}
 
 
-def load_neuron_set(cond: str) -> set[tuple[str, int, int]] | None:
+def load_neuron_set(cond: str, size_suffix: str = "") -> set[tuple[str, int, int]] | None:
     """Return {(module_name, layer_idx, neuron_idx)} for one condition, or None
     if the all_neurons_normad_max.json file is missing."""
-    path = NEURONS_DIR / cond / "all_neurons_normad_max.json"
+    path = NEURONS_DIR / f"{cond}{size_suffix}" / "all_neurons_normad_max.json"
     if not path.exists():
         return None
     neurons = json.loads(path.read_text()).get("top_neurons", [])
@@ -66,9 +68,14 @@ def jaccard(a: set, b: set) -> float:
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
+    args = parser.parse_args()
+    size_suffix = "_8b" if args.model_size == "8b" else ""
+
     sets = {}
     for cond in CONDITIONS:
-        s = load_neuron_set(cond)
+        s = load_neuron_set(cond, size_suffix)
         if s is None:
             print(f"# WARN: missing all_neurons_normad_max.json for {cond}", file=sys.stderr)
             continue
