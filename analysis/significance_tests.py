@@ -92,14 +92,15 @@ def load_country_to_cluster(path: Path) -> dict[str, str]:
     return out
 
 
-def load_condition(cond: str, country_to_cluster: dict[str, str]) -> list[tuple[int, str, str]]:
+def load_condition(cond: str, country_to_cluster: dict[str, str],
+                   size_suffix: str = "") -> list[tuple[int, str, str]]:
     """Return list of (correct, country, group_label) per prediction for one condition.
 
     `group_label` is 'W' or 'NW' derived from the country's I-W cluster (re-derived
     from data/iw_coordinates.csv rather than using the pre-computed `group` field
     in the JSON, which was generated under the old author-judgment partition).
     """
-    path = BEHAVIORAL_DIR / f"normad_{cond}.json"
+    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
     if not path.exists():
         sys.exit(f"ERROR: {path} not found")
     preds = json.loads(path.read_text()).get("predictions", [])
@@ -205,14 +206,17 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bootstrap", choices=["country", "item"], default="country",
                         help="country (default, more conservative) or item-level bootstrap")
+    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
     args = parser.parse_args()
 
+    size_suffix = "_8b" if args.model_size == "8b" else ""
     rng = np.random.default_rng(args.seed)
     country_to_cluster = load_country_to_cluster(IW_COORDS)
 
     # Load every condition that appears in any comparison
     conditions_needed = {c for a, b, _ in DEFAULT_COMPARISONS for c in (a, b)}
-    by_cond = {cond: load_condition(cond, country_to_cluster) for cond in conditions_needed}
+    by_cond = {cond: load_condition(cond, country_to_cluster, size_suffix)
+               for cond in conditions_needed}
 
     # Sanity: all conditions should have the same item count (paired bootstrap requirement)
     sizes = {cond: len(items) for cond, items in by_cond.items()}

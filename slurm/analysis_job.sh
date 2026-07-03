@@ -39,6 +39,7 @@ $PYTHON analysis/culturemapping/validate_iw_clusters.py   # sanity-check + summa
 $PYTHON analysis/compare_conditions.py
 $PYTHON analysis/neuron_attribution.py
 $PYTHON analysis/neuron_overlap.py --model-size "$MODEL_SIZE"
+$PYTHON analysis/significance_tests.py --model-size "$MODEL_SIZE"
 
 # --- Headline figures (each writes to outputs/figures/)
 $PYTHON analysis/cluster_accuracy_bars.py --model-size "$MODEL_SIZE"
