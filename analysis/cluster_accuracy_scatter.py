@@ -264,11 +264,11 @@ def main():
                         help="Conditions to drop from the setup, e.g. --exclude dpo")
     parser.add_argument("--per-condition", action="store_true",
                         help="Emit one PDF per condition instead of a single grid")
-    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
     args = parser.parse_args()
 
-    size_suffix = "_8b" if args.model_size == "8b" else ""
-    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
+    size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"
+    fig_size_suffix = f"_{args.model_size}"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = [c for c in SETUP_CONDITIONS[args.setup] if c not in args.exclude]
     if not conditions:

@@ -223,11 +223,12 @@ def main():
     parser.add_argument(
         "--model-size",
         default="3b",
-        choices=["3b", "8b"],
+        choices=["3b", "8b", "gemma4"],
         help="Which base model to load. '3b' = Llama-3.2-3B (default), "
-             "'8b' = Llama-3.1-8B. Outputs for non-3B sizes are written with "
-             "a size suffix (e.g. normad_sft_8b.json) so 3B artifacts are not "
-             "overwritten.",
+             "'8b' = Llama-3.1-8B, 'gemma4' = Gemma 4 12B. Outputs for "
+             "non-3B sizes are written with a size suffix (e.g. "
+             "normad_sft_8b.json, normad_sft_gemma4.json) so 3B artifacts "
+             "are not overwritten.",
     )
     parser.add_argument(
         "--precision",

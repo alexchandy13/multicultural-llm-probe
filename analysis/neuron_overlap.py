@@ -69,9 +69,9 @@ def jaccard(a: set, b: set) -> float:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
     args = parser.parse_args()
-    size_suffix = "_8b" if args.model_size == "8b" else ""
+    size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"
 
     sets = {}
     for cond in CONDITIONS:

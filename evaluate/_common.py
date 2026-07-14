@@ -7,10 +7,10 @@ as a backward-compatible fallback).
 Conditions: base (C1), sft (C2), dpo (C3), sftdpo (C4).
 SFT uses Alpaca; DPO uses HH-RLHF preferences; C4 = DPO on top of merged C2.
 
-Model sizes: '3b' (Llama 3.2 3B, default) or '8b' (Llama 3.1 8B). When
-model_size != '3b', checkpoint dirs and output paths are suffixed with the
-size label (e.g. checkpoints/sft_8b, outputs/neurons/sft_8b/) so that 3B
-artifacts on disk are never overwritten by larger-model runs.
+Model sizes: '3b' (Llama 3.2 3B, default), '8b' (Llama 3.1 8B), or 'gemma4'
+(Gemma 4 12B). When model_size != '3b', checkpoint dirs and output paths are
+suffixed with the size label (e.g. checkpoints/sft_8b, outputs/neurons/sft_8b/)
+so that 3B artifacts on disk are never overwritten by larger-model runs.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
 MODEL_REGISTRY = {
     "3b": "meta-llama/Llama-3.2-3B",
     "8b": "meta-llama/Llama-3.1-8B",
+    "gemma4": "google/gemma-4-12B",
 }
 DEFAULT_MODEL_SIZE = "3b"
 

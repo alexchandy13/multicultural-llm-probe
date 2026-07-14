@@ -184,11 +184,11 @@ def main():
                         help="Force Y axis to start at 0 (default: auto-zoomed to data range).")
     parser.add_argument("--out-suffix", default="",
                         help="Suffix appended to the output PDF filename.")
-    parser.add_argument("--model-size", choices=["3b", "8b"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
     args = parser.parse_args()
 
-    size_suffix = "_8b" if args.model_size == "8b" else ""
-    fig_size_suffix = "_8b" if args.model_size == "8b" else "_3b"
+    size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"
+    fig_size_suffix = f"_{args.model_size}"
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = args.conditions if args.conditions else DEFAULT_PIPELINE
     if len(conditions) < 2:

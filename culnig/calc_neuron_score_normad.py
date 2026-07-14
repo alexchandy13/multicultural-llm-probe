@@ -379,9 +379,10 @@ def parse_args():
                         help="e.g. `normad` or `normadcontrol` (single name per run).")
     parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))
     parser.add_argument(
-        "--model-size", default="3b", choices=["3b", "8b"],
-        help="Base model size. '3b'=Llama-3.2-3B (default), '8b'=Llama-3.1-8B. "
-             "Per-condition output dir is suffixed with the size when not 3b.",
+        "--model-size", default="3b", choices=["3b", "8b", "gemma4"],
+        help="Base model size. '3b'=Llama-3.2-3B (default), '8b'=Llama-3.1-8B, "
+             "'gemma4'=Gemma 4 12B. Per-condition output dir is suffixed with "
+             "the size when not 3b.",
     )
     parser.add_argument(
         "--precision", default="matched_bf16",
