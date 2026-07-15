@@ -5,7 +5,7 @@
 #SBATCH --qos=default
 #SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --time=2-00:00:00
-#SBATCH --mem=64G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/sftdpo_gemma4.%j.out
 #SBATCH --error=slurm/sftdpo_gemma4.%j.err
