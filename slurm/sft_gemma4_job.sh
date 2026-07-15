@@ -2,9 +2,9 @@
 #SBATCH --job-name=culture_sft_gemma4
 #SBATCH --partition=clip
 #SBATCH --account=clip
-#SBATCH --qos=high
+#SBATCH --qos=default
 #SBATCH --gres=gpu:rtxa6000:1
-#SBATCH --time=24:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/sft_gemma4.%j.out
