@@ -117,7 +117,7 @@ def label_for_comparison(before: str, after: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
     parser.add_argument(
         "--comparisons", nargs="+", default=None,
         help="List of 'before:after' condition pairs (e.g. base:sft). "

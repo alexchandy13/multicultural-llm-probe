@@ -29,6 +29,7 @@ MODEL_REGISTRY = {
     "3b": "meta-llama/Llama-3.2-3B",
     "8b": "meta-llama/Llama-3.1-8B",
     "gemma4": "google/gemma-4-12B",
+    "qwen35": "Qwen/Qwen3.5-9B-Base",
 }
 DEFAULT_MODEL_SIZE = "3b"
 

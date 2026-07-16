@@ -1,0 +1,61 @@
+# C4 at qwen35 — DPO on top of the merged Alpaca SFT adapter, on Qwen3.5 9B Base.
+#
+# Mirrors sftdpo_8b_config.yaml with:
+#   1. base model → Qwen/Qwen3.5-9B-Base
+#   2. init_adapter_path → checkpoints/sft_qwen35
+#   3. output_dir → checkpoints/sftdpo_qwen35
+
+model_name_or_path: Qwen/Qwen3.5-9B-Base
+init_adapter_path: checkpoints/sft_qwen35
+
+dataset_name: Anthropic/hh-rlhf
+dataset_path: data/hh-rlhf
+output_dir: checkpoints/sftdpo_qwen35
+
+# Same HH-RLHF subsample as 3B/8B/gemma4 and dpo_qwen35.
+max_train_examples: 30000
+
+# Training
+num_train_epochs: 2
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 32
+learning_rate: 5.0e-5
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_length: 384
+max_prompt_length: 192
+
+# DPO-specific
+beta: 0.1
+loss_type: sigmoid
+
+# Saving
+save_strategy: epoch
+save_total_limit: 2
+logging_steps: 25
+report_to: none
+seed: 42
+
+# Reward-margin early stop
+early_stop:
+  enabled: true
+  patience_windows: 4
+
+# LoRA — fresh adapter on top of merged qwen35 SFT weights.
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

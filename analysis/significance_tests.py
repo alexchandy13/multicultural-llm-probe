@@ -206,7 +206,7 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bootstrap", choices=["country", "item"], default="country",
                         help="country (default, more conservative) or item-level bootstrap")
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
     args = parser.parse_args()
 
     size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"

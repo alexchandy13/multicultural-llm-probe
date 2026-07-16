@@ -1,0 +1,47 @@
+# SFT on Alpaca for Qwen3.5 9B Base (C2 at qwen35).
+#
+# Mirrors sft_8b_config.yaml with:
+#   1. base model → Qwen/Qwen3.5-9B-Base
+#   2. output_dir → checkpoints/sft_qwen35
+#   3. batch/grad-accum same as 8B (9B bf16 ≈ 18 GB, fits A6000 48 GB at batch=2)
+# Loads in bf16 to match dpo/sftdpo precision.
+
+model_name_or_path: Qwen/Qwen3.5-9B-Base
+dataset_name: tatsu-lab/alpaca
+dataset_path: data/alpaca
+output_dir: checkpoints/sft_qwen35
+
+# Training
+num_train_epochs: 3
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_seq_length: 512
+
+# Saving
+save_strategy: epoch
+save_total_limit: 3
+logging_steps: 25
+report_to: none
+seed: 42
+
+# LoRA (same recipe as 3B/8B/gemma4; same module names as Llama 3)
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

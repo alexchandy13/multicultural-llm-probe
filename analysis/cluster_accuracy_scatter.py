@@ -264,7 +264,7 @@ def main():
                         help="Conditions to drop from the setup, e.g. --exclude dpo")
     parser.add_argument("--per-condition", action="store_true",
                         help="Emit one PDF per condition instead of a single grid")
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
     args = parser.parse_args()
 
     size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"

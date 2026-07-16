@@ -1043,12 +1043,13 @@ def main():
              "producing multiple variants of the same figure type (e.g. two "
              "different --conditions sets) so they don't overwrite.",
     )
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
     args = parser.parse_args()
 
     global _SIZE_SUFFIX, _N_LAYERS
     _SIZE_SUFFIX = "" if args.model_size == "3b" else f"_{args.model_size}"
-    _N_LAYERS = 48 if args.model_size == "gemma4" else (32 if args.model_size == "8b" else 28)
+    _N_LAYERS = (48 if args.model_size == "gemma4" else
+                 32 if args.model_size in ("8b", "qwen35") else 28)
     fig_size_suffix = f"_{args.model_size}"
 
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)

@@ -42,7 +42,7 @@ def main():
                         choices=["base", "dpo", "sft", "sftdpo"])
     parser.add_argument("--dataset-names", nargs="+", default=["normad"])
     parser.add_argument(
-        "--model-size", default="3b", choices=["3b", "8b", "gemma4"],
+        "--model-size", default="3b", choices=["3b", "8b", "gemma4", "qwen35"],
         help="Base model size. Reads scores from outputs/neurons/{condition}"
              "{_size_suffix}/ and writes selected neurons there. Must match the "
              "size used during calc_neuron_score_normad.py.",
