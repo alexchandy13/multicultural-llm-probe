@@ -60,17 +60,17 @@ def load_hh_split(cfg: dict):
 def _format_conversations(turns: list) -> str:
     """Convert COIG-P conversations list to HH-RLHF-style prompt string.
 
-    Each turn is a dict with 'role' (human/user/assistant) and 'content'.
+    Each turn is a dict with 'from' (human/gpt) and 'value'.
     Ends with '\n\nAssistant:' so DPOTrainer sees the same split boundary as HH-RLHF.
     """
     parts = []
     for turn in turns:
-        role = turn.get("role", "")
-        content = turn.get("content", "")
-        if role in ("human", "user"):
-            parts.append(f"\n\nHuman: {content}")
-        elif role == "assistant":
-            parts.append(f"\n\nAssistant: {content}")
+        speaker = turn.get("from", "")
+        text = turn.get("value", "")
+        if speaker == "human":
+            parts.append(f"\n\nHuman: {text}")
+        elif speaker in ("gpt", "assistant"):
+            parts.append(f"\n\nAssistant: {text}")
     parts.append("\n\nAssistant:")
     return "".join(parts)
 
@@ -96,8 +96,8 @@ def load_coig_p(cfg: dict):
         rejected = example.get("rejected") or {}
         return {
             "prompt": prompt,
-            "chosen": chosen.get("content", "") if isinstance(chosen, dict) else str(chosen),
-            "rejected": rejected.get("content", "") if isinstance(rejected, dict) else str(rejected),
+            "chosen": chosen.get("value", "") if isinstance(chosen, dict) else str(chosen),
+            "rejected": rejected.get("value", "") if isinstance(rejected, dict) else str(rejected),
         }
 
     mapped = train.map(_normalize, remove_columns=train.column_names)

@@ -44,13 +44,25 @@ def _format_coig_cqia(example: dict) -> dict:
     return {"text": text}
 
 
+_COIG_CQIA_CONFIGS = [
+    "chinese_traditional", "coig_pc", "exam", "finance", "douban",
+    "human_value", "logi_qa", "ruozhiba", "segmentfault", "wiki",
+    "wikihow", "xhs", "zhihu",
+]
+
+
 def _load_coig_cqia(cfg: dict):
+    from datasets import concatenate_datasets
     local = Path(cfg["dataset_path"])
     if local.exists() and any(local.iterdir()):
         ds = load_from_disk(str(local))
+        train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
     else:
-        ds = load_dataset(cfg["dataset_name"])
-    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+        splits = []
+        for config_name in _COIG_CQIA_CONFIGS:
+            sub = load_dataset(cfg["dataset_name"], config_name)
+            splits.append(sub["train"] if "train" in sub else sub)
+        train = concatenate_datasets(splits)
     return train.map(_format_coig_cqia, remove_columns=train.column_names)
 
 
