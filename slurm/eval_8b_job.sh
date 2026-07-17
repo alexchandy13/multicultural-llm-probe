@@ -23,3 +23,4 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval_8b] condition=$COND"
 
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --calibrate

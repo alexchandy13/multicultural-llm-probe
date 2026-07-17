@@ -23,3 +23,4 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval_gemma4] condition=$COND"
 
 python evaluate/eval_normad.py --condition "$COND" --model-size gemma4
+python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --calibrate

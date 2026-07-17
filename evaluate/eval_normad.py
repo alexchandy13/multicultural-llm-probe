@@ -113,9 +113,26 @@ def load_normad(path: Path):
     return ds
 
 
+NULL_PROMPT = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: N/A\n"
+    "Scenario: N/A\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "Answer with exactly one of: yes, no, neutral.\n"
+    "Answer:"
+)
+
+
 @torch.no_grad()
-def score_choices(model, tokenizer, prompt: str, choices: list[str]) -> list[float]:
-    """Return log-prob of the first token of each choice given prompt."""
+def score_choices(model, tokenizer, prompt: str, choices: list[str],
+                  priors: list[float] | None = None) -> list[float]:
+    """Return log-prob of the first token of each choice given prompt.
+
+    If `priors` is provided (list of log-probs from a content-free prompt),
+    subtract them from each score before returning — this is contextual
+    calibration (Zhao et al. 2021) and removes the model's unconditional
+    token bias toward e.g. 'yes' or 'neutral'.
+    """
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
     out = model(**enc)
@@ -129,7 +146,20 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str]) -> list[flo
             scores.append(float("-inf"))
         else:
             scores.append(last_logits[ids[0]].item())
+
+    if priors is not None:
+        scores = [s - p for s, p in zip(scores, priors)]
     return scores
+
+
+@torch.no_grad()
+def compute_priors(model, tokenizer, choices: list[str]) -> list[float]:
+    """Compute unconditional log-probs for each choice using a content-free prompt.
+
+    Used for contextual calibration: subtract these from conditional scores
+    to remove the model's inherent token bias.
+    """
+    return score_choices(model, tokenizer, NULL_PROMPT, choices, priors=None)
 
 
 def gold_label(example: dict) -> str:
@@ -165,10 +195,15 @@ def scenario_text(example: dict) -> str:
 
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
-                 model_size: str = "3b", precision: str = "matched_bf16"):
+                 model_size: str = "3b", precision: str = "matched_bf16",
+                 calibrate: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
+
+    priors = compute_priors(model, tokenizer, CHOICES) if calibrate else None
+    if calibrate:
+        print(f"Calibration priors — yes: {priors[0]:.3f}  no: {priors[1]:.3f}  neutral: {priors[2]:.3f}")
 
     correct = defaultdict(int)
     total = defaultdict(int)
@@ -176,7 +211,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
     for ex in tqdm(ds, desc=f"normad/{condition_name}"):
         prompt = PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex))
-        scores = score_choices(model, tokenizer, prompt, CHOICES)
+        scores = score_choices(model, tokenizer, prompt, CHOICES, priors=priors)
         pred = CHOICES[max(range(len(CHOICES)), key=scores.__getitem__)]
         gold = gold_label(ex)
         c = country(ex)
@@ -213,13 +248,13 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     print(f"Wrote {out_path}: overall={result['accuracy_overall']:.3f}")
 
 
+ALL_CONDITIONS = ["base", "dpo", "sft", "sftdpo",
+                  "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku"]
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--condition",
-        required=True,
-        choices=["base", "dpo", "sft", "sftdpo"],
-    )
+    parser.add_argument("--condition", required=True, choices=ALL_CONDITIONS)
     parser.add_argument(
         "--model-size",
         default="3b",
@@ -242,14 +277,21 @@ def main():
     parser.add_argument(
         "--out-path",
         default=None,
-        help="Defaults to outputs/behavioral/normad_{condition}{size_suffix}.json",
+        help="Defaults to outputs/behavioral/normad_{condition}{size_suffix}[_calibrated].json",
+    )
+    parser.add_argument(
+        "--calibrate", action="store_true",
+        help="Apply contextual calibration (Zhao et al. 2021): subtract per-label "
+             "log-probs from a content-free prompt before argmax. Output filename "
+             "gains a _calibrated suffix.",
     )
     args = parser.parse_args()
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
+    cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -257,6 +299,7 @@ def main():
         out,
         model_size=args.model_size,
         precision=args.precision,
+        calibrate=args.calibrate,
     )
 
 

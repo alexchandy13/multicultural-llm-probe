@@ -6,9 +6,9 @@ For each (benchmark, condition):
   - Delta from base (C1)
   - Western - Non-Western gap
 
-Outputs:
-  outputs/behavioral/table1.csv     # machine-readable
-  outputs/behavioral/table1.md      # paper-ready
+Outputs (suffixed by model size for non-3B models):
+  outputs/behavioral/table1{suffix}.csv     # machine-readable
+  outputs/behavioral/table1{suffix}.md      # paper-ready
 """
 from __future__ import annotations
 
@@ -20,15 +20,18 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 
-CONDITIONS = ["base", "sft", "dpo", "sftdpo"]
+DEFAULT_MODEL_SIZE = "3b"
 
-SETUP_CONDITIONS = {
-    "all": ["base", "sft", "dpo", "sftdpo"],
+CONDITIONS_BY_MODEL = {
+    "3b":     ["base", "sft", "dpo", "sftdpo"],
+    "8b":     ["base", "sft", "dpo", "sftdpo"],
+    "gemma4": ["base", "sft", "dpo", "sftdpo"],
+    "qwen35": ["base", "sft", "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku"],
 }
 
 
-def load(benchmark: str, cond: str) -> dict | None:
-    path = BEHAVIORAL_DIR / f"{benchmark}_{cond}.json"
+def load(benchmark: str, cond: str, size_suffix: str = "") -> dict | None:
+    path = BEHAVIORAL_DIR / f"{benchmark}_{cond}{size_suffix}.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())
@@ -40,18 +43,16 @@ def metric_keys(benchmark: str) -> tuple[str, str]:
     return "accuracy_overall", "accuracy_by_group"
 
 
-def build_rows(benchmark: str, conditions: list[str] = None):
-    if conditions is None:
-        conditions = CONDITIONS
+def build_rows(benchmark: str, conditions: list[str], size_suffix: str = ""):
     overall_k, group_k = metric_keys(benchmark)
-    base = load(benchmark, "base")
+    base = load(benchmark, "base", size_suffix)
     base_overall = base[overall_k] if base else None
     base_w = base[group_k]["Western"] if base else None
     base_nw = base[group_k]["Non-Western"] if base else None
 
     rows = []
     for cond in conditions:
-        d = load(benchmark, cond)
+        d = load(benchmark, cond, size_suffix)
         if d is None:
             rows.append({"condition": cond, "missing": True})
             continue
@@ -113,15 +114,22 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmarks", nargs="+", default=["normad"])
     parser.add_argument(
-        "--setup", choices=list(SETUP_CONDITIONS), default="all",
-        help="Which condition set to include. Only 'all' is available.",
+        "--model-size", choices=list(CONDITIONS_BY_MODEL), default=DEFAULT_MODEL_SIZE,
+        help="Model size label — controls which conditions are loaded and the output filename suffix.",
+    )
+    parser.add_argument(
+        "--conditions", nargs="+", default=None,
+        help="Override the default condition list for the chosen model size.",
     )
     args = parser.parse_args()
 
-    conditions = SETUP_CONDITIONS[args.setup]
-    rows_by_bench = {b: build_rows(b, conditions) for b in args.benchmarks}
-    csv_path = BEHAVIORAL_DIR / "table1.csv"
-    md_path = BEHAVIORAL_DIR / "table1.md"
+    size_suffix = "" if args.model_size == DEFAULT_MODEL_SIZE else f"_{args.model_size}"
+    fig_size_suffix = f"_{args.model_size}"
+    conditions = args.conditions or CONDITIONS_BY_MODEL[args.model_size]
+
+    rows_by_bench = {b: build_rows(b, conditions, size_suffix) for b in args.benchmarks}
+    csv_path = BEHAVIORAL_DIR / f"table1{fig_size_suffix}.csv"
+    md_path = BEHAVIORAL_DIR / f"table1{fig_size_suffix}.md"
     to_csv(rows_by_bench, csv_path)
     to_md(rows_by_bench, md_path)
     print(f"Wrote {csv_path} and {md_path}")
