@@ -8,8 +8,8 @@
 model_name_or_path: Qwen/Qwen3.5-9B-Base
 init_adapter_path: checkpoints/sft_qwen35
 
-dataset_name: Anthropic/hh-rlhf
-dataset_path: data/hh-rlhf
+dataset_name: m-a-p/COIG-P
+dataset_path: data/coig-p
 output_dir: checkpoints/sftdpo_qwen35
 
 # Same HH-RLHF subsample as 3B/8B/gemma4 and dpo_qwen35.

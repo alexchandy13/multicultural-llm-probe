@@ -1,9 +1,9 @@
 """Shared utilities for the DPO training script.
 
 `load_hh_split` and `split_hh_pair` parse HH-RLHF chosen/rejected transcripts into
-(prompt, chosen, rejected) triples. Used by `finetune/dpo_train.py` and
-`finetune/sftdpo_train.py` to read preference data; SFT (Alpaca) does not touch
-HH-RLHF and so does not call these helpers.
+(prompt, chosen, rejected) triples. `load_coig_p` loads COIG-P preference pairs.
+`load_dpo_dataset` dispatches to the right loader based on `dataset_name` in the
+config. Used by `finetune/dpo_train.py` and `finetune/sftdpo_train.py`.
 """
 from __future__ import annotations
 
@@ -55,6 +55,102 @@ def load_hh_split(cfg: dict):
     if cap and len(filtered) > cap:
         filtered = filtered.shuffle(seed=cfg["seed"]).select(range(cap))
     return filtered
+
+
+def _format_conversations(turns: list) -> str:
+    """Convert COIG-P conversations list to HH-RLHF-style prompt string.
+
+    Each turn is a dict with 'role' (human/user/assistant) and 'content'.
+    Ends with '\n\nAssistant:' so DPOTrainer sees the same split boundary as HH-RLHF.
+    """
+    parts = []
+    for turn in turns:
+        role = turn.get("role", "")
+        content = turn.get("content", "")
+        if role in ("human", "user"):
+            parts.append(f"\n\nHuman: {content}")
+        elif role == "assistant":
+            parts.append(f"\n\nAssistant: {content}")
+    parts.append("\n\nAssistant:")
+    return "".join(parts)
+
+
+def load_coig_p(cfg: dict):
+    """Load m-a-p/COIG-P preference dataset as (prompt, chosen, rejected) triples.
+
+    COIG-P schema: conversations (list of {role, content}), chosen (dict), rejected (dict).
+    We format conversations into a HH-RLHF-style prompt string and extract content from
+    chosen/rejected dicts.
+    """
+    local = Path(cfg["dataset_path"])
+    if local.exists() and any(local.iterdir()):
+        ds = load_from_disk(str(local))
+    else:
+        ds = load_dataset(cfg["dataset_name"])
+    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+
+    def _normalize(example):
+        prompt = _format_conversations(example.get("conversations") or [])
+        chosen = example.get("chosen") or {}
+        rejected = example.get("rejected") or {}
+        return {
+            "prompt": prompt,
+            "chosen": chosen.get("content", "") if isinstance(chosen, dict) else str(chosen),
+            "rejected": rejected.get("content", "") if isinstance(rejected, dict) else str(rejected),
+        }
+
+    mapped = train.map(_normalize, remove_columns=train.column_names)
+    filtered = mapped.filter(lambda x: x["prompt"] and x["chosen"] and x["rejected"])
+    cap = cfg.get("max_train_examples")
+    if cap and len(filtered) > cap:
+        filtered = filtered.shuffle(seed=cfg["seed"]).select(range(cap))
+    return filtered
+
+
+def load_pku_safe_rlhf(cfg: dict):
+    """Load PKU-SafeRLHF as (prompt, chosen, rejected) triples.
+
+    Schema: prompt, response_0, response_1, better_response_id (0 or 1).
+    We use better_response_id to assign chosen/rejected.
+    """
+    local = Path(cfg["dataset_path"])
+    if local.exists() and any(local.iterdir()):
+        ds = load_from_disk(str(local))
+    else:
+        ds = load_dataset(cfg["dataset_name"])
+    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+
+    def _normalize(example):
+        bid = example.get("better_response_id")
+        if bid == 0:
+            chosen, rejected = example["response_0"], example["response_1"]
+        elif bid == 1:
+            chosen, rejected = example["response_1"], example["response_0"]
+        else:
+            chosen, rejected = "", ""
+        return {"prompt": example.get("prompt", ""), "chosen": chosen, "rejected": rejected}
+
+    mapped = train.map(_normalize, remove_columns=train.column_names)
+    filtered = mapped.filter(lambda x: x["prompt"] and x["chosen"] and x["rejected"])
+    cap = cfg.get("max_train_examples")
+    if cap and len(filtered) > cap:
+        filtered = filtered.shuffle(seed=cfg["seed"]).select(range(cap))
+    return filtered
+
+
+def load_dpo_dataset(cfg: dict):
+    """Dispatch to the right preference-data loader based on dataset_name."""
+    name = cfg.get("dataset_name", "")
+    if "hh-rlhf" in name or "hh_rlhf" in name:
+        return load_hh_split(cfg)
+    if "COIG-P" in name or "coig-p" in name.lower():
+        return load_coig_p(cfg)
+    if "PKU-SafeRLHF" in name or "pku-safe" in name.lower() or "pku_safe" in name.lower():
+        return load_pku_safe_rlhf(cfg)
+    raise ValueError(
+        f"Unsupported DPO dataset: {name!r}. "
+        f"Supported: Anthropic/hh-rlhf, m-a-p/COIG-P, PKU-Alignment/PKU-SafeRLHF-single-dimension"
+    )
 
 
 def build_bnb_config(qcfg: dict) -> BitsAndBytesConfig:

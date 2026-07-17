@@ -19,7 +19,7 @@ from peft import LoraConfig, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import DPOConfig, DPOTrainer
 
-from finetune._common import build_bnb_config, load_hh_split
+from finetune._common import build_bnb_config, load_dpo_dataset
 
 
 class RewardMarginEarlyStop(TrainerCallback):
@@ -79,7 +79,7 @@ def main():
     model.config.use_cache = False
 
     lora_cfg = LoraConfig(**cfg["lora"])
-    train_ds = load_hh_split(cfg)
+    train_ds = load_dpo_dataset(cfg)
 
     dpo_args = DPOConfig(
         output_dir=cfg["output_dir"],

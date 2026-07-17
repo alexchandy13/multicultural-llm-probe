@@ -28,7 +28,7 @@ from peft import LoraConfig, PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOConfig, DPOTrainer
 
-from finetune._common import load_hh_split
+from finetune._common import load_dpo_dataset
 from finetune.dpo_train import RewardMarginEarlyStop
 
 
@@ -99,7 +99,7 @@ def main():
 
     model = load_and_merge_sft(cfg)
     lora_cfg = LoraConfig(**cfg["lora"])
-    train_ds = load_hh_split(cfg)
+    train_ds = load_dpo_dataset(cfg)
 
     dpo_args = DPOConfig(
         output_dir=cfg["output_dir"],

@@ -33,6 +33,27 @@ ALPACA_TEMPLATE_NO_INPUT = (
 )
 
 
+def _format_coig_cqia(example: dict) -> dict:
+    instruction = example.get("instruction", "")
+    inp = example.get("input", "")
+    output = example.get("output", "")
+    if inp:
+        text = ALPACA_TEMPLATE_WITH_INPUT.format(instruction=instruction, input=inp, output=output)
+    else:
+        text = ALPACA_TEMPLATE_NO_INPUT.format(instruction=instruction, output=output)
+    return {"text": text}
+
+
+def _load_coig_cqia(cfg: dict):
+    local = Path(cfg["dataset_path"])
+    if local.exists() and any(local.iterdir()):
+        ds = load_from_disk(str(local))
+    else:
+        ds = load_dataset(cfg["dataset_name"])
+    train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+    return train.map(_format_coig_cqia, remove_columns=train.column_names)
+
+
 def _format_alpaca(example: dict) -> dict:
     if example.get("input"):
         text = ALPACA_TEMPLATE_WITH_INPUT.format(**example)
@@ -55,8 +76,11 @@ def load_train_dataset(cfg: dict):
     name = cfg.get("dataset_name", "")
     if name.startswith("tatsu-lab/alpaca") or name == "alpaca":
         return _load_alpaca(cfg)
+    if "COIG-CQIA" in name or "coig-cqia" in name.lower():
+        return _load_coig_cqia(cfg)
     raise ValueError(
-        f"Unsupported SFT dataset: {name!r}. Only tatsu-lab/alpaca is supported."
+        f"Unsupported SFT dataset: {name!r}. "
+        f"Supported: tatsu-lab/alpaca, m-a-p/COIG-CQIA"
     )
 
 
