@@ -119,18 +119,41 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
     if name == "dpo":
         adapter = _latest_checkpoint(ckpt_root / f"dpo{sfx}")
         return Condition("dpo", base, adapter, final_epoch=dpo_epoch, model_size=model_size)
+    if name == "dpo_coig":
+        adapter = _latest_checkpoint(ckpt_root / f"dpo_coig{sfx}")
+        return Condition("dpo_coig", base, adapter, final_epoch=dpo_epoch, model_size=model_size)
+    if name == "dpo_pku":
+        adapter = _latest_checkpoint(ckpt_root / f"dpo_pku{sfx}")
+        return Condition("dpo_pku", base, adapter, final_epoch=dpo_epoch, model_size=model_size)
     if name == "sft":
-        # C2 — Alpaca-trained SFT adapter (only SFT variant retained).
         adapter = _latest_checkpoint(ckpt_root / f"sft{sfx}")
         return Condition("sft", base, adapter, final_epoch=sft_epoch, model_size=model_size)
     if name == "sftdpo":
-        # C4 — DPO trained on top of the merged Alpaca SFT adapter. For correct
-        # inference we merge the SFT adapter into the base first, then apply
-        # the sftdpo adapter on top (its weights are deltas from base + SFT).
+        # C4 — DPO trained on top of the merged SFT adapter.
         sft_adapter = _latest_checkpoint(ckpt_root / f"sft{sfx}")
         sftdpo_adapter = _latest_checkpoint(ckpt_root / f"sftdpo{sfx}")
         return Condition(
             "sftdpo", base,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+            model_size=model_size,
+        )
+    if name == "sftdpo_coig":
+        sft_adapter = _latest_checkpoint(ckpt_root / f"sft{sfx}")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / f"sftdpo_coig{sfx}")
+        return Condition(
+            "sftdpo_coig", base,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+            model_size=model_size,
+        )
+    if name == "sftdpo_pku":
+        sft_adapter = _latest_checkpoint(ckpt_root / f"sft{sfx}")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / f"sftdpo_pku{sfx}")
+        return Condition(
+            "sftdpo_pku", base,
             adapter=sftdpo_adapter,
             pre_merge_adapter=sft_adapter,
             final_epoch=dpo_epoch,

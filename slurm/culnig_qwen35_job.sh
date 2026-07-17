@@ -7,11 +7,12 @@
 #SBATCH --time=48:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-3
+#SBATCH --array=0-5
 #SBATCH --output=slurm/culnig_qwen35.%A_%a.out
 #SBATCH --error=slurm/culnig_qwen35.%A_%a.err
 
-# CULNIG gradient scoring at qwen35. Output dirs are outputs/neurons/{cond}_qwen35/.
+# CULNIG gradient scoring at qwen35 — all 6 conditions.
+# Submit with: CONDITIONS="base sft dpo_coig dpo_pku sftdpo_coig sftdpo_pku" sbatch ...
 
 set -euo pipefail
 source env.sh

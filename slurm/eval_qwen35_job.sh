@@ -7,11 +7,12 @@
 #SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-3
+#SBATCH --array=0-5
 #SBATCH --output=slurm/eval_qwen35.%A_%a.out
 #SBATCH --error=slurm/eval_qwen35.%A_%a.err
 
-# Array job — eval all 4 conditions at qwen35 on CLIP A6000.
+# Array job — eval all 6 conditions at qwen35 on CLIP A6000.
+# Submit with: CONDITIONS="base sft dpo_coig dpo_pku sftdpo_coig sftdpo_pku" sbatch ...
 
 set -euo pipefail
 source env.sh

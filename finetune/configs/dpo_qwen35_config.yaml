@@ -1,16 +1,9 @@
-# DPO on HH-RLHF for Qwen3.5 9B Base (C3 at qwen35).
-#
-# Mirrors dpo_8b_config.yaml with:
-#   1. base model → Qwen/Qwen3.5-9B-Base
-#   2. output_dir → checkpoints/dpo_qwen35
-# Loads in bf16 to match sftdpo_qwen35 precision.
+# DPO config for Qwen3.5 9B Base — shared hyperparameters.
+# dataset_name, dataset_path, and output_dir are passed via CLI at submission time.
+# See slurm/dpo_qwen35_coig_job.sh and slurm/dpo_qwen35_pku_job.sh.
 
 model_name_or_path: Qwen/Qwen3.5-9B-Base
-dataset_name: m-a-p/COIG-P
-dataset_path: data/coig-p
-output_dir: checkpoints/dpo_qwen35
 
-# Same HH-RLHF subsample as 3B/8B/gemma4 runs.
 max_train_examples: 30000
 
 # Training
@@ -37,12 +30,12 @@ logging_steps: 25
 report_to: none
 seed: 42
 
-# Reward-margin early stop (same patience as 3B/8B/gemma4)
+# Reward-margin early stop
 early_stop:
   enabled: true
   patience_windows: 4
 
-# LoRA (same recipe as 3B/8B/gemma4)
+# LoRA
 lora:
   r: 16
   lora_alpha: 32

@@ -80,18 +80,22 @@ def load_and_merge_sft(cfg: dict):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
-    parser.add_argument(
-        "--sft-adapter-path",
-        default=None,
-        help="Override `init_adapter_path` from the config (the path to the "
-             "C2 SFT LoRA adapter to merge in). If omitted, the config's "
-             "value is used.",
-    )
+    parser.add_argument("--sft-adapter-path", default=None,
+                        help="Override init_adapter_path in config")
+    parser.add_argument("--dataset-name", default=None, help="Override dataset_name in config")
+    parser.add_argument("--dataset-path", default=None, help="Override dataset_path in config")
+    parser.add_argument("--output-dir", default=None, help="Override output_dir in config")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
     if args.sft_adapter_path:
         cfg["init_adapter_path"] = args.sft_adapter_path
+    if args.dataset_name:
+        cfg["dataset_name"] = args.dataset_name
+    if args.dataset_path:
+        cfg["dataset_path"] = args.dataset_path
+    if args.output_dir:
+        cfg["output_dir"] = args.output_dir
 
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name_or_path"])
     if tokenizer.pad_token is None:

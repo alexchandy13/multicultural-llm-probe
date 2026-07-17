@@ -46,9 +46,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", required=True)
     parser.add_argument("--qlora", action="store_true", help="Use QLoRA 4-bit instead of bf16")
+    parser.add_argument("--dataset-name", default=None, help="Override dataset_name in config")
+    parser.add_argument("--dataset-path", default=None, help="Override dataset_path in config")
+    parser.add_argument("--output-dir", default=None, help="Override output_dir in config")
     args = parser.parse_args()
 
     cfg = yaml.safe_load(Path(args.config).read_text())
+    if args.dataset_name:
+        cfg["dataset_name"] = args.dataset_name
+    if args.dataset_path:
+        cfg["dataset_path"] = args.dataset_path
+    if args.output_dir:
+        cfg["output_dir"] = args.output_dir
 
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name_or_path"])
     if tokenizer.pad_token is None:
