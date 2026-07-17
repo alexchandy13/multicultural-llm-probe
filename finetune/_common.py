@@ -88,6 +88,7 @@ def load_coig_p(cfg: dict):
     else:
         ds = load_dataset(cfg["dataset_name"])
     train = ds["train"] if hasattr(ds, "keys") and "train" in ds else ds
+    train = train.filter(lambda x: x.get("domain") == "chat")
 
     def _normalize(example):
         prompt = _format_conversations(example.get("conversations") or [])
