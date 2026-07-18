@@ -184,7 +184,7 @@ def main():
                         help="Force Y axis to start at 0 (default: auto-zoomed to data range).")
     parser.add_argument("--out-suffix", default="",
                         help="Suffix appended to the output PDF filename.")
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "8b_instruct", "gemma4", "qwen35"], default="3b")
     parser.add_argument("--calibrated", action="store_true",
                         help="Read *_calibrated.json files and suffix output with _calibrated.")
     parser.add_argument("--few-shot", type=int, default=0, metavar="N",

@@ -23,10 +23,11 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 DEFAULT_MODEL_SIZE = "3b"
 
 CONDITIONS_BY_MODEL = {
-    "3b":     ["base", "sft", "dpo", "sftdpo"],
-    "8b":     ["base", "sft", "dpo", "sftdpo"],
-    "gemma4": ["base", "sft", "dpo", "sftdpo"],
-    "qwen35": ["base", "sft", "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku"],
+    "3b":          ["base", "sft", "dpo", "sftdpo"],
+    "8b":          ["base", "sft", "dpo", "sftdpo"],
+    "8b_instruct": ["base"],
+    "gemma4":      ["base", "sft", "dpo", "sftdpo"],
+    "qwen35":      ["base", "sft", "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku"],
 }
 
 

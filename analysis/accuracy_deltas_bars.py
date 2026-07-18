@@ -117,7 +117,7 @@ def label_for_comparison(before: str, after: str) -> str:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
+    parser.add_argument("--model-size", choices=["3b", "8b", "8b_instruct", "gemma4", "qwen35"], default="3b")
     parser.add_argument("--calibrated", action="store_true",
                         help="Read *_calibrated.json files and suffix output with _calibrated.")
     parser.add_argument("--few-shot", type=int, default=0, metavar="N",

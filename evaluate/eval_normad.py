@@ -339,7 +339,7 @@ def main():
     parser.add_argument(
         "--model-size",
         default="3b",
-        choices=["3b", "8b", "gemma4", "qwen35"],
+        choices=["3b", "8b", "8b_instruct", "gemma4", "qwen35"],
         help="Which base model to load. '3b' = Llama-3.2-3B (default), "
              "'8b' = Llama-3.1-8B, 'gemma4' = Gemma 4 12B. Outputs for "
              "non-3B sizes are written with a size suffix (e.g. "
