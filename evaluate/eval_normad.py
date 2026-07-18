@@ -36,6 +36,32 @@ PROMPT_TEMPLATE = (
     "Answer:"
 )
 
+# Multiple-choice letter format (Hendrycks et al. 2021 / MMLU style).
+# Scoring single letters avoids the surface-form competition problem (Holtzman
+# et al. 2021, arXiv 2104.08315) where "neutral" competes with all 'n'-initial
+# tokens and is systematically underscored relative to short words like "yes".
+MC_CHOICES = ["A", "B", "C"]
+MC_LABEL_MAP = {"yes": "A", "no": "B", "neutral": "C"}
+MC_CHOICE_MAP = {"A": "yes", "B": "no", "C": "neutral"}
+
+MC_PROMPT_TEMPLATE = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: {country}\n"
+    "Scenario: {scenario}\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "(A) yes  (B) no  (C) neutral\n"
+    "Answer:"
+)
+
+MC_NULL_PROMPT = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: N/A\n"
+    "Scenario: N/A\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "(A) yes  (B) no  (C) neutral\n"
+    "Answer:"
+)
+
 # NormAd ships country names lowercase + underscored (e.g. 'united_states_of_america',
 # 'south_korea'). Map raw -> canonical forms `culture_group` recognizes; anything
 # unmapped falls through and lands in the "Other" bucket. The expanded list covers
@@ -113,7 +139,8 @@ def load_normad(path: Path):
     return ds
 
 
-def build_fewshot_prefix(ds, n_shots: int, seed: int = 42) -> tuple[str, set[int]]:
+def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
+                         mc_format: bool = False) -> tuple[str, set[int]]:
     """Sample n_shots examples balanced across yes/no/neutral and build a prefix string.
 
     Returns (prefix_string, excluded_indices) — excluded indices are skipped during eval
@@ -141,12 +168,14 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42) -> tuple[str, set[int
     rng.shuffle(picks)
     picks = picks[:n_shots]
 
+    template = MC_PROMPT_TEMPLATE if mc_format else PROMPT_TEMPLATE
     parts = []
     excluded: set[int] = set()
     for idx, _ in picks:
         ex = ds[idx]
         lbl = gold_label(ex)
-        parts.append(PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex)) + f" {lbl}\n\n")
+        answer = MC_LABEL_MAP[lbl] if mc_format else lbl
+        parts.append(template.format(country=country(ex), scenario=scenario_text(ex)) + f" {answer}\n\n")
         excluded.add(idx)
 
     return "".join(parts), excluded
@@ -192,13 +221,15 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 
 @torch.no_grad()
-def compute_priors(model, tokenizer, choices: list[str], prefix: str = "") -> list[float]:
+def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
+                   mc_format: bool = False) -> list[float]:
     """Compute unconditional log-probs for each choice using a content-free prompt.
 
     If few-shot prefix is provided, it's prepended so the prior is estimated in
     the same context as the actual prompts.
     """
-    return score_choices(model, tokenizer, prefix + NULL_PROMPT, choices, priors=None)
+    null = MC_NULL_PROMPT if mc_format else NULL_PROMPT
+    return score_choices(model, tokenizer, prefix + null, choices, priors=None)
 
 
 def gold_label(example: dict) -> str:
@@ -235,18 +266,22 @@ def scenario_text(example: dict) -> str:
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 calibrate: bool = False, few_shot: int = 0):
+                 calibrate: bool = False, few_shot: int = 0, mc_format: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
 
-    prefix, excluded = build_fewshot_prefix(ds, few_shot) if few_shot > 0 else ("", set())
+    choices = MC_CHOICES if mc_format else CHOICES
+    template = MC_PROMPT_TEMPLATE if mc_format else PROMPT_TEMPLATE
+
+    prefix, excluded = build_fewshot_prefix(ds, few_shot, mc_format=mc_format) if few_shot > 0 else ("", set())
     if few_shot > 0:
         print(f"Few-shot: {few_shot} examples, {len(excluded)} excluded from eval")
 
-    priors = compute_priors(model, tokenizer, CHOICES, prefix=prefix) if calibrate else None
+    priors = compute_priors(model, tokenizer, choices, prefix=prefix, mc_format=mc_format) if calibrate else None
     if calibrate:
-        print(f"Calibration priors — yes: {priors[0]:.3f}  no: {priors[1]:.3f}  neutral: {priors[2]:.3f}")
+        labels = ["A", "B", "C"] if mc_format else ["yes", "no", "neutral"]
+        print("Calibration priors — " + "  ".join(f"{l}: {p:.3f}" for l, p in zip(labels, priors)))
 
     correct = defaultdict(int)
     total = defaultdict(int)
@@ -255,9 +290,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     for i, ex in enumerate(tqdm(ds, desc=f"normad/{condition_name}")):
         if i in excluded:
             continue
-        prompt = prefix + PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex))
-        scores = score_choices(model, tokenizer, prompt, CHOICES, priors=priors)
-        pred = CHOICES[max(range(len(CHOICES)), key=scores.__getitem__)]
+        prompt = prefix + template.format(country=country(ex), scenario=scenario_text(ex))
+        scores = score_choices(model, tokenizer, prompt, choices, priors=priors)
+        pred_token = choices[max(range(len(choices)), key=scores.__getitem__)]
+        pred = MC_CHOICE_MAP[pred_token] if mc_format else pred_token
         gold = gold_label(ex)
         c = country(ex)
         group = culture_group(c)
@@ -336,14 +372,22 @@ def main():
              "sampled from the dataset (seed=42) and excluded from eval. Output "
              "filename gains a _fsN suffix. 0 = standard 0-shot (default).",
     )
+    parser.add_argument(
+        "--mc-format", action="store_true",
+        help="Score letter tokens (A/B/C) instead of words (yes/no/neutral). "
+             "Avoids surface-form competition (Holtzman et al. 2021, arXiv 2104.08315) "
+             "where 'neutral' is structurally underscored because 'n'-initial tokens "
+             "are high-frequency. Output filename gains a _mc suffix.",
+    )
     args = parser.parse_args()
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{mc_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -353,6 +397,7 @@ def main():
         precision=args.precision,
         calibrate=args.calibrate,
         few_shot=args.few_shot,
+        mc_format=args.mc_format,
     )
 
 

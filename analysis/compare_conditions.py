@@ -123,11 +123,17 @@ def main():
     )
     parser.add_argument("--calibrated", action="store_true",
                         help="Read *_calibrated.json files and suffix output with _calibrated.")
+    parser.add_argument("--few-shot", type=int, default=0, metavar="N",
+                        help="Read *_fsN.json files and suffix output with _fsN.")
+    parser.add_argument("--mc-format", action="store_true",
+                        help="Read *_mc.json files (letter-scored) and suffix output with _mc.")
     args = parser.parse_args()
 
+    fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    mc_sfx = "_mc" if args.mc_format else ""
     cal_suffix = "_calibrated" if args.calibrated else ""
-    size_suffix = ("" if args.model_size == DEFAULT_MODEL_SIZE else f"_{args.model_size}") + cal_suffix
-    fig_size_suffix = f"_{args.model_size}" + cal_suffix
+    size_suffix = ("" if args.model_size == DEFAULT_MODEL_SIZE else f"_{args.model_size}") + fs_sfx + mc_sfx + cal_suffix
+    fig_size_suffix = f"_{args.model_size}" + fs_sfx + mc_sfx + cal_suffix
     conditions = args.conditions or CONDITIONS_BY_MODEL[args.model_size]
 
     rows_by_bench = {b: build_rows(b, conditions, size_suffix) for b in args.benchmarks}
