@@ -185,10 +185,13 @@ def main():
     parser.add_argument("--out-suffix", default="",
                         help="Suffix appended to the output PDF filename.")
     parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
+    parser.add_argument("--calibrated", action="store_true",
+                        help="Read *_calibrated.json files and suffix output with _calibrated.")
     args = parser.parse_args()
 
-    size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"
-    fig_size_suffix = f"_{args.model_size}"
+    cal_suffix = "_calibrated" if args.calibrated else ""
+    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + cal_suffix
+    fig_size_suffix = f"_{args.model_size}" + cal_suffix
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = args.conditions if args.conditions else DEFAULT_PIPELINE
     if len(conditions) < 2:

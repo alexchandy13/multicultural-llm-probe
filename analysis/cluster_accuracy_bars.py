@@ -116,6 +116,8 @@ def main():
     parser.add_argument("--setup", choices=list(SETUP_CONDITIONS), default="all")
     parser.add_argument("--exclude", nargs="+", default=[])
     parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
+    parser.add_argument("--calibrated", action="store_true",
+                        help="Read *_calibrated.json files and suffix output with _calibrated.")
     parser.add_argument("--no-errorbars", action="store_true",
                         help="Hide SEM error bars on top of each bar.")
     args = parser.parse_args()
@@ -125,8 +127,9 @@ def main():
     if not conditions:
         sys.exit("No conditions left after --exclude")
 
-    size_suffix = "" if args.model_size == "3b" else f"_{args.model_size}"
-    fig_size_suffix = f"_{args.model_size}"
+    cal_suffix = "_calibrated" if args.calibrated else ""
+    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + cal_suffix
+    fig_size_suffix = f"_{args.model_size}" + cal_suffix
     suffix = "" if (args.setup == "all" and not args.exclude) else f"_{args.setup}"
     if args.exclude:
         suffix += "_no_" + "_".join(sorted(args.exclude))

@@ -121,10 +121,13 @@ def main():
         "--conditions", nargs="+", default=None,
         help="Override the default condition list for the chosen model size.",
     )
+    parser.add_argument("--calibrated", action="store_true",
+                        help="Read *_calibrated.json files and suffix output with _calibrated.")
     args = parser.parse_args()
 
-    size_suffix = "" if args.model_size == DEFAULT_MODEL_SIZE else f"_{args.model_size}"
-    fig_size_suffix = f"_{args.model_size}"
+    cal_suffix = "_calibrated" if args.calibrated else ""
+    size_suffix = ("" if args.model_size == DEFAULT_MODEL_SIZE else f"_{args.model_size}") + cal_suffix
+    fig_size_suffix = f"_{args.model_size}" + cal_suffix
     conditions = args.conditions or CONDITIONS_BY_MODEL[args.model_size]
 
     rows_by_bench = {b: build_rows(b, conditions, size_suffix) for b in args.benchmarks}

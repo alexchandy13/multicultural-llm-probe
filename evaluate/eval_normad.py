@@ -113,6 +113,45 @@ def load_normad(path: Path):
     return ds
 
 
+def build_fewshot_prefix(ds, n_shots: int, seed: int = 42) -> tuple[str, set[int]]:
+    """Sample n_shots examples balanced across yes/no/neutral and build a prefix string.
+
+    Returns (prefix_string, excluded_indices) — excluded indices are skipped during eval
+    so few-shot examples are never evaluated on. The 0-shot eval files are untouched;
+    few-shot results write to a separate _fsN suffixed file.
+    """
+    import random
+    rng = random.Random(seed)
+
+    by_label: dict[str, list[int]] = {"yes": [], "no": [], "neutral": []}
+    for i, ex in enumerate(ds):
+        try:
+            by_label[gold_label(ex)].append(i)
+        except KeyError:
+            pass
+
+    per_class = max(1, n_shots // 3)
+    remainder = n_shots - per_class * 3
+    picks: list[tuple[int, str]] = []
+    for lbl in ("yes", "no", "neutral"):
+        extra = 1 if remainder > 0 else 0
+        remainder -= extra
+        chosen = rng.sample(by_label[lbl], min(per_class + extra, len(by_label[lbl])))
+        picks.extend((i, lbl) for i in chosen)
+    rng.shuffle(picks)
+    picks = picks[:n_shots]
+
+    parts = []
+    excluded: set[int] = set()
+    for idx, _ in picks:
+        ex = ds[idx]
+        lbl = gold_label(ex)
+        parts.append(PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex)) + f" {lbl}\n\n")
+        excluded.add(idx)
+
+    return "".join(parts), excluded
+
+
 NULL_PROMPT = (
     "You are evaluating cultural acceptability.\n"
     "Country: N/A\n"
@@ -153,13 +192,13 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 
 @torch.no_grad()
-def compute_priors(model, tokenizer, choices: list[str]) -> list[float]:
+def compute_priors(model, tokenizer, choices: list[str], prefix: str = "") -> list[float]:
     """Compute unconditional log-probs for each choice using a content-free prompt.
 
-    Used for contextual calibration: subtract these from conditional scores
-    to remove the model's inherent token bias.
+    If few-shot prefix is provided, it's prepended so the prior is estimated in
+    the same context as the actual prompts.
     """
-    return score_choices(model, tokenizer, NULL_PROMPT, choices, priors=None)
+    return score_choices(model, tokenizer, prefix + NULL_PROMPT, choices, priors=None)
 
 
 def gold_label(example: dict) -> str:
@@ -196,12 +235,16 @@ def scenario_text(example: dict) -> str:
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 calibrate: bool = False):
+                 calibrate: bool = False, few_shot: int = 0):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
 
-    priors = compute_priors(model, tokenizer, CHOICES) if calibrate else None
+    prefix, excluded = build_fewshot_prefix(ds, few_shot) if few_shot > 0 else ("", set())
+    if few_shot > 0:
+        print(f"Few-shot: {few_shot} examples, {len(excluded)} excluded from eval")
+
+    priors = compute_priors(model, tokenizer, CHOICES, prefix=prefix) if calibrate else None
     if calibrate:
         print(f"Calibration priors — yes: {priors[0]:.3f}  no: {priors[1]:.3f}  neutral: {priors[2]:.3f}")
 
@@ -209,8 +252,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     total = defaultdict(int)
     predictions = []
 
-    for ex in tqdm(ds, desc=f"normad/{condition_name}"):
-        prompt = PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex))
+    for i, ex in enumerate(tqdm(ds, desc=f"normad/{condition_name}")):
+        if i in excluded:
+            continue
+        prompt = prefix + PROMPT_TEMPLATE.format(country=country(ex), scenario=scenario_text(ex))
         scores = score_choices(model, tokenizer, prompt, CHOICES, priors=priors)
         pred = CHOICES[max(range(len(CHOICES)), key=scores.__getitem__)]
         gold = gold_label(ex)
@@ -285,13 +330,20 @@ def main():
              "log-probs from a content-free prompt before argmax. Output filename "
              "gains a _calibrated suffix.",
     )
+    parser.add_argument(
+        "--few-shot", type=int, default=0, metavar="N",
+        help="Prepend N balanced few-shot examples to each prompt. Examples are "
+             "sampled from the dataset (seed=42) and excluded from eval. Output "
+             "filename gains a _fsN suffix. 0 = standard 0-shot (default).",
+    )
     args = parser.parse_args()
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
+    fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -300,6 +352,7 @@ def main():
         model_size=args.model_size,
         precision=args.precision,
         calibrate=args.calibrate,
+        few_shot=args.few_shot,
     )
 
 
