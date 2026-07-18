@@ -28,3 +28,5 @@ echo "[eval_8b_mc] condition=$COND"
 
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --mc-format
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --mc-format --calibrate
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --few-shot 3 --mc-format
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --few-shot 3 --mc-format --calibrate
