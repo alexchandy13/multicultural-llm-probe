@@ -4,7 +4,7 @@
 #SBATCH --account=clip
 #SBATCH --qos=high
 #SBATCH --gres=gpu:rtxa6000:1
-#SBATCH --time=24:00:00
+#SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/sft_qwen35.%j.out

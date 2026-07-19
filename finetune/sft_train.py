@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 import torch
@@ -17,6 +18,7 @@ import yaml
 from datasets import load_dataset, load_from_disk
 from peft import LoraConfig, prepare_model_for_kbit_training
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from transformers.trainer_utils import get_last_checkpoint
 from trl import SFTTrainer, SFTConfig
 
 from finetune._common import build_bnb_config
@@ -166,7 +168,10 @@ def main():
         processing_class=tokenizer,  # TRL/transformers renamed `tokenizer`
         peft_config=lora_cfg,
     )
-    trainer.train()
+    last_checkpoint = get_last_checkpoint(cfg["output_dir"]) if os.path.isdir(cfg["output_dir"]) else None
+    if last_checkpoint:
+        print(f"[sft_train] Resuming from {last_checkpoint}")
+    trainer.train(resume_from_checkpoint=last_checkpoint)
     trainer.save_model(cfg["output_dir"])
 
 

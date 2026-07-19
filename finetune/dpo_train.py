@@ -10,6 +10,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 from collections import deque
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import torch
 import yaml
 from peft import LoraConfig, prepare_model_for_kbit_training
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
+from transformers.trainer_utils import get_last_checkpoint
 from trl import DPOConfig, DPOTrainer
 
 from finetune._common import build_bnb_config, load_dpo_dataset
@@ -129,7 +131,10 @@ def main():
         peft_config=lora_cfg,
         callbacks=callbacks,
     )
-    trainer.train()
+    last_checkpoint = get_last_checkpoint(cfg["output_dir"]) if os.path.isdir(cfg["output_dir"]) else None
+    if last_checkpoint:
+        print(f"[dpo_train] Resuming from {last_checkpoint}")
+    trainer.train(resume_from_checkpoint=last_checkpoint)
     trainer.save_model(cfg["output_dir"])
 
 
