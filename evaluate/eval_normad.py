@@ -26,6 +26,21 @@ from evaluate._common import (
 )
 
 
+# Countries held out entirely from evaluation and used as the few-shot pool.
+# One per IW cluster (most niche by example count), excluding EnglishSpeaking
+# and Confucian clusters so the prefix draws only from non-Western-adjacent
+# cultural contexts.
+#   AfricanIslamic  → Syria           (n=12)
+#   SouthAsia       → Indonesia       (n=18)
+#   LatinAmerica    → Colombia        (n=21)
+#   CatholicEurope  → Austria         (n=23)
+#   Orthodox        → north_macedonia (n=23)
+#   ProtestantEurope→ Sweden          (n=24)
+HOLDOUT_COUNTRIES = {
+    "Syria", "Indonesia", "Colombia",
+    "Austria", "north_macedonia", "Sweden",
+}
+
 CHOICES = ["yes", "no", "neutral"]
 
 PROMPT_TEMPLATE = (
@@ -163,38 +178,46 @@ def load_normad(path: Path):
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False) -> tuple[str, set[int]]:
-    """Sample n_shots examples balanced across labels and build a prefix string.
+    """Build a 1-yes + 1-no few-shot prefix from held-out countries.
 
-    Returns (prefix_string, excluded_indices) — excluded indices are skipped during eval
-    so few-shot examples are never evaluated on. The 0-shot eval files are untouched;
-    few-shot results write to a separate _fsN suffixed file.
+    Examples are drawn exclusively from HOLDOUT_COUNTRIES — one country per IW
+    cluster that is excluded entirely from evaluation. This prevents country-level
+    leakage: no held-out country appears in the eval set, and no eval country
+    appears in the few-shot context.
 
-    With yn_only=True, only yes/no examples are sampled.
+    Returns (prefix_string, excluded_indices). excluded_indices contains ALL
+    examples from holdout countries (not just the 2 sampled shots), so they
+    are never evaluated on.
     """
     import random
     rng = random.Random(seed)
 
-    labels = ("yes", "no") if yn_only else ("yes", "no", "neutral")
-    by_label: dict[str, list[int]] = {l: [] for l in labels}
+    yes_pool: list[int] = []
+    no_pool: list[int] = []
+    excluded: set[int] = set()
+
     for i, ex in enumerate(ds):
         try:
+            c = country(ex)
+            if c not in HOLDOUT_COUNTRIES:
+                continue
+            excluded.add(i)
             lbl = gold_label(ex)
-            if lbl in by_label:
-                by_label[lbl].append(i)
+            if lbl == "yes":
+                yes_pool.append(i)
+            elif lbl == "no":
+                no_pool.append(i)
         except KeyError:
             pass
 
-    n_classes = len(labels)
-    per_class = max(1, n_shots // n_classes)
-    remainder = n_shots - per_class * n_classes
-    picks: list[tuple[int, str]] = []
-    for lbl in labels:
-        extra = 1 if remainder > 0 else 0
-        remainder -= extra
-        chosen = rng.sample(by_label[lbl], min(per_class + extra, len(by_label[lbl])))
-        picks.extend((i, lbl) for i in chosen)
+    if not yes_pool or not no_pool:
+        raise RuntimeError(
+            f"Holdout pool missing yes or no examples. yes={len(yes_pool)} no={len(no_pool)}. "
+            f"Check that HOLDOUT_COUNTRIES appear in the dataset."
+        )
+
+    picks = [rng.choice(yes_pool), rng.choice(no_pool)]
     rng.shuffle(picks)
-    picks = picks[:n_shots]
 
     if yn_only:
         template = YN_PROMPT_TEMPLATE
@@ -204,13 +227,11 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
         template = PROMPT_TEMPLATE
 
     parts = []
-    excluded: set[int] = set()
-    for idx, _ in picks:
+    for idx in picks:
         ex = ds[idx]
         lbl = gold_label(ex)
         answer = MC_LABEL_MAP[lbl] if mc_format else lbl
         parts.append(template.format(country=country(ex), scenario=scenario_text(ex)) + f" {answer}\n\n")
-        excluded.add(idx)
 
     return "".join(parts), excluded
 
@@ -354,9 +375,16 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         choices = CHOICES
         template = PROMPT_TEMPLATE
 
-    prefix, excluded = build_fewshot_prefix(ds, few_shot, mc_format=mc_format, yn_only=yn_only) if few_shot > 0 else ("", set())
+    # Always exclude holdout countries so 0-shot and few-shot eval on identical examples.
+    holdout_excluded = {i for i, ex in enumerate(ds) if country(ex) in HOLDOUT_COUNTRIES}
+    print(f"Holdout countries excluded from eval: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
+
     if few_shot > 0:
-        print(f"Few-shot: {few_shot} examples, {len(excluded)} excluded from eval")
+        prefix, excluded = build_fewshot_prefix(ds, few_shot, mc_format=mc_format, yn_only=yn_only)
+        excluded |= holdout_excluded
+        print(f"Few-shot: 1 yes + 1 no from holdout pool, {len(excluded)} total excluded from eval")
+    else:
+        prefix, excluded = "", holdout_excluded
 
     priors = compute_priors(model, tokenizer, choices, prefix=prefix, mc_format=mc_format, yn_only=yn_only) if calibrate else None
     if calibrate:
