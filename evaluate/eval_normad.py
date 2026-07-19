@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -33,6 +34,26 @@ PROMPT_TEMPLATE = (
     "Scenario: {scenario}\n"
     "Question: Is this action socially acceptable in this culture?\n"
     "Answer with exactly one of: yes, no, neutral.\n"
+    "Answer:"
+)
+
+YN_CHOICES = ["yes", "no"]
+
+YN_PROMPT_TEMPLATE = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: {country}\n"
+    "Scenario: {scenario}\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "Answer with exactly one of: yes, no.\n"
+    "Answer:"
+)
+
+YN_NULL_PROMPT = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: N/A\n"
+    "Scenario: N/A\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "Answer with exactly one of: yes, no.\n"
     "Answer:"
 )
 
@@ -140,27 +161,34 @@ def load_normad(path: Path):
 
 
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
-                         mc_format: bool = False) -> tuple[str, set[int]]:
-    """Sample n_shots examples balanced across yes/no/neutral and build a prefix string.
+                         mc_format: bool = False,
+                         yn_only: bool = False) -> tuple[str, set[int]]:
+    """Sample n_shots examples balanced across labels and build a prefix string.
 
     Returns (prefix_string, excluded_indices) — excluded indices are skipped during eval
     so few-shot examples are never evaluated on. The 0-shot eval files are untouched;
     few-shot results write to a separate _fsN suffixed file.
+
+    With yn_only=True, only yes/no examples are sampled.
     """
     import random
     rng = random.Random(seed)
 
-    by_label: dict[str, list[int]] = {"yes": [], "no": [], "neutral": []}
+    labels = ("yes", "no") if yn_only else ("yes", "no", "neutral")
+    by_label: dict[str, list[int]] = {l: [] for l in labels}
     for i, ex in enumerate(ds):
         try:
-            by_label[gold_label(ex)].append(i)
+            lbl = gold_label(ex)
+            if lbl in by_label:
+                by_label[lbl].append(i)
         except KeyError:
             pass
 
-    per_class = max(1, n_shots // 3)
-    remainder = n_shots - per_class * 3
+    n_classes = len(labels)
+    per_class = max(1, n_shots // n_classes)
+    remainder = n_shots - per_class * n_classes
     picks: list[tuple[int, str]] = []
-    for lbl in ("yes", "no", "neutral"):
+    for lbl in labels:
         extra = 1 if remainder > 0 else 0
         remainder -= extra
         chosen = rng.sample(by_label[lbl], min(per_class + extra, len(by_label[lbl])))
@@ -168,7 +196,13 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
     rng.shuffle(picks)
     picks = picks[:n_shots]
 
-    template = MC_PROMPT_TEMPLATE if mc_format else PROMPT_TEMPLATE
+    if yn_only:
+        template = YN_PROMPT_TEMPLATE
+    elif mc_format:
+        template = MC_PROMPT_TEMPLATE
+    else:
+        template = PROMPT_TEMPLATE
+
     parts = []
     excluded: set[int] = set()
     for idx, _ in picks:
@@ -222,14 +256,52 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 @torch.no_grad()
 def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
-                   mc_format: bool = False) -> list[float]:
+                   mc_format: bool = False, yn_only: bool = False) -> list[float]:
     """Compute unconditional log-probs for each choice using a content-free prompt.
 
     If few-shot prefix is provided, it's prepended so the prior is estimated in
     the same context as the actual prompts.
     """
-    null = MC_NULL_PROMPT if mc_format else NULL_PROMPT
+    if yn_only:
+        null = YN_NULL_PROMPT
+    elif mc_format:
+        null = MC_NULL_PROMPT
+    else:
+        null = NULL_PROMPT
     return score_choices(model, tokenizer, prefix + null, choices, priors=None)
+
+
+def parse_label(text: str) -> str:
+    """Parse yes/no/neutral from a generated response.
+
+    Checks neutral/neither before no to avoid 'no' matching inside those words.
+    Returns 'unparseable' when none of the expected labels are found — these are
+    counted as wrong rather than silently assigned to any class.
+    """
+    t = text.strip().lower()
+    if re.search(r'\b(neutral|neither)\b', t):
+        return "neutral"
+    if re.search(r'\byes\b', t):
+        return "yes"
+    if re.search(r'\bno\b', t):
+        return "no"
+    return "unparseable"
+
+
+@torch.no_grad()
+def generate_answer(model, tokenizer, prompt: str) -> str:
+    """Greedy-decode up to 10 new tokens and parse the label from the output."""
+    device = next(model.parameters()).device
+    enc = tokenizer(prompt, return_tensors="pt").to(device)
+    out = model.generate(
+        **enc,
+        max_new_tokens=10,
+        do_sample=False,
+        pad_token_id=tokenizer.eos_token_id,
+    )
+    new_tokens = out[0][enc["input_ids"].shape[1]:]
+    text = tokenizer.decode(new_tokens, skip_special_tokens=True)
+    return parse_label(text)
 
 
 def gold_label(example: dict) -> str:
@@ -266,34 +338,50 @@ def scenario_text(example: dict) -> str:
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 calibrate: bool = False, few_shot: int = 0, mc_format: bool = False):
+                 calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
+                 generate: bool = False, yn_only: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
 
-    choices = MC_CHOICES if mc_format else CHOICES
-    template = MC_PROMPT_TEMPLATE if mc_format else PROMPT_TEMPLATE
+    if yn_only:
+        choices = YN_CHOICES
+        template = YN_PROMPT_TEMPLATE
+    elif mc_format:
+        choices = MC_CHOICES
+        template = MC_PROMPT_TEMPLATE
+    else:
+        choices = CHOICES
+        template = PROMPT_TEMPLATE
 
-    prefix, excluded = build_fewshot_prefix(ds, few_shot, mc_format=mc_format) if few_shot > 0 else ("", set())
+    prefix, excluded = build_fewshot_prefix(ds, few_shot, mc_format=mc_format, yn_only=yn_only) if few_shot > 0 else ("", set())
     if few_shot > 0:
         print(f"Few-shot: {few_shot} examples, {len(excluded)} excluded from eval")
 
-    priors = compute_priors(model, tokenizer, choices, prefix=prefix, mc_format=mc_format) if calibrate else None
+    priors = compute_priors(model, tokenizer, choices, prefix=prefix, mc_format=mc_format, yn_only=yn_only) if calibrate else None
     if calibrate:
         labels = ["A", "B", "C"] if mc_format else ["yes", "no", "neutral"]
         print("Calibration priors — " + "  ".join(f"{l}: {p:.3f}" for l, p in zip(labels, priors)))
 
     correct = defaultdict(int)
     total = defaultdict(int)
+    n_unparseable = 0
     predictions = []
 
     for i, ex in enumerate(tqdm(ds, desc=f"normad/{condition_name}")):
         if i in excluded:
             continue
+        if yn_only and gold_label(ex) == "neutral":
+            continue
         prompt = prefix + template.format(country=country(ex), scenario=scenario_text(ex))
-        scores = score_choices(model, tokenizer, prompt, choices, priors=priors)
-        pred_token = choices[max(range(len(choices)), key=scores.__getitem__)]
-        pred = MC_CHOICE_MAP[pred_token] if mc_format else pred_token
+        if generate:
+            pred = generate_answer(model, tokenizer, prompt)
+            if pred == "unparseable":
+                n_unparseable += 1
+        else:
+            scores = score_choices(model, tokenizer, prompt, choices, priors=priors)
+            pred_token = choices[max(range(len(choices)), key=scores.__getitem__)]
+            pred = MC_CHOICE_MAP[pred_token] if mc_format else pred_token
         gold = gold_label(ex)
         c = country(ex)
         group = culture_group(c)
@@ -309,10 +397,15 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     def acc(key):
         return correct[key] / total[key] if total[key] else None
 
+    if generate and n_unparseable > 0:
+        print(f"Unparseable responses: {n_unparseable} / {total[('all', 'all')]} "
+              f"({100*n_unparseable/total[('all','all')]:.1f}%) — counted as wrong")
+
     result = {
         "condition": condition_name,
         "benchmark": "NormAd",
         "n": total[("all", "all")],
+        "n_unparseable": n_unparseable if generate else 0,
         "accuracy_overall": acc(("all", "all")),
         "accuracy_by_group": {
             "Western": acc(("group", "Western")),
@@ -373,6 +466,20 @@ def main():
              "filename gains a _fsN suffix. 0 = standard 0-shot (default).",
     )
     parser.add_argument(
+        "--yn-only", action="store_true",
+        help="Evaluate on yes/no gold examples only (skip neutral). Uses a binary "
+             "yes/no prompt so the model is not offered neutral as an option. "
+             "Output gains a _yn suffix.",
+    )
+    parser.add_argument(
+        "--generate", action="store_true",
+        help="Use greedy generation + label parsing instead of log-prob scoring. "
+             "The model generates up to 10 tokens; 'yes'/'no'/'neutral'/'neither' "
+             "are matched with word-boundary regex. Unparseable outputs are counted "
+             "as wrong (not silently assigned to any class). Output gains a _gen suffix. "
+             "Compatible with --few-shot; mutually exclusive with --calibrate and --mc-format.",
+    )
+    parser.add_argument(
         "--mc-format", action="store_true",
         help="Score letter tokens (A/B/C) instead of words (yes/no/neutral). "
              "Avoids surface-form competition (Holtzman et al. 2021, arXiv 2104.08315) "
@@ -381,13 +488,20 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.generate and (args.calibrate or args.mc_format):
+        import sys; sys.exit("--generate is incompatible with --calibrate and --mc-format")
+    if args.yn_only and args.mc_format:
+        import sys; sys.exit("--yn-only is incompatible with --mc-format")
+
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    yn_sfx = "_yn" if args.yn_only else ""
+    gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{mc_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{yn_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -398,6 +512,8 @@ def main():
         calibrate=args.calibrate,
         few_shot=args.few_shot,
         mc_format=args.mc_format,
+        generate=args.generate,
+        yn_only=args.yn_only,
     )
 
 

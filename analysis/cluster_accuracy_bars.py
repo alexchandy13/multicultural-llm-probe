@@ -122,6 +122,10 @@ def main():
                         help="Read *_fsN.json files and suffix output with _fsN.")
     parser.add_argument("--mc-format", action="store_true",
                         help="Read *_mc.json files (letter-scored) and suffix output with _mc.")
+    parser.add_argument("--generate", action="store_true",
+                        help="Read *_gen.json files (generation-based) and suffix output with _gen.")
+    parser.add_argument("--yn-only", action="store_true",
+                        help="Read *_yn.json files (yes/no only) and suffix output with _yn.")
     parser.add_argument("--no-errorbars", action="store_true",
                         help="Hide SEM error bars on top of each bar.")
     args = parser.parse_args()
@@ -132,10 +136,12 @@ def main():
         sys.exit("No conditions left after --exclude")
 
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    yn_sfx = "_yn" if args.yn_only else ""
+    gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_suffix = "_calibrated" if args.calibrated else ""
-    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + fs_sfx + mc_sfx + cal_suffix
-    fig_size_suffix = f"_{args.model_size}" + fs_sfx + mc_sfx + cal_suffix
+    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + fs_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix
+    fig_size_suffix = f"_{args.model_size}" + fs_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix
     suffix = "" if (args.setup == "all" and not args.exclude) else f"_{args.setup}"
     if args.exclude:
         suffix += "_no_" + "_".join(sorted(args.exclude))
