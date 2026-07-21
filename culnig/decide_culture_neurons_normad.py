@@ -47,6 +47,10 @@ def main():
              "{_size_suffix}/ and writes selected neurons there. Must match the "
              "size used during calc_neuron_score_normad.py.",
     )
+    parser.add_argument("--yn-only", action="store_true",
+                        help="Read normad_yn_max_scores.json instead of normad_max_scores.json. "
+                             "Control file remains normadcontrol_max_scores.json. "
+                             "Output gains a _yn suffix.")
     args = parser.parse_args()
 
     logger = setup_logging()
@@ -61,7 +65,8 @@ def main():
     dataset_ids = defaultdict(list)
 
     for dataset_name in dataset_names:
-        score_path = cond_dir / f"{dataset_name}_max_scores.json"
+        score_name = f"{dataset_name}_yn" if (args.yn_only and dataset_name == "normad") else dataset_name
+        score_path = cond_dir / f"{score_name}_max_scores.json"
         ctrl_path = cond_dir / f"{dataset_name}control_max_scores.json"
         if not score_path.exists():
             raise FileNotFoundError(score_path)
@@ -72,7 +77,7 @@ def main():
 
         for dname, ids in scores_dict["dataset_ids"].items():
             dataset_ids[dname].extend(ids)
-        n_samples = len(scores_dict["dataset_ids"][dataset_name])
+        n_samples = len(scores_dict["dataset_ids"][score_name])
         n_ctrl = len(control_dict["dataset_ids"][f"{dataset_name}control"])
 
         for key, score in scores_dict["neuron_scores"].items():
@@ -140,7 +145,8 @@ def main():
 
     logger.info(f"Refined culture neurons: {len(refined)} | per module: {dict(module_count)}")
 
-    out_path = cond_dir / f"all_neurons_{''.join(dataset_names)}_max.json"
+    out_suffix = "".join(dataset_names) + ("_yn" if args.yn_only else "")
+    out_path = cond_dir / f"all_neurons_{out_suffix}_max.json"
     out_path.write_text(json.dumps({
         "condition": args.condition,
         "dataset_ids": dict(dataset_ids),
