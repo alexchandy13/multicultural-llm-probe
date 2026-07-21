@@ -20,6 +20,9 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
+export TRANSFORMERS_OFFLINE=1
+export HF_DATASETS_OFFLINE=1
+
 python finetune/sftdpo_train.py \
     --config finetune/configs/sftdpo_qwen35_config.yaml \
     --sft-adapter-path checkpoints/sft_qwen35 \
