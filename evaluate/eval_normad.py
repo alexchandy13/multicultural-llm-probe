@@ -360,7 +360,7 @@ def scenario_text(example: dict) -> str:
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
-                 generate: bool = False, yn_only: bool = False):
+                 generate: bool = False, yn_only: bool = False, us_probe: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -401,7 +401,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             continue
         if yn_only and gold_label(ex) == "neutral":
             continue
-        prompt = prefix + template.format(country=country(ex), scenario=scenario_text(ex))
+        c = country(ex)
+        prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
         if generate:
             pred = generate_answer(model, tokenizer, prompt)
             if pred == "unparseable":
@@ -411,7 +412,6 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             pred_token = choices[max(range(len(choices)), key=scores.__getitem__)]
             pred = MC_CHOICE_MAP[pred_token] if mc_format else pred_token
         gold = gold_label(ex)
-        c = country(ex)
         group = culture_group(c)
         total[("all", "all")] += 1
         total[("country", c)] += 1
@@ -420,7 +420,18 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             correct[("all", "all")] += 1
             correct[("country", c)] += 1
             correct[("group", group)] += 1
-        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred})
+
+        us_pred = None
+        if us_probe and c != "US":
+            us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
+            if generate:
+                us_pred = generate_answer(model, tokenizer, us_prompt)
+            else:
+                us_scores = score_choices(model, tokenizer, us_prompt, choices, priors=priors)
+                us_pred_token = choices[max(range(len(us_scores)), key=us_scores.__getitem__)]
+                us_pred = MC_CHOICE_MAP[us_pred_token] if mc_format else us_pred_token
+
+        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred, "us_pred": us_pred})
 
     def acc(key):
         return correct[key] / total[key] if total[key] else None
@@ -500,6 +511,12 @@ def main():
              "Output gains a _yn suffix.",
     )
     parser.add_argument(
+        "--us-probe", action="store_true",
+        help="For each non-US example, also score the same prompt with the country "
+             "token replaced by 'United States'. Records us_pred alongside pred in "
+             "each prediction entry. Roughly doubles eval time. Output gains a _usprobe suffix.",
+    )
+    parser.add_argument(
         "--generate", action="store_true",
         help="Use greedy generation + label parsing instead of log-prob scoring. "
              "The model generates up to 10 tokens; 'yes'/'no'/'neutral'/'neither' "
@@ -524,12 +541,13 @@ def main():
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     yn_sfx = "_yn" if args.yn_only else ""
+    usprobe_sfx = "_usprobe" if args.us_probe else ""
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{yn_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{yn_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -542,6 +560,7 @@ def main():
         mc_format=args.mc_format,
         generate=args.generate,
         yn_only=args.yn_only,
+        us_probe=args.us_probe,
     )
 
 
