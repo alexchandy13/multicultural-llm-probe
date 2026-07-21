@@ -377,6 +377,10 @@ def parse_args():
                         choices=["base", "dpo", "sft", "sftdpo"])
     parser.add_argument("--dataset-names", nargs="+", required=True,
                         help="e.g. `normad` or `normadcontrol` (single name per run).")
+    parser.add_argument("--yn-only", action="store_true",
+                        help="Replace 'normad' with 'normad_yn': filters neutral-gold "
+                             "examples and holdout countries, uses a binary yes/no prompt. "
+                             "Existing normadcontrol runs are unaffected.")
     parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))
     parser.add_argument(
         "--model-size", default="3b", choices=["3b", "8b", "gemma4", "qwen35"],
@@ -397,8 +401,12 @@ def main():
     set_seed(42)
     args = parse_args()
     logger = setup_logging()
+    dataset_names = args.dataset_names
+    if args.yn_only:
+        dataset_names = ["normad_yn" if d == "normad" else d for d in dataset_names]
+        logger.info("--yn-only: replaced 'normad' with 'normad_yn' in dataset_names")
     run(
-        args.condition, args.dataset_names, Path(args.out_root), logger,
+        args.condition, dataset_names, Path(args.out_root), logger,
         model_size=args.model_size, precision=args.precision,
     )
 
