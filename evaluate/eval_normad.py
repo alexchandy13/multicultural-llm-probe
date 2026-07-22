@@ -276,7 +276,7 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                 yes_tok, no_tok, option_str = yn_numbered_options(idx)
                 answer = yes_tok if lbl == "yes" else no_tok
                 parts.append(tmpl.format(country=country(ex), scenario=scenario_text(ex),
-                                         options=option_str) + f" {answer}\n\n")
+                                         options=option_str) + f"{answer}\n\n")
             prefixes.append("".join(parts))
         return prefixes, excluded
 
