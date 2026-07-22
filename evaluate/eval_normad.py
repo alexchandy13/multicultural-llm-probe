@@ -309,13 +309,20 @@ NULL_PROMPT = (
 
 @torch.no_grad()
 def score_choices(model, tokenizer, prompt: str, choices: list[str],
-                  priors: list[float] | None = None) -> list[float]:
+                  priors: list[float] | None = None,
+                  leading_space: bool = True) -> list[float]:
     """Return log-prob of the first token of each choice given prompt.
 
     If `priors` is provided (list of log-probs from a content-free prompt),
     subtract them from each score before returning — this is contextual
     calibration (Zhao et al. 2021) and removes the model's unconditional
     token bias toward e.g. 'yes' or 'neutral'.
+
+    `leading_space=True` (default): encodes " " + choice, matching prompts
+    that end with "Answer:" where the next token is space-prefixed.
+    `leading_space=False`: encodes choice bare, for prompts that end with
+    a newline (e.g. the numbered multi-prompt format) where the model
+    predicts "1" or "2" without a preceding space.
     """
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
@@ -324,8 +331,8 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
     scores = []
     for choice in choices:
-        # Leading space matches typical Llama tokenization after a newline+"Answer:".
-        ids = tokenizer.encode(" " + choice, add_special_tokens=False)
+        token_str = (" " + choice) if leading_space else choice
+        ids = tokenizer.encode(token_str, add_special_tokens=False)
         if not ids:
             scores.append(float("-inf"))
         else:
@@ -475,7 +482,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             accumulated = [0.0, 0.0]  # ["1", "2"]
             for tmpl, pfx in zip(YN_NUMBERED_PROMPTS, prefix):
                 p = pfx + tmpl.format(country=c, scenario=scenario_text(ex), options=option_str)
-                s = score_choices(model, tokenizer, p, choices)
+                s = score_choices(model, tokenizer, p, choices, leading_space=False)
                 accumulated[0] += s[0]
                 accumulated[1] += s[1]
             yes_score = accumulated[choices.index(yes_tok)]
@@ -507,7 +514,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_accumulated = [0.0, 0.0]
                 for tmpl, pfx in zip(YN_NUMBERED_PROMPTS, prefix):
                     up = pfx + tmpl.format(country="United States", scenario=scenario_text(ex), options=option_str)
-                    us_s = score_choices(model, tokenizer, up, choices)
+                    us_s = score_choices(model, tokenizer, up, choices, leading_space=False)
                     us_accumulated[0] += us_s[0]
                     us_accumulated[1] += us_s[1]
                 us_yes_score = us_accumulated[choices.index(yes_tok)]
