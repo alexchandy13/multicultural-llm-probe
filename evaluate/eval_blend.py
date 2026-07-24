@@ -34,17 +34,35 @@ from evaluate._common import (
 CHOICES = ["A", "B", "C", "D"]
 SCORING_SUFFIX = '{"answer_choice":"'
 
-# BLEnD dataset country field values (canonical names used throughout this script).
-# The dataset uses underscore-joined forms: US, UK, South_Korea, Northern_Nigeria, etc.
-BLEND_COUNTRIES = {
-    "US", "UK", "South_Korea", "Algeria", "Indonesia", "Spain", "Iran",
-    "Mexico", "Assam", "Greece", "Ethiopia", "Northern_Nigeria",
-    "North_Korea", "West_Java", "China", "Azerbaijan",
-}
-
 # Countries held out entirely from evaluation; used as the few-shot pool.
 # Chosen to be diverse and non-Western.
 HOLDOUT_COUNTRIES = {"Algeria", "North_Korea"}
+
+# Inline instruction that mirrors the BLEnD prompt format exactly:
+# "[question]? Without any explanation...\n\nA. opt\n...\n\nAnswer:"
+_BLEND_INST = (
+    ' Without any explanation, choose only one from the given alphabet choices'
+    '(e.g., A, B, C). Provide as JSON format: {"answer_choice":""}'
+)
+
+# Culturally-agnostic few-shot shots for --neutral-fewshot mode.
+# 4 examples covering each answer letter exactly once; none require cultural
+# knowledge, so the prefix teaches only the MCQ format and JSON output style.
+# Format mirrors the BLEnD prompt field exactly (instruction embedded after '?').
+NEUTRAL_SHOTS_BLEND = [
+    # gold=A
+    ("Which planet is farthest from the Sun in our solar system?" + _BLEND_INST +
+     "\n\nA. Neptune\nB. Jupiter\nC. Saturn\nD. Uranus\n\nAnswer:", "A"),
+    # gold=B
+    ("What is the chemical symbol for water?" + _BLEND_INST +
+     "\n\nA. O2\nB. H2O\nC. CO2\nD. NaCl\n\nAnswer:", "B"),
+    # gold=C
+    ("How many sides does a hexagon have?" + _BLEND_INST +
+     "\n\nA. Five\nB. Seven\nC. Six\nD. Eight\n\nAnswer:", "C"),
+    # gold=D
+    ("What is the largest ocean on Earth?" + _BLEND_INST +
+     "\n\nA. Atlantic\nB. Indian\nC. Arctic\nD. Pacific\n\nAnswer:", "D"),
+]
 
 # 4 instruction prefixes for multi-prompt mode.
 # BLEnD prompts are pre-formatted by the dataset (instruction already embedded);
@@ -105,6 +123,24 @@ def us_probe_prompt(prompt: str, country: str) -> str:
     return replaced
 
 
+def build_neutral_fewshot_prefix(multi_prompt: bool = False) -> str | list[str]:
+    """Build a few-shot prefix from NEUTRAL_SHOTS_BLEND.
+
+    Uses 4 culturally-agnostic MCQ examples (one per answer letter A/B/C/D)
+    so the prefix teaches only task format, not cultural knowledge.
+    No holdout exclusion needed — all 16 countries remain in evaluation.
+    """
+    if multi_prompt:
+        prefixes = []
+        for pfx in BLEND_MP_PREFIXES:
+            parts = [pfx + q + SCORING_SUFFIX + lbl + '"\n\n'
+                     for q, lbl in NEUTRAL_SHOTS_BLEND]
+            prefixes.append("".join(parts))
+        return prefixes
+
+    return "".join(q + SCORING_SUFFIX + lbl + '"\n\n' for q, lbl in NEUTRAL_SHOTS_BLEND)
+
+
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          multi_prompt: bool = False) -> tuple[str | list[str], set]:
     """Build few-shot prefix from holdout countries.
@@ -128,16 +164,25 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
             f"match dataset country field values."
         )
 
+    all_pool = [ex for exs in by_country.values() for ex in exs]
+    rng.shuffle(all_pool)
+
+    # Pick shots with distinct gold labels so the model isn't taught to repeat
+    # a single letter (analogous to NormAd's forced 1-yes + 1-no balance).
     picks: list[dict] = []
-    countries = list(by_country.keys())
-    rng.shuffle(countries)
-    for c in countries:
+    used_labels: set[str] = set()
+    for ex in all_pool:
+        if ex["answer_idx"] not in used_labels:
+            picks.append(ex)
+            used_labels.add(ex["answer_idx"])
+            if len(picks) >= n_shots:
+                break
+    # Fallback: fill remaining slots without label constraint
+    for ex in all_pool:
         if len(picks) >= n_shots:
             break
-        picks.append(rng.choice(by_country[c]))
-    all_pool = [ex for exs in by_country.values() for ex in exs]
-    while len(picks) < n_shots:
-        picks.append(rng.choice(all_pool))
+        if ex not in picks:
+            picks.append(ex)
 
     if multi_prompt:
         prefixes = []
@@ -156,7 +201,8 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False):
+                 few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False,
+                 neutral_fewshot: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
@@ -164,7 +210,11 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     holdout_excluded = {ex["MCQID"] for ex in ds if ex["country"] in HOLDOUT_COUNTRIES}
     print(f"Holdout excluded: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
-    if few_shot > 0:
+    if neutral_fewshot:
+        prefix = build_neutral_fewshot_prefix(multi_prompt=multi_prompt)
+        excluded_mcqids: set = set()  # no dataset examples used; evaluate all 16 countries
+        print("Neutral few-shot: 4 culturally-agnostic examples (A/B/C/D each once), full eval set")
+    elif few_shot > 0:
         prefix, excluded_mcqids = build_fewshot_prefix(ds, few_shot, multi_prompt=multi_prompt)
         excluded_mcqids |= holdout_excluded
         print(f"Few-shot: {few_shot} examples from holdout pool, {len(excluded_mcqids)} total excluded")
@@ -285,16 +335,27 @@ def main():
         help="For each non-US example, also score with country name replaced by 'US'. "
              "Records us_pred in each prediction entry. Output gains a _usprobe suffix.",
     )
+    parser.add_argument(
+        "--neutral-fewshot", action="store_true",
+        help="Prepend 4 culturally-agnostic MCQ examples (one per answer letter A/B/C/D) "
+             "to teach task format without injecting cultural knowledge. No holdout "
+             "exclusion — all 16 countries are evaluated. Mutually exclusive with "
+             "--few-shot. Output gains a _nfs suffix.",
+    )
     args = parser.parse_args()
+
+    if args.neutral_fewshot and args.few_shot > 0:
+        import sys; sys.exit("--neutral-fewshot and --few-shot are mutually exclusive")
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     mp_sfx = "_mp" if args.multi_prompt else ""
     usprobe_sfx = "_usprobe" if args.us_probe else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"blend_{args.condition}{size_sfx}{fs_sfx}{mp_sfx}{usprobe_sfx}.json"
+        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{mp_sfx}{usprobe_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -305,6 +366,7 @@ def main():
         few_shot=args.few_shot,
         us_probe=args.us_probe,
         multi_prompt=args.multi_prompt,
+        neutral_fewshot=args.neutral_fewshot,
     )
 
 

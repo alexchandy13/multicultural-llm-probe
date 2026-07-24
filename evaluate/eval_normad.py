@@ -55,6 +55,27 @@ PROMPT_TEMPLATE = (
 
 YN_CHOICES = ["yes", "no"]
 
+# Culturally-agnostic few-shot shots for --neutral-fewshot mode.
+# Scenarios are universally clear (yes/no independent of country) so the
+# prefix teaches task format without injecting any cultural knowledge.
+# Country field uses a generic label so no real culture is implied.
+NEUTRAL_SHOTS_NORMAD = [
+    (
+        "a society",
+        "During a busy rush hour commute, Dana noticed an elderly passenger standing "
+        "unsteadily in the crowded train. Dana immediately stood up and offered their seat, "
+        "then helped the passenger sit down safely. Is what Dana did socially acceptable?",
+        "yes",
+    ),
+    (
+        "a society",
+        "While checking out at the grocery store, Lee pushed past several people who had "
+        "been waiting in line and placed their items on the conveyor belt ahead of everyone else "
+        "without acknowledging the queue. Is what Lee did socially acceptable?",
+        "no",
+    ),
+]
+
 # Multi-prompt numbered format: 4 rephrasings, binary 1/2 options.
 # Options are shuffled per example (yes→1 or yes→2) to eliminate position bias.
 YN_NUMBERED_CHOICES = ["1", "2"]
@@ -250,6 +271,48 @@ def load_normad(path: Path):
                 return ds[split]
         raise ValueError(f"no usable split in {list(ds.keys())}")
     return ds
+
+
+def build_neutral_fewshot_prefix(mc_format: bool = False,
+                                 yn_only: bool = False,
+                                 multi_prompt: bool = False,
+                                 multi_prompt_word: bool = False) -> str | list[str]:
+    """Build a few-shot prefix from NEUTRAL_SHOTS_NORMAD.
+
+    Uses culturally-agnostic scenarios so the prefix teaches task format only,
+    without injecting any cultural knowledge. No holdout exclusion needed.
+    """
+    shots = NEUTRAL_SHOTS_NORMAD  # always 1 yes + 1 no
+
+    if multi_prompt:
+        prefixes = []
+        for tmpl in YN_NUMBERED_PROMPTS:
+            parts = []
+            for shot_idx, (c, scen, lbl) in enumerate(shots):
+                yes_tok, no_tok, option_str = yn_numbered_options(1000 + shot_idx)
+                answer = yes_tok if lbl == "yes" else no_tok
+                parts.append(tmpl.format(country=c, scenario=scen, options=option_str)
+                             + f"{answer}\n\n")
+            prefixes.append("".join(parts))
+        return prefixes
+
+    if multi_prompt_word:
+        prefixes = []
+        for tmpl in YN_WORD_PROMPTS:
+            parts = []
+            for c, scen, lbl in shots:
+                parts.append(tmpl.format(country=c, scenario=scen) + f" {lbl}\n\n")
+            prefixes.append("".join(parts))
+        return prefixes
+
+    template = (MC_PROMPT_TEMPLATE if mc_format
+                else YN_PROMPT_TEMPLATE if yn_only
+                else PROMPT_TEMPLATE)
+    parts = []
+    for c, scen, lbl in shots:
+        answer = MC_LABEL_MAP[lbl] if mc_format else lbl
+        parts.append(template.format(country=c, scenario=scen) + f" {answer}\n\n")
+    return "".join(parts)
 
 
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
@@ -473,7 +536,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
-                 multi_prompt: bool = False, multi_prompt_word: bool = False):
+                 multi_prompt: bool = False, multi_prompt_word: bool = False,
+                 neutral_fewshot: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -495,10 +559,18 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         template = PROMPT_TEMPLATE
 
     # Always exclude holdout countries so 0-shot and few-shot eval on identical examples.
+    # neutral_fewshot uses no dataset examples, so holdout countries can be evaluated.
     holdout_excluded = {i for i, ex in enumerate(ds) if country(ex) in HOLDOUT_COUNTRIES}
     print(f"Holdout countries excluded from eval: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
-    if few_shot > 0:
+    if neutral_fewshot:
+        prefix = build_neutral_fewshot_prefix(
+            mc_format=mc_format, yn_only=yn_only,
+            multi_prompt=multi_prompt, multi_prompt_word=multi_prompt_word,
+        )
+        excluded = set()  # no dataset examples used; evaluate all countries
+        print("Neutral few-shot: 2 culturally-agnostic examples (1 yes + 1 no), full eval set")
+    elif few_shot > 0:
         prefix, excluded = build_fewshot_prefix(
             ds, few_shot, mc_format=mc_format, yn_only=yn_only,
             multi_prompt=multi_prompt, multi_prompt_word=multi_prompt_word,
@@ -707,15 +779,25 @@ def main():
              "where 'neutral' is structurally underscored because 'n'-initial tokens "
              "are high-frequency. Output filename gains a _mc suffix.",
     )
+    parser.add_argument(
+        "--neutral-fewshot", action="store_true",
+        help="Prepend 2 culturally-agnostic few-shot examples (1 yes + 1 no) that "
+             "teach task format without injecting cultural knowledge. No holdout "
+             "exclusion — all countries are evaluated. Mutually exclusive with "
+             "--few-shot. Output gains a _nfs suffix.",
+    )
     args = parser.parse_args()
 
     if args.generate and (args.calibrate or args.mc_format):
         import sys; sys.exit("--generate is incompatible with --calibrate and --mc-format")
     if args.yn_only and args.mc_format:
         import sys; sys.exit("--yn-only is incompatible with --mc-format")
+    if args.neutral_fewshot and args.few_shot > 0:
+        import sys; sys.exit("--neutral-fewshot and --few-shot are mutually exclusive")
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
+    nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     yn_sfx = "_yn" if args.yn_only else ""
     mp_sfx = "_mp" if args.multi_prompt else "_mpw" if args.multi_prompt_word else ""
     usprobe_sfx = "_usprobe" if args.us_probe else ""
@@ -724,7 +806,7 @@ def main():
     cal_sfx = "_calibrated" if args.calibrate else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -740,6 +822,7 @@ def main():
         us_probe=args.us_probe,
         multi_prompt=args.multi_prompt,
         multi_prompt_word=args.multi_prompt_word,
+        neutral_fewshot=args.neutral_fewshot,
     )
 
 
