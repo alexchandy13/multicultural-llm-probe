@@ -25,13 +25,10 @@ from finetune._common import build_bnb_config
 
 
 ALPACA_TEMPLATE_WITH_INPUT = (
-    "Below is an instruction that describes a task, paired with an input that provides "
-    "further context. Write a response that appropriately completes the request.\n\n"
-    "### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n{output}"
+    "{instruction}\n\n{input}\n\n{output}"
 )
 ALPACA_TEMPLATE_NO_INPUT = (
-    "Below is an instruction that describes a task. Write a response that appropriately "
-    "completes the request.\n\n### Instruction:\n{instruction}\n\n### Response:\n{output}"
+    "{instruction}\n\n{output}"
 )
 
 

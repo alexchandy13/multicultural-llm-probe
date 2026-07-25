@@ -41,15 +41,15 @@ QNLI_PROMPT = (
     "Does the following context answer the question?\n"
     "Question: {question}\n"
     "Context: {sentence}\n"
-    "Respond with 0 if yes (entailment), 1 if no (not entailment).\n"
+    "Answer yes if the context answers the question, no if it does not.\n"
     "Answer:"
 )
 
 MRPC_PROMPT = (
-    "Are the following two sentences paraphrases?\n"
+    "Are the following two sentences paraphrases of each other?\n"
     "Sentence 1: {sentence1}\n"
     "Sentence 2: {sentence2}\n"
-    "Respond with 1 if yes (paraphrase), 0 if no (not paraphrase).\n"
+    "Answer yes if they are paraphrases, no if they are not.\n"
     "Answer:"
 )
 
@@ -96,25 +96,25 @@ CSQA_NEUTRAL_SHOTS = [
 ]
 
 QNLI_NEUTRAL_SHOTS = [
-    # gold=0 (entailment — context answers the question)
+    # gold=yes (entailment — context answers the question)
     {"question": "What is the capital of France?",
      "sentence": "Paris is the capital and most populous city of France.",
-     "gold": "0"},
-    # gold=1 (not entailment — context does not answer the question)
+     "gold": "yes"},
+    # gold=no (not entailment — context does not answer the question)
     {"question": "What is the population of the Moon?",
      "sentence": "The Moon orbits the Earth at an average distance of 384,400 km.",
-     "gold": "1"},
+     "gold": "no"},
 ]
 
 MRPC_NEUTRAL_SHOTS = [
-    # gold=1 (paraphrase)
+    # gold=yes (paraphrase)
     {"sentence1": "The dog ran quickly through the park.",
      "sentence2": "The canine sprinted rapidly across the park.",
-     "gold": "1"},
-    # gold=0 (not paraphrase)
+     "gold": "yes"},
+    # gold=no (not paraphrase)
     {"sentence1": "She enjoys reading books in the evening.",
      "sentence2": "He prefers watching movies at night.",
-     "gold": "0"},
+     "gold": "no"},
 ]
 
 # ---------------------------------------------------------------------------
@@ -140,14 +140,14 @@ DATASET_CONFIGS = {
         "hf_path": "nyu-mll/glue",
         "hf_name": "qnli",
         "split": "validation",
-        "choices": ["0", "1"],
+        "choices": ["yes", "no"],
         "neutral_shots": QNLI_NEUTRAL_SHOTS,
     },
     "mrpc": {
         "hf_path": "nyu-mll/glue",
         "hf_name": "mrpc",
         "split": "validation",
-        "choices": ["0", "1"],
+        "choices": ["yes", "no"],
         "neutral_shots": MRPC_NEUTRAL_SHOTS,
     },
 }
@@ -192,8 +192,13 @@ def gold_label(dataset: str, ex: dict) -> str:
         return "yes" if ex["answer"] else "no"
     if dataset == "csqa":
         return ex["answerKey"]
-    if dataset in ("qnli", "mrpc"):
-        return str(ex["label"])
+    if dataset == "qnli":
+        # 0 = entailment (context answers question) → yes
+        # 1 = not_entailment → no
+        return "yes" if ex["label"] == 0 else "no"
+    if dataset == "mrpc":
+        # 1 = paraphrase → yes; 0 = not paraphrase → no
+        return "yes" if ex["label"] == 1 else "no"
     raise ValueError(f"unknown dataset: {dataset}")
 
 
@@ -244,7 +249,7 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
 
     for ex in tqdm(ds, desc=f"nlu/{dataset}/{condition_name}"):
         gold = gold_label(dataset, ex)
-        if gold not in choices and gold not in {"0", "1", "yes", "no", "A", "B", "C", "D", "E"}:
+        if gold not in choices:
             continue  # skip examples with missing labels (e.g. GLUE test set)
 
         prompt = prefix + format_prompt(dataset, ex)
