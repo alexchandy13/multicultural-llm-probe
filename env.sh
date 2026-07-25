@@ -31,7 +31,7 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 # The four conditions used everywhere downstream:
 #   base, sft (C2), dpo (C3), sftdpo (C4).
-export CONDITIONS="base sft dpo sftdpo"
+export CONDITIONS="${CONDITIONS:-base sft dpo sftdpo}"
 
 # Cultures from NormAd; split for paper-side analysis.
 export WESTERN_CULTURES="US UK Germany Spain Australia"
