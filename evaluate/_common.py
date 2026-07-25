@@ -160,6 +160,11 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
             final_epoch=dpo_epoch,
             model_size=model_size,
         )
+    # Tulu 3 conditions — full merged models, no adapter needed.
+    if name == "tulu3_sft":
+        return Condition("tulu3_sft", "allenai/Llama-3.1-Tulu-3-8B-SFT", None, model_size=model_size)
+    if name == "tulu3_dpo":
+        return Condition("tulu3_dpo", "allenai/Llama-3.1-Tulu-3-8B-DPO", None, model_size=model_size)
     raise ValueError(f"unknown condition: {name}")
 
 

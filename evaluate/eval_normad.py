@@ -698,7 +698,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
 
 ALL_CONDITIONS = ["base", "dpo", "sft", "sftdpo",
-                  "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku"]
+                  "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku",
+                  "tulu3_sft", "tulu3_dpo"]
 
 
 def main():
