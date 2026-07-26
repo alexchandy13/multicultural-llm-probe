@@ -4,7 +4,7 @@
 #SBATCH --account=clip
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa6000:1
-#SBATCH --time=12:00:00
+#SBATCH --time=18:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-1
@@ -26,3 +26,5 @@ echo "[eval_tulu3_normad] condition=$COND"
 
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --calibrate
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --few-shot 2 --yn-only
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --neutral-fewshot
