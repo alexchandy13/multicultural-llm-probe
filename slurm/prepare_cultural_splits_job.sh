@@ -19,4 +19,4 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-python data/prepare_cultural_splits.py --out-dir data
+python finetune/prepare_cultural_splits.py --out-dir data
