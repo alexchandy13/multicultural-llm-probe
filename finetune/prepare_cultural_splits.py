@@ -83,7 +83,7 @@ def build_tag_lookups(do_aya: bool, do_uf: bool, cache_dir: Path) -> tuple[dict,
             src = ex["dataset_source"]
             if do_aya_stream and src == "Aya":
                 aya_tags[ex["inputs"]] = ex["culture_tag"]
-            elif do_uf_stream and src == "UltraFeedback":
+            elif do_uf_stream and src == "UltraFeedback-Alignment":
                 uf_tags[ex["inputs"]] = ex["culture_tag"]
             total += 1
             if total % 200_000 == 0:
