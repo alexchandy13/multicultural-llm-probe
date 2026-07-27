@@ -165,6 +165,33 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
         return Condition("tulu3_sft", "allenai/Llama-3.1-Tulu-3-8B-SFT", None, model_size=model_size)
     if name == "tulu3_dpo":
         return Condition("tulu3_dpo", "allenai/Llama-3.1-Tulu-3-8B-DPO", None, model_size=model_size)
+    # Aya cultural split conditions — 8B only (checkpoints always suffixed _8b).
+    if name == "sft_aya_cult":
+        adapter = _latest_checkpoint(ckpt_root / "sft_aya_cult_8b")
+        return Condition("sft_aya_cult", base, adapter, final_epoch=sft_epoch, model_size=model_size)
+    if name == "sft_aya_nocult":
+        adapter = _latest_checkpoint(ckpt_root / "sft_aya_nocult_8b")
+        return Condition("sft_aya_nocult", base, adapter, final_epoch=sft_epoch, model_size=model_size)
+    if name == "sftdpo_aya_cult":
+        sft_adapter = _latest_checkpoint(ckpt_root / "sft_aya_cult_8b")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / "sftdpo_aya_cult_8b")
+        return Condition(
+            "sftdpo_aya_cult", base,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+            model_size=model_size,
+        )
+    if name == "sftdpo_aya_nocult":
+        sft_adapter = _latest_checkpoint(ckpt_root / "sft_aya_nocult_8b")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / "sftdpo_aya_nocult_8b")
+        return Condition(
+            "sftdpo_aya_nocult", base,
+            adapter=sftdpo_adapter,
+            pre_merge_adapter=sft_adapter,
+            final_epoch=dpo_epoch,
+            model_size=model_size,
+        )
     raise ValueError(f"unknown condition: {name}")
 
 
