@@ -1,11 +1,11 @@
-# DPO on culturally-tagged UltraFeedback pairs, Llama 3.1 8B.
-# Data prepared by data/prepare_cultural_splits.py (culture_tag != NoCulture).
+# DPO on culturally-tagged pairs (UF + PRISM combined), Llama 3.1 8B.
+# Data prepared by finetune/prepare_cultural_splits.py (culture_tag != NoCulture).
 # Recipe identical to dpo_8b_config.yaml; only dataset and output_dir differ.
 
 model_name_or_path: meta-llama/Llama-3.1-8B
-dataset_name: uf_cult
-dataset_path: data/uf_cult
-output_dir: checkpoints/dpo_uf_cult_8b
+dataset_name: dpo_cult
+dataset_path: data/dpo_cult
+output_dir: checkpoints/dpo_cult_8b
 
 max_train_examples: 30000
 
