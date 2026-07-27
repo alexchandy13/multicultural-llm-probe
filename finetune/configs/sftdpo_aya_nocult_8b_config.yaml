@@ -1,0 +1,52 @@
+# SFT+DPO with non-cultural data, Llama 3.1 8B.
+# DPO on top of merged sft_aya_nocult_8b adapter, using uf_nocult preference pairs.
+# Matched control for sftdpo_aya_cult_8b.
+
+model_name_or_path: meta-llama/Llama-3.1-8B
+init_adapter_path: checkpoints/sft_aya_nocult_8b
+
+dataset_name: uf_nocult
+dataset_path: data/uf_nocult
+output_dir: checkpoints/sftdpo_aya_nocult_8b
+
+max_train_examples: 30000
+
+num_train_epochs: 2
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 32
+learning_rate: 5.0e-5
+warmup_ratio: 0.1
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_length: 384
+max_prompt_length: 192
+
+beta: 0.1
+loss_type: sigmoid
+
+save_strategy: epoch
+save_total_limit: 2
+logging_steps: 25
+report_to: none
+seed: 42
+
+early_stop:
+  enabled: true
+  patience_windows: 4
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj

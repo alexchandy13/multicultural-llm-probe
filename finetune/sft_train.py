@@ -83,15 +83,27 @@ def _load_alpaca(cfg: dict):
     return train.map(_format_alpaca, remove_columns=train.column_names)
 
 
+def _load_cultural_split(cfg: dict):
+    """Load a pre-built cultural split (aya_cult / aya_nocult) from disk.
+
+    Splits are prepared by data/prepare_cultural_splits.py and already have
+    a 'text' column in the same format as Alpaca examples.
+    """
+    ds = load_from_disk(cfg["dataset_path"])
+    return ds if hasattr(ds, "column_names") else ds["train"]
+
+
 def load_train_dataset(cfg: dict):
     name = cfg.get("dataset_name", "")
     if name.startswith("tatsu-lab/alpaca") or name == "alpaca":
         return _load_alpaca(cfg)
     if "COIG-CQIA" in name or "coig-cqia" in name.lower():
         return _load_coig_cqia(cfg)
+    if name in ("aya_cult", "aya_nocult"):
+        return _load_cultural_split(cfg)
     raise ValueError(
         f"Unsupported SFT dataset: {name!r}. "
-        f"Supported: tatsu-lab/alpaca, m-a-p/COIG-CQIA"
+        f"Supported: tatsu-lab/alpaca, m-a-p/COIG-CQIA, aya_cult, aya_nocult"
     )
 
 

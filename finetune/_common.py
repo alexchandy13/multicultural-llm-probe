@@ -139,6 +139,20 @@ def load_pku_safe_rlhf(cfg: dict):
     return filtered
 
 
+def load_ultrafeedback_split(cfg: dict):
+    """Load a pre-built UltraFeedback cultural split (uf_cult / uf_nocult) from disk.
+
+    Splits are prepared by data/prepare_cultural_splits.py and already have
+    prompt, chosen, rejected columns matching DPOTrainer's expected format.
+    """
+    ds = load_from_disk(cfg["dataset_path"])
+    train = ds if hasattr(ds, "column_names") else ds["train"]
+    cap = cfg.get("max_train_examples")
+    if cap and len(train) > cap:
+        train = train.shuffle(seed=cfg.get("seed", 42)).select(range(cap))
+    return train
+
+
 def load_dpo_dataset(cfg: dict):
     """Dispatch to the right preference-data loader based on dataset_name."""
     name = cfg.get("dataset_name", "")
@@ -148,9 +162,12 @@ def load_dpo_dataset(cfg: dict):
         return load_coig_p(cfg)
     if "PKU-SafeRLHF" in name or "pku-safe" in name.lower() or "pku_safe" in name.lower():
         return load_pku_safe_rlhf(cfg)
+    if name in ("uf_cult", "uf_nocult"):
+        return load_ultrafeedback_split(cfg)
     raise ValueError(
         f"Unsupported DPO dataset: {name!r}. "
-        f"Supported: Anthropic/hh-rlhf, m-a-p/COIG-P, PKU-Alignment/PKU-SafeRLHF-single-dimension"
+        f"Supported: Anthropic/hh-rlhf, m-a-p/COIG-P, PKU-Alignment/PKU-SafeRLHF-single-dimension, "
+        f"uf_cult, uf_nocult"
     )
 
 

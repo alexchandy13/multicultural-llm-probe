@@ -1,0 +1,40 @@
+# SFT on culturally-tagged Aya examples, Llama 3.1 8B.
+# Data prepared by data/prepare_cultural_splits.py (culture_tag != NoCulture).
+# Recipe identical to sft_8b_config.yaml; only dataset and output_dir differ.
+
+model_name_or_path: meta-llama/Llama-3.1-8B
+dataset_name: aya_cult
+dataset_path: data/aya_cult
+output_dir: checkpoints/sft_aya_cult_8b
+
+num_train_epochs: 3
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 16
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_seq_length: 512
+
+save_strategy: epoch
+save_total_limit: 3
+logging_steps: 25
+report_to: none
+seed: 42
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
