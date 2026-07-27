@@ -27,4 +27,4 @@ echo "[eval_tulu3_normad] condition=$COND"
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --calibrate
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --few-shot 2 --yn-only
-python evaluate/eval_normad.py --condition "$COND" --model-size 8b --neutral-fewshot
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --neutral-fewshot --yn-only --us-probe

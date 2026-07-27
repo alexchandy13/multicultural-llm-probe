@@ -56,24 +56,12 @@ PROMPT_TEMPLATE = (
 YN_CHOICES = ["yes", "no"]
 
 # Culturally-agnostic few-shot shots for --neutral-fewshot mode.
-# Scenarios are universally clear (yes/no independent of country) so the
-# prefix teaches task format without injecting any cultural knowledge.
-# Country field uses a generic label so no real culture is implied.
+# Pure factual yes/no questions — no social/cultural content whatsoever.
+# Prepended as raw strings before the task prompt so the instruction appears
+# only once (for the eval example), not once per shot.
 NEUTRAL_SHOTS_NORMAD = [
-    (
-        "a society",
-        "During a busy rush hour commute, Dana noticed an elderly passenger standing "
-        "unsteadily in the crowded train. Dana immediately stood up and offered their seat, "
-        "then helped the passenger sit down safely. Is what Dana did socially acceptable?",
-        "yes",
-    ),
-    (
-        "a society",
-        "While checking out at the grocery store, Lee pushed past several people who had "
-        "been waiting in line and placed their items on the conveyor belt ahead of everyone else "
-        "without acknowledging the queue. Is what Lee did socially acceptable?",
-        "no",
-    ),
+    ("Is the Earth round?\nAnswer:", "yes"),
+    ("Is fire cold?\nAnswer:", "no"),
 ]
 
 # Multi-prompt numbered format: 4 rephrasings, binary 1/2 options.
@@ -273,46 +261,23 @@ def load_normad(path: Path):
     return ds
 
 
-def build_neutral_fewshot_prefix(mc_format: bool = False,
-                                 yn_only: bool = False,
-                                 multi_prompt: bool = False,
+def build_neutral_fewshot_prefix(multi_prompt: bool = False,
                                  multi_prompt_word: bool = False) -> str | list[str]:
     """Build a few-shot prefix from NEUTRAL_SHOTS_NORMAD.
 
-    Uses culturally-agnostic scenarios so the prefix teaches task format only,
-    without injecting any cultural knowledge. No holdout exclusion needed.
+    Shots are prepended as raw factual yes/no strings, bypassing the task
+    template entirely. The instruction therefore appears only once (for the
+    eval example), not once per shot. The same prefix is used across all
+    multi-prompt template variants — format teaching doesn't depend on which
+    rephrasing follows.
     """
-    shots = NEUTRAL_SHOTS_NORMAD  # always 1 yes + 1 no
+    raw = "".join(f"{q} {a}\n\n" for q, a in NEUTRAL_SHOTS_NORMAD)
 
     if multi_prompt:
-        prefixes = []
-        for tmpl in YN_NUMBERED_PROMPTS:
-            parts = []
-            for shot_idx, (c, scen, lbl) in enumerate(shots):
-                yes_tok, no_tok, option_str = yn_numbered_options(1000 + shot_idx)
-                answer = yes_tok if lbl == "yes" else no_tok
-                parts.append(tmpl.format(country=c, scenario=scen, options=option_str)
-                             + f"{answer}\n\n")
-            prefixes.append("".join(parts))
-        return prefixes
-
+        return [raw] * len(YN_NUMBERED_PROMPTS)
     if multi_prompt_word:
-        prefixes = []
-        for tmpl in YN_WORD_PROMPTS:
-            parts = []
-            for c, scen, lbl in shots:
-                parts.append(tmpl.format(country=c, scenario=scen) + f" {lbl}\n\n")
-            prefixes.append("".join(parts))
-        return prefixes
-
-    template = (MC_PROMPT_TEMPLATE if mc_format
-                else YN_PROMPT_TEMPLATE if yn_only
-                else PROMPT_TEMPLATE)
-    parts = []
-    for c, scen, lbl in shots:
-        answer = MC_LABEL_MAP[lbl] if mc_format else lbl
-        parts.append(template.format(country=c, scenario=scen) + f" {answer}\n\n")
-    return "".join(parts)
+        return [raw] * len(YN_WORD_PROMPTS)
+    return raw
 
 
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
@@ -565,7 +530,6 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
     if neutral_fewshot:
         prefix = build_neutral_fewshot_prefix(
-            mc_format=mc_format, yn_only=yn_only,
             multi_prompt=multi_prompt, multi_prompt_word=multi_prompt_word,
         )
         excluded = set()  # no dataset examples used; evaluate all countries
