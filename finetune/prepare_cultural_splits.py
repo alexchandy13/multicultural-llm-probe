@@ -30,6 +30,11 @@ TARGET_SFT = 52000   # match Alpaca (52k examples)
 TARGET_DPO = 30000   # match HH-RLHF cap
 
 
+def _norm(s: str) -> str:
+    """Normalize whitespace for robust key matching across dataset versions."""
+    return " ".join(s.split())
+
+
 def build_tag_lookups(do_aya: bool, do_uf: bool, cache_dir: Path) -> tuple[dict, dict]:
     """Stream CultureMarkers once, build {inputs_text: culture_tag} for Aya and UF.
 
@@ -82,9 +87,9 @@ def build_tag_lookups(do_aya: bool, do_uf: bool, cache_dir: Path) -> tuple[dict,
         for ex in ds:
             src = ex["dataset_source"]
             if do_aya_stream and src == "Aya":
-                aya_tags[ex["inputs"]] = ex["culture_tag"]
+                aya_tags[_norm(ex["inputs"])] = ex["culture_tag"]
             elif do_uf_stream and src == "UltraFeedback-Alignment":
-                uf_tags[ex["inputs"]] = ex["culture_tag"]
+                uf_tags[_norm(ex["inputs"])] = ex["culture_tag"]
             total += 1
             if total % 200_000 == 0:
                 print(f"  {total:,} rows scanned | aya={len(aya_tags):,} | uf={len(uf_tags):,}")
@@ -112,7 +117,7 @@ def prepare_aya(aya_tags: dict[str, str], out_dir: Path, seed: int = 42) -> None
     n_matched = 0
 
     for ex in ds:
-        tag = aya_tags.get(ex["inputs"])
+        tag = aya_tags.get(_norm(ex["inputs"]))
         if tag is None:
             continue
         n_matched += 1
@@ -133,7 +138,7 @@ def prepare_aya(aya_tags: dict[str, str], out_dir: Path, seed: int = 42) -> None
     print(f"Saved aya_cult: {len(cult):,} examples")
 
     rng.shuffle(nocult_rows)
-    nocult = Dataset.from_list(nocult_rows[:TARGET_SFT])
+    nocult = Dataset.from_list(nocult_rows[:len(cult)])
     nocult.save_to_disk(str(out_dir / "aya_nocult"))
     print(f"Saved aya_nocult: {len(nocult):,} examples")
 
@@ -148,7 +153,7 @@ def prepare_ultrafeedback(uf_tags: dict[str, str], out_dir: Path, seed: int = 42
     n_matched = 0
 
     for ex in ds:
-        tag = uf_tags.get(ex["prompt"])
+        tag = uf_tags.get(_norm(ex["prompt"]))
         if tag is None:
             continue
         n_matched += 1
@@ -173,7 +178,7 @@ def prepare_ultrafeedback(uf_tags: dict[str, str], out_dir: Path, seed: int = 42
     print(f"Saved uf_cult: {len(cult):,} examples")
 
     rng.shuffle(nocult_rows)
-    nocult = Dataset.from_list(nocult_rows[:TARGET_DPO])
+    nocult = Dataset.from_list(nocult_rows[:len(cult)])
     nocult.save_to_disk(str(out_dir / "uf_nocult"))
     print(f"Saved uf_nocult: {len(nocult):,} examples")
 
