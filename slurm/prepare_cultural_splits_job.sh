@@ -3,8 +3,8 @@
 #SBATCH --partition=clip
 #SBATCH --account=clip
 #SBATCH --qos=medium
-#SBATCH --time=4:00:00
-#SBATCH --mem=32G
+#SBATCH --time=12:00:00
+#SBATCH --mem=64G
 #SBATCH --cpus-per-task=8
 #SBATCH --output=slurm/prepare_cultural_splits.%j.out
 #SBATCH --error=slurm/prepare_cultural_splits.%j.err
