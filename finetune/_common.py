@@ -162,12 +162,12 @@ def load_dpo_dataset(cfg: dict):
         return load_coig_p(cfg)
     if "PKU-SafeRLHF" in name or "pku-safe" in name.lower() or "pku_safe" in name.lower():
         return load_pku_safe_rlhf(cfg)
-    if name in ("uf_cult", "uf_nocult"):
+    if name in ("uf_cult", "uf_nocult", "prism_cult", "prism_nocult", "dpo_cult", "dpo_nocult"):
         return load_ultrafeedback_split(cfg)
     raise ValueError(
         f"Unsupported DPO dataset: {name!r}. "
         f"Supported: Anthropic/hh-rlhf, m-a-p/COIG-P, PKU-Alignment/PKU-SafeRLHF-single-dimension, "
-        f"uf_cult, uf_nocult"
+        f"uf_cult, uf_nocult, prism_cult, prism_nocult, dpo_cult, dpo_nocult"
     )
 
 

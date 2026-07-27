@@ -1,12 +1,12 @@
 # SFT+DPO with cultural data, Llama 3.1 8B.
-# DPO on top of merged sft_aya_cult_8b adapter, using uf_cult preference pairs.
+# DPO on top of merged sft_aya_cult_8b adapter, using dpo_cult preference pairs (UF + PRISM combined).
 # Recipe mirrors sftdpo_8b_config.yaml.
 
 model_name_or_path: meta-llama/Llama-3.1-8B
 init_adapter_path: checkpoints/sft_aya_cult_8b
 
-dataset_name: uf_cult
-dataset_path: data/uf_cult
+dataset_name: dpo_cult
+dataset_path: data/dpo_cult
 output_dir: checkpoints/sftdpo_aya_cult_8b
 
 max_train_examples: 30000

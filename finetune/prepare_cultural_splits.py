@@ -227,6 +227,20 @@ def prepare_prism(prism_tags: dict[str, str], out_dir: Path, seed: int = 42) -> 
     print(f"Saved prism_nocult: {len(nocult):,} examples")
 
 
+def combine_dpo_splits(out_dir: Path, seed: int = 42) -> None:
+    """Merge UF and PRISM cultural splits into combined dpo_cult / dpo_nocult datasets."""
+    from datasets import concatenate_datasets, load_from_disk
+
+    print("\nCombining UF + PRISM into dpo_cult / dpo_nocult...")
+    for split in ("cult", "nocult"):
+        uf    = load_from_disk(str(out_dir / f"uf_{split}"))
+        prism = load_from_disk(str(out_dir / f"prism_{split}"))
+        combined = concatenate_datasets([uf, prism])
+        combined = combined.shuffle(seed=seed)
+        combined.save_to_disk(str(out_dir / f"dpo_{split}"))
+        print(f"Saved dpo_{split}: {len(combined):,} examples")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out-dir", default="data", help="Root dir for output splits")
@@ -253,6 +267,8 @@ def main() -> None:
         prepare_ultrafeedback(uf_tags, out_dir, args.seed)
     if do_prism:
         prepare_prism(prism_tags, out_dir, args.seed)
+    if do_uf and do_prism:
+        combine_dpo_splits(out_dir, args.seed)
 
     print("\nDone. All splits saved.")
 
