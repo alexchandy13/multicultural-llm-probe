@@ -28,3 +28,4 @@ python evaluate/eval_normad.py --condition "$COND" --model-size 8b
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --calibrate
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --few-shot 2 --yn-only
 python evaluate/eval_normad.py --condition "$COND" --model-size 8b --neutral-fewshot --yn-only --us-probe
+python evaluate/eval_normad.py --condition "$COND" --model-size 8b --neutral-fewshot --multi-prompt-word --us-probe
