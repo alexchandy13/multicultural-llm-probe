@@ -49,13 +49,24 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
+
+# BLEnD uses abbreviated or region-level names that differ from iw_coordinates.csv.
+COUNTRY_ALIASES = {
+    "uk":               "united_kingdom",
+    "us":               "united_states_of_america",
+    "northern_nigeria": "nigeria",
+    "assam":            "india",
+    "west_java":        "indonesia",
+}
 US_SIMILAR_LABEL = "US-similar"   # merged-group key used in cluster mode
 
 COND_LABELS = {
-    "base":   "Base",
-    "sft":    "SFT",
-    "dpo":    "DPO",
-    "sftdpo": "SFT+DPO",
+    "base":      "Base",
+    "sft":       "SFT",
+    "dpo":       "DPO",
+    "sftdpo":    "SFT+DPO",
+    "tulu3_sft": "Tulu3-SFT",
+    "tulu3_dpo": "Tulu3-DPO",
 }
 
 DEFAULT_PIPELINE = ["base", "sft", "sftdpo"]
@@ -97,11 +108,53 @@ def load_iw_data(path: Path) -> tuple[dict[str, str], dict[str, float]]:
     return country_to_cluster, cluster_mean_dist
 
 
+def pooled_us_default_rate_by_group(
+    cond: str,
+    country_to_cluster: dict[str, str],
+    mode: str,
+    size_suffix: str = "",
+    benchmark: str = "normad",
+) -> dict[str, float]:
+    """Return {group_label: us_default_rate} for one condition.
+
+    us_default_rate = wrong_us_match / (wrong_us_match + wrong_us_diverge)
+    i.e. among errors, what fraction match the US prediction.
+    Skips US itself and examples with no us_pred.
+    """
+    path = BEHAVIORAL_DIR / f"{benchmark}_{cond}{size_suffix}.json"
+    if not path.exists():
+        return {}
+    preds = json.loads(path.read_text()).get("predictions", [])
+    by_group: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # [us_match, total_wrong]
+    for p in preds:
+        if p.get("country") == "US":
+            continue
+        us_pred = p.get("us_pred")
+        if us_pred is None:
+            continue
+        if p["pred"] == p["gold"]:
+            continue  # correct — not counted in rate
+        country = p.get("country", "")
+        normed = COUNTRY_ALIASES.get(country.lower(), country.lower())
+        cluster = country_to_cluster.get(country) or country_to_cluster.get(normed)
+        if cluster is None:
+            continue
+        if mode == "binary":
+            group = US_SIMILAR_LABEL if cluster in US_SIMILAR_CLUSTERS else "US-distant"
+        else:
+            group = US_SIMILAR_LABEL if cluster in US_SIMILAR_CLUSTERS else cluster
+        by_group[group][1] += 1
+        if p["pred"] == us_pred:
+            by_group[group][0] += 1
+    return {g: (m / t) for g, (m, t) in by_group.items() if t > 0}
+
+
 def pooled_accuracy_by_group(
     cond: str,
     country_to_cluster: dict[str, str],
     mode: str,
     size_suffix: str = "",
+    benchmark: str = "normad",
 ) -> dict[str, float]:
     """Return {group_label: accuracy} for one condition.
 
@@ -112,15 +165,15 @@ def pooled_accuracy_by_group(
     Accuracy is pooled across all predictions in each group (matching the
     convention in accuracy_deltas_bars.py and the original two-line plot).
     """
-    path = BEHAVIORAL_DIR / f"normad_{cond}{size_suffix}.json"
+    path = BEHAVIORAL_DIR / f"{benchmark}_{cond}{size_suffix}.json"
     if not path.exists():
         return {}
     preds = json.loads(path.read_text()).get("predictions", [])
     by_group: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for p in preds:
         country = p.get("country", "")
-        cluster = (country_to_cluster.get(country)
-                   or country_to_cluster.get(country.lower()))
+        normed = COUNTRY_ALIASES.get(country.lower(), country.lower())
+        cluster = country_to_cluster.get(country) or country_to_cluster.get(normed)
         if cluster is None:
             continue
         if mode == "binary":
@@ -195,6 +248,16 @@ def main():
                         help="Read *_gen.json files (generation-based) and suffix output with _gen.")
     parser.add_argument("--yn-only", action="store_true",
                         help="Read *_yn.json files (yes/no only) and suffix output with _yn.")
+    parser.add_argument("--neutral-fewshot", action="store_true",
+                        help="Read *_nfs.json files.")
+    parser.add_argument("--multi-prompt-word", action="store_true",
+                        help="Read *_mpw.json files.")
+    parser.add_argument("--us-probe", action="store_true",
+                        help="Read *_usprobe.json files.")
+    parser.add_argument("--benchmark", choices=["normad", "blend"], default="normad",
+                        help="Which benchmark's output files to read.")
+    parser.add_argument("--us-default-rate", action="store_true",
+                        help="Plot US-default rate among errors instead of accuracy.")
     args = parser.parse_args()
 
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
@@ -202,8 +265,11 @@ def main():
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_suffix = "_calibrated" if args.calibrated else ""
-    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + fs_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix
-    fig_size_suffix = f"_{args.model_size}" + fs_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix
+    nfs_sfx = "_nfs" if args.neutral_fewshot else ""
+    mpw_sfx = "_mpw" if args.multi_prompt_word else ""
+    usp_sfx = "_usprobe" if args.us_probe else ""
+    size_suffix = ("" if args.model_size == "3b" else f"_{args.model_size}") + fs_sfx + nfs_sfx + mpw_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix + usp_sfx
+    fig_size_suffix = f"_{args.model_size}" + fs_sfx + nfs_sfx + mpw_sfx + yn_sfx + gen_sfx + mc_sfx + cal_suffix + usp_sfx
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     conditions = args.conditions if args.conditions else DEFAULT_PIPELINE
     if len(conditions) < 2:
@@ -216,8 +282,9 @@ def main():
     acc_by_group: dict[str, list[float]] = defaultdict(
         lambda: [float("nan")] * len(conditions)
     )
+    metric_fn = pooled_us_default_rate_by_group if args.us_default_rate else pooled_accuracy_by_group
     for j, cond in enumerate(conditions):
-        groups = pooled_accuracy_by_group(cond, country_to_cluster, args.mode, size_suffix)
+        groups = metric_fn(cond, country_to_cluster, args.mode, size_suffix, args.benchmark)
         if not groups:
             print(f"[warn] no data for condition {cond!r}; will appear as NaN",
                   file=sys.stderr)
@@ -284,11 +351,18 @@ def main():
     ax.set_xticks(x)
     ax.set_xticklabels([COND_LABELS.get(c, c) for c in conditions], fontsize=11)
     ax.set_xlabel("Alignment Condition")
-    ax.set_ylabel("NormAd Accuracy", fontsize=11)
-    if args.mode == "binary":
-        title = "NormAd Accuracy Across Alignment Pipeline: Western vs Non-Western"
+    bench_label = "BLEnD" if args.benchmark == "blend" else "NormAd"
+    if args.us_default_rate:
+        metric_label = "US-Default Rate Among Errors"
+        metric_sfx = "_usdr"
     else:
-        title = ("NormAd accuracy across alignment pipeline, by I-W cluster\n"
+        metric_label = "Accuracy"
+        metric_sfx = ""
+    ax.set_ylabel(f"{bench_label} {metric_label}", fontsize=11)
+    if args.mode == "binary":
+        title = f"{bench_label} {metric_label} Across Alignment Pipeline: Western vs Non-Western"
+    else:
+        title = (f"{bench_label} {metric_label} across alignment pipeline, by I-W cluster\n"
                  "(EnglishSpeaking + ProtestantEurope merged; legend ordered by "
                  "distance from anglosphere centroid)")
     ax.set_title(title, fontsize=11)
@@ -315,7 +389,8 @@ def main():
     ax.set_xlim(-0.4, len(conditions) - 0.6)
 
     fig.tight_layout()
-    out = FIGURES_DIR / f"accuracy_pipeline_lines{fig_size_suffix}{args.out_suffix}.pdf"
+    bench_sfx = f"_{args.benchmark}" if args.benchmark != "normad" else ""
+    out = FIGURES_DIR / f"accuracy_pipeline_lines{bench_sfx}{fig_size_suffix}{metric_sfx}{args.out_suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
