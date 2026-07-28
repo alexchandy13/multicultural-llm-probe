@@ -3,7 +3,7 @@
 #SBATCH --partition=clip
 #SBATCH --account=clip
 #SBATCH --qos=medium
-#SBATCH --gres=gpu:rtxa6000:1
+#SBATCH --gres=gpu:rtx3090:1
 #SBATCH --time=18:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
