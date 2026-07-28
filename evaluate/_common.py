@@ -172,16 +172,17 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
     if name == "dpo_nocult":
         adapter = _latest_checkpoint(ckpt_root / "dpo_nocult_8b")
         return Condition("dpo_nocult", base, adapter, final_epoch=dpo_epoch, model_size=model_size)
-    # Aya cultural split conditions — 8B only (checkpoints always suffixed _8b).
+    # Aya cultural split conditions — checkpoint suffix matches model size.
+    _aya_sfx = "gemma4" if model_size == "gemma4" else "8b"
     if name == "sft_aya_cult":
-        adapter = _latest_checkpoint(ckpt_root / "sft_aya_cult_8b")
+        adapter = _latest_checkpoint(ckpt_root / f"sft_aya_cult_{_aya_sfx}")
         return Condition("sft_aya_cult", base, adapter, final_epoch=sft_epoch, model_size=model_size)
     if name == "sft_aya_nocult":
-        adapter = _latest_checkpoint(ckpt_root / "sft_aya_nocult_8b")
+        adapter = _latest_checkpoint(ckpt_root / f"sft_aya_nocult_{_aya_sfx}")
         return Condition("sft_aya_nocult", base, adapter, final_epoch=sft_epoch, model_size=model_size)
     if name == "sftdpo_aya_cult":
-        sft_adapter = _latest_checkpoint(ckpt_root / "sft_aya_cult_8b")
-        sftdpo_adapter = _latest_checkpoint(ckpt_root / "sftdpo_aya_cult_8b")
+        sft_adapter = _latest_checkpoint(ckpt_root / f"sft_aya_cult_{_aya_sfx}")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / f"sftdpo_aya_cult_{_aya_sfx}")
         return Condition(
             "sftdpo_aya_cult", base,
             adapter=sftdpo_adapter,
@@ -190,8 +191,8 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
             model_size=model_size,
         )
     if name == "sftdpo_aya_nocult":
-        sft_adapter = _latest_checkpoint(ckpt_root / "sft_aya_nocult_8b")
-        sftdpo_adapter = _latest_checkpoint(ckpt_root / "sftdpo_aya_nocult_8b")
+        sft_adapter = _latest_checkpoint(ckpt_root / f"sft_aya_nocult_{_aya_sfx}")
+        sftdpo_adapter = _latest_checkpoint(ckpt_root / f"sftdpo_aya_nocult_{_aya_sfx}")
         return Condition(
             "sftdpo_aya_nocult", base,
             adapter=sftdpo_adapter,

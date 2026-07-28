@@ -1,0 +1,39 @@
+# SFT on non-cultural Aya examples (balanced to cult size), Gemma 4 12B.
+# Mirrors sft_aya_nocult_8b_config.yaml; batch reduced to 1 / grad-accum 32 for 12B memory.
+
+model_name_or_path: google/gemma-4-12B
+dataset_name: aya_nocult
+dataset_path: data/aya_nocult
+output_dir: checkpoints/sft_aya_nocult_gemma4
+
+num_train_epochs: 3
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 32
+learning_rate: 2.0e-4
+warmup_ratio: 0.03
+lr_scheduler_type: cosine
+weight_decay: 0.0
+max_grad_norm: 1.0
+optim: paged_adamw_8bit
+max_seq_length: 512
+
+save_strategy: epoch
+save_total_limit: 3
+logging_steps: 25
+report_to: none
+seed: 42
+
+lora:
+  r: 16
+  lora_alpha: 32
+  lora_dropout: 0.05
+  bias: none
+  task_type: CAUSAL_LM
+  target_modules:
+    - q_proj
+    - k_proj
+    - v_proj
+    - o_proj
+    - gate_proj
+    - up_proj
+    - down_proj
