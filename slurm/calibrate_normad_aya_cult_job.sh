@@ -4,7 +4,7 @@
 #SBATCH --account=clip
 #SBATCH --qos=default
 #SBATCH --time=2:00:00
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --cpus-per-task=4
 #SBATCH --output=slurm/calibrate_normad_aya_cult.out
 #SBATCH --error=slurm/calibrate_normad_aya_cult.err
