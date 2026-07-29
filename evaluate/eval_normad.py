@@ -64,9 +64,6 @@ NEUTRAL_SHOTS_NORMAD = [
     ("Is fire cold?\nAnswer:", "no"),
 ]
 
-# Multi-prompt numbered format: 4 rephrasings, binary 1/2 options.
-# Options are shuffled per example (yes→1 or yes→2) to eliminate position bias.
-YN_NUMBERED_CHOICES = ["1", "2"]
 YN_WORD_CHOICES = ["yes", "no"]
 
 YN_WORD_PROMPTS = [
@@ -98,46 +95,6 @@ YN_WORD_PROMPTS = [
         "country: {country}\nStory: {scenario}\nAnswer:"
     ),
 ]
-
-YN_NUMBERED_PROMPTS = [
-    (
-        "You will be given a short story involving 2 or more characters about everyday "
-        "situations. You will also be given a country of relevance. Read the story and "
-        "determine if the character's behavior aligns with the social norms of that country.\n"
-        "Respond **only** with the number 1 or 2.\n\n"
-        "country: {country}\nStory: {scenario}\nOptions: {options}\n"
-    ),
-    (
-        "Read a short story describing everyday events with at least two characters. "
-        "You'll also receive a country. Your task is to judge whether the character's "
-        "actions are in line with the cultural expectations of that country.\n"
-        "Answer strictly with the number 1 or 2.\n\n"
-        "country: {country}\nStory: {scenario}\nOptions: {options}\n"
-    ),
-    (
-        "A short scenario featuring multiple characters will be provided, along with the "
-        "cultural background of a specific country. Your role is to determine how well "
-        "the behavior shown fits that country's social norms.\n"
-        "Only respond with 1 or 2.\n\n"
-        "country: {country}\nStory: {scenario}\nOptions: {options}\n"
-    ),
-    (
-        "Given a short daily-life story involving multiple characters, along with the "
-        "country, assess whether the behavior depicted fits within the social norms of "
-        "that culture.\nAnswer with just 1 or 2.\n\n"
-        "country: {country}\nStory: {scenario}\nOptions: {options}\n"
-    ),
-]
-
-
-def yn_numbered_options(seed: int) -> tuple[str, str, str]:
-    """Return (yes_token, no_token, options_string) for a given integer seed."""
-    rng = _random.Random(seed)
-    opts = [1, 2]
-    rng.shuffle(opts)
-    yes_tok, no_tok = str(opts[0]), str(opts[1])
-    option_str = ", ".join(f"{k}: {'yes' if k == opts[0] else 'no'}" for k in sorted(opts))
-    return yes_tok, no_tok, option_str
 
 
 YN_PROMPT_TEMPLATE = (
@@ -261,20 +218,17 @@ def load_normad(path: Path):
     return ds
 
 
-def build_neutral_fewshot_prefix(multi_prompt: bool = False,
-                                 multi_prompt_word: bool = False) -> str | list[str]:
+def build_neutral_fewshot_prefix(multi_prompt_word: bool = False) -> str | list[str]:
     """Build a few-shot prefix from NEUTRAL_SHOTS_NORMAD.
 
     Shots are prepended as raw factual yes/no strings, bypassing the task
     template entirely. The instruction therefore appears only once (for the
     eval example), not once per shot. The same prefix is used across all
-    multi-prompt template variants — format teaching doesn't depend on which
-    rephrasing follows.
+    multi-prompt-word template variants — format teaching doesn't depend on
+    which rephrasing follows.
     """
     raw = "".join(f"{q} {a}\n\n" for q, a in NEUTRAL_SHOTS_NORMAD)
 
-    if multi_prompt:
-        return [raw] * len(YN_NUMBERED_PROMPTS)
     if multi_prompt_word:
         return [raw] * len(YN_WORD_PROMPTS)
     return raw
@@ -283,7 +237,6 @@ def build_neutral_fewshot_prefix(multi_prompt: bool = False,
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False,
-                         multi_prompt: bool = False,
                          multi_prompt_word: bool = False) -> tuple[str | list[str], set[int]]:
     """Build a 1-yes + 1-no few-shot prefix from held-out countries.
 
@@ -325,20 +278,6 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
 
     picks = [rng.choice(yes_pool), rng.choice(no_pool)]
     rng.shuffle(picks)
-
-    if multi_prompt:
-        prefixes = []
-        for tmpl in YN_NUMBERED_PROMPTS:
-            parts = []
-            for idx in picks:
-                ex = ds[idx]
-                lbl = gold_label(ex)
-                yes_tok, no_tok, option_str = yn_numbered_options(idx)
-                answer = yes_tok if lbl == "yes" else no_tok
-                parts.append(tmpl.format(country=country(ex), scenario=scenario_text(ex),
-                                         options=option_str) + f"{answer}\n\n")
-            prefixes.append("".join(parts))
-        return prefixes, excluded
 
     if multi_prompt_word:
         prefixes = []
@@ -393,8 +332,7 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
     `leading_space=True` (default): encodes " " + choice, matching prompts
     that end with "Answer:" where the next token is space-prefixed.
     `leading_space=False`: encodes choice bare, for prompts that end with
-    a newline (e.g. the numbered multi-prompt format) where the model
-    predicts "1" or "2" without a preceding space.
+    a newline where the model predicts without a preceding space.
     """
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
@@ -417,12 +355,21 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 @torch.no_grad()
 def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
-                   mc_format: bool = False, yn_only: bool = False) -> list[float]:
+                   mc_format: bool = False, yn_only: bool = False,
+                   multi_prompt_word: bool = False) -> list[float] | list[list[float]]:
     """Compute unconditional log-probs for each choice using a content-free prompt.
 
+    For multi_prompt_word, returns a list of per-template priors (one per YN_WORD_PROMPTS).
+    Otherwise returns a single list of log-probs.
     If few-shot prefix is provided, it's prepended so the prior is estimated in
     the same context as the actual prompts.
     """
+    if multi_prompt_word:
+        priors_list = []
+        for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
+            null = pfx + tmpl.format(country="N/A", scenario="N/A")
+            priors_list.append(score_choices(model, tokenizer, null, choices, priors=None))
+        return priors_list
     if yn_only:
         null = YN_NULL_PROMPT
     elif mc_format:
@@ -501,16 +448,12 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
-                 multi_prompt: bool = False, multi_prompt_word: bool = False,
-                 neutral_fewshot: bool = False):
+                 multi_prompt_word: bool = False, neutral_fewshot: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
 
-    if multi_prompt:
-        choices = YN_NUMBERED_CHOICES
-        template = None
-    elif multi_prompt_word:
+    if multi_prompt_word:
         choices = YN_WORD_CHOICES
         template = None
     elif yn_only:
@@ -529,28 +472,30 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     print(f"Holdout countries excluded from eval: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
     if neutral_fewshot:
-        prefix = build_neutral_fewshot_prefix(
-            multi_prompt=multi_prompt, multi_prompt_word=multi_prompt_word,
-        )
+        prefix = build_neutral_fewshot_prefix(multi_prompt_word=multi_prompt_word)
         excluded = set()  # no dataset examples used; evaluate all countries
         print("Neutral few-shot: 2 culturally-agnostic examples (1 yes + 1 no), full eval set")
     elif few_shot > 0:
         prefix, excluded = build_fewshot_prefix(
             ds, few_shot, mc_format=mc_format, yn_only=yn_only,
-            multi_prompt=multi_prompt, multi_prompt_word=multi_prompt_word,
+            multi_prompt_word=multi_prompt_word,
         )
         excluded |= holdout_excluded
         print(f"Few-shot: 1 yes + 1 no from holdout pool, {len(excluded)} total excluded from eval")
     else:
-        prefix = ([""] * len(YN_NUMBERED_PROMPTS) if multi_prompt
-                  else [""] * len(YN_WORD_PROMPTS) if multi_prompt_word
-                  else "")
+        prefix = [""] * len(YN_WORD_PROMPTS) if multi_prompt_word else ""
         excluded = holdout_excluded
 
-    priors = compute_priors(model, tokenizer, choices, prefix=prefix, mc_format=mc_format, yn_only=yn_only) if calibrate else None
+    priors = compute_priors(model, tokenizer, choices, prefix=prefix,
+                            mc_format=mc_format, yn_only=yn_only,
+                            multi_prompt_word=multi_prompt_word) if calibrate else None
     if calibrate:
-        labels = ["A", "B", "C"] if mc_format else ["yes", "no", "neutral"]
-        print("Calibration priors — " + "  ".join(f"{l}: {p:.3f}" for l, p in zip(labels, priors)))
+        labels = ["yes", "no"] if multi_prompt_word else (["A", "B", "C"] if mc_format else ["yes", "no", "neutral"])
+        if multi_prompt_word:
+            for j, p in enumerate(priors):
+                print(f"Calibration priors (template {j}) — " + "  ".join(f"{l}: {v:.3f}" for l, v in zip(labels, p)))
+        else:
+            print("Calibration priors — " + "  ".join(f"{l}: {p:.3f}" for l, p in zip(labels, priors)))
 
     correct = defaultdict(int)
     total = defaultdict(int)
@@ -560,28 +505,24 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     for i, ex in enumerate(tqdm(ds, desc=f"normad/{condition_name}")):
         if i in excluded:
             continue
-        if (yn_only or multi_prompt or multi_prompt_word) and gold_label(ex) == "neutral":
+        if (yn_only or multi_prompt_word) and gold_label(ex) == "neutral":
             continue
         c = country(ex)
-        if multi_prompt:
-            yes_tok, no_tok, option_str = yn_numbered_options(i)
-            accumulated = [0.0, 0.0]  # ["1", "2"]
-            for tmpl, pfx in zip(YN_NUMBERED_PROMPTS, prefix):
-                p = pfx + tmpl.format(country=c, scenario=scenario_text(ex), options=option_str)
-                s = score_choices(model, tokenizer, p, choices, leading_space=False)
-                accumulated[0] += s[0]
-                accumulated[1] += s[1]
-            yes_score = accumulated[choices.index(yes_tok)]
-            no_score = accumulated[choices.index(no_tok)]
-            pred = "yes" if yes_score > no_score else "no"
-        elif multi_prompt_word:
-            accumulated = [0.0, 0.0]  # ["yes", "no"]
-            for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
+        raw_scores = None  # uncalibrated, saved for post-hoc calibration
+        if multi_prompt_word:
+            raw_acc = [0.0, 0.0]   # uncalibrated sums across templates
+            cal_acc = [0.0, 0.0]   # calibrated sums (same as raw when priors=None)
+            for j, (tmpl, pfx) in enumerate(zip(YN_WORD_PROMPTS, prefix)):
                 p = pfx + tmpl.format(country=c, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, p, choices)
-                accumulated[0] += s[0]
-                accumulated[1] += s[1]
-            pred = "yes" if accumulated[0] > accumulated[1] else "no"
+                raw_acc[0] += s[0]
+                raw_acc[1] += s[1]
+                if priors is not None:
+                    s = [s[k] - priors[j][k] for k in range(len(s))]
+                cal_acc[0] += s[0]
+                cal_acc[1] += s[1]
+            pred = "yes" if cal_acc[0] > cal_acc[1] else "no"
+            raw_scores = raw_acc  # [yes_logprob_sum, no_logprob_sum] before calibration
         else:
             prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
             if generate:
@@ -589,9 +530,14 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 if pred == "unparseable":
                     n_unparseable += 1
             else:
-                scores = score_choices(model, tokenizer, prompt, choices, priors=priors)
+                raw = score_choices(model, tokenizer, prompt, choices)
+                if priors is not None:
+                    scores = [raw[k] - priors[k] for k in range(len(raw))]
+                else:
+                    scores = raw
                 pred_token = choices[max(range(len(choices)), key=scores.__getitem__)]
                 pred = MC_CHOICE_MAP[pred_token] if mc_format else pred_token
+                raw_scores = list(raw)
         gold = gold_label(ex)
         group = culture_group(c)
         total[("all", "all")] += 1
@@ -612,16 +558,6 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                     us_accumulated[0] += us_s[0]
                     us_accumulated[1] += us_s[1]
                 us_pred = "yes" if us_accumulated[0] > us_accumulated[1] else "no"
-            elif multi_prompt:
-                us_accumulated = [0.0, 0.0]
-                for tmpl, pfx in zip(YN_NUMBERED_PROMPTS, prefix):
-                    up = pfx + tmpl.format(country="United States", scenario=scenario_text(ex), options=option_str)
-                    us_s = score_choices(model, tokenizer, up, choices, leading_space=False)
-                    us_accumulated[0] += us_s[0]
-                    us_accumulated[1] += us_s[1]
-                us_yes_score = us_accumulated[choices.index(yes_tok)]
-                us_no_score = us_accumulated[choices.index(no_tok)]
-                us_pred = "yes" if us_yes_score > us_no_score else "no"
             else:
                 us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
                 if generate:
@@ -631,7 +567,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                     us_pred_token = choices[max(range(len(us_scores)), key=us_scores.__getitem__)]
                     us_pred = MC_CHOICE_MAP[us_pred_token] if mc_format else us_pred_token
 
-        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred, "us_pred": us_pred})
+        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred, "us_pred": us_pred, "scores": raw_scores})
 
     def acc(key):
         return correct[key] / total[key] if total[key] else None
@@ -715,12 +651,6 @@ def main():
              "Output gains a _yn suffix.",
     )
     parser.add_argument(
-        "--multi-prompt", action="store_true",
-        help="Score using 4 NormAd-style prompt variants with shuffled numbered options "
-             "(1 or 2). Log-probs are averaged across prompts before argmax. "
-             "Implies yn-only (neutral examples are skipped). Output gains a _mp suffix.",
-    )
-    parser.add_argument(
         "--multi-prompt-word", action="store_true",
         help="Score using 4 NormAd-style prompt variants with direct yes/no answers "
              "(no numbered options). Log-probs averaged across prompts before argmax. "
@@ -767,7 +697,7 @@ def main():
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     yn_sfx = "_yn" if args.yn_only else ""
-    mp_sfx = "_mp" if args.multi_prompt else "_mpw" if args.multi_prompt_word else ""
+    mp_sfx = "_mpw" if args.multi_prompt_word else ""
     usprobe_sfx = "_usprobe" if args.us_probe else ""
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
@@ -788,7 +718,6 @@ def main():
         generate=args.generate,
         yn_only=args.yn_only,
         us_probe=args.us_probe,
-        multi_prompt=args.multi_prompt,
         multi_prompt_word=args.multi_prompt_word,
         neutral_fewshot=args.neutral_fewshot,
     )

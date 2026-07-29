@@ -25,8 +25,5 @@ CONDS=(sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult)
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval_aya_cult_blend] condition=$COND"
 
-python evaluate/eval_blend.py --condition "$COND" --model-size 8b --us-probe
 python evaluate/eval_blend.py --condition "$COND" --model-size 8b --neutral-fewshot --us-probe
-python evaluate/eval_blend.py --condition "$COND" --model-size 8b --multi-prompt --us-probe
-python evaluate/eval_blend.py --condition "$COND" --model-size 8b --few-shot 2 --us-probe
-python evaluate/eval_blend.py --condition "$COND" --model-size 8b --few-shot 2 --multi-prompt --us-probe
+python evaluate/eval_blend.py --condition "$COND" --model-size 8b --neutral-fewshot --multi-prompt --us-probe
