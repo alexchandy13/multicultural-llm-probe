@@ -243,10 +243,11 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 for j, sj in enumerate(s):
                     accumulated[j] += sj
             pred = CHOICES[max(range(4), key=accumulated.__getitem__)]
+            raw_scores = list(accumulated)
         else:
             p = prefix + prompt + SCORING_SUFFIX
-            scores = score_choices(model, tokenizer, p)
-            pred = CHOICES[max(range(4), key=scores.__getitem__)]
+            raw_scores = score_choices(model, tokenizer, p)
+            pred = CHOICES[max(range(4), key=raw_scores.__getitem__)]
 
         total[("all", "all")] += 1
         total[("country", c)] += 1
@@ -275,6 +276,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         predictions.append({
             "country": c, "group": group, "gold": gold,
             "pred": pred, "us_pred": us_pred, "mcqid": ex["MCQID"],
+            "scores": raw_scores,
         })
 
     def acc(key):

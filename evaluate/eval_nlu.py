@@ -253,13 +253,13 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
             continue  # skip examples with missing labels (e.g. GLUE test set)
 
         prompt = prefix + format_prompt(dataset, ex)
-        scores = score_choices(model, tokenizer, prompt, choices)
-        pred = choices[max(range(len(choices)), key=scores.__getitem__)]
+        raw_scores = score_choices(model, tokenizer, prompt, choices)
+        pred = choices[max(range(len(choices)), key=raw_scores.__getitem__)]
 
         total += 1
         if pred == gold:
             correct += 1
-        predictions.append({"gold": gold, "pred": pred})
+        predictions.append({"gold": gold, "pred": pred, "scores": list(raw_scores)})
 
     accuracy = correct / total if total else None
     result = {
