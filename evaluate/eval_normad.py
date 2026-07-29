@@ -549,6 +549,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             correct[("group", group)] += 1
 
         us_pred = None
+        us_raw_scores = None
         if us_probe and c != "US":
             if multi_prompt_word:
                 us_accumulated = [0.0, 0.0]
@@ -558,6 +559,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                     us_accumulated[0] += us_s[0]
                     us_accumulated[1] += us_s[1]
                 us_pred = "yes" if us_accumulated[0] > us_accumulated[1] else "no"
+                us_raw_scores = us_accumulated
             else:
                 us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
                 if generate:
@@ -566,8 +568,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                     us_scores = score_choices(model, tokenizer, us_prompt, choices, priors=priors)
                     us_pred_token = choices[max(range(len(us_scores)), key=us_scores.__getitem__)]
                     us_pred = MC_CHOICE_MAP[us_pred_token] if mc_format else us_pred_token
+                    us_raw_scores = list(us_scores)
 
-        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred, "us_pred": us_pred, "scores": raw_scores})
+        predictions.append({"country": c, "group": group, "gold": gold, "pred": pred, "us_pred": us_pred, "scores": raw_scores, "us_scores": us_raw_scores})
 
     def acc(key):
         return correct[key] / total[key] if total[key] else None
