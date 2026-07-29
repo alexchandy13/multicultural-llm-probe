@@ -56,7 +56,7 @@ def calibrate(input_path: Path, condition: str, model_size: str) -> None:
             "Expected '*_mpw_*' or '*_yn_*' in the path."
         )
 
-    model, tokenizer = load_model_for_eval(resolve_condition(condition, model_size))
+    tokenizer, model = load_model_for_eval(resolve_condition(condition, model_size=model_size))
 
     print(f"Computing priors (mode={mode})...")
     if mode == "mpw":
