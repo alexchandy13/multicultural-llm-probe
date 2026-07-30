@@ -25,8 +25,8 @@ CONDS=(sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult)
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[eval_aya_cult_gemma4_normad] condition=$COND"
 
-python evaluate/eval_normad.py --condition "$COND" --model-size gemma4
-python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --calibrate
-python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --few-shot 2 --yn-only
+# python evaluate/eval_normad.py --condition "$COND" --model-size gemma4
+# python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --calibrate
+# python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --few-shot 2 --yn-only
 python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --neutral-fewshot --yn-only --us-probe
 python evaluate/eval_normad.py --condition "$COND" --model-size gemma4 --neutral-fewshot --multi-prompt-word --us-probe
