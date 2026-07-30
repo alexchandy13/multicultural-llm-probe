@@ -4,16 +4,17 @@ X axis: Base → SFT → SFT+DPO
 Blue lines: Western (US-centric) — solid=cult, dotted=nocult
 Red lines:  Non-Western           — solid=cult, dotted=nocult
 
-Produces:
-  outputs/figures/aya_cult_normad_accuracy.pdf
-  outputs/figures/aya_cult_normad_us_default_rate.pdf
-  outputs/figures/aya_cult_blend_accuracy.pdf
-  outputs/figures/aya_cult_blend_us_default_rate.pdf
-  outputs/figures/aya_cult_boolq_accuracy.pdf
-  outputs/figures/aya_cult_csqa_accuracy.pdf
+Produces (e.g. for --model-size 8b):
+  outputs/figures/aya_cult_8b_normad_accuracy.pdf
+  outputs/figures/aya_cult_8b_normad_us_default_rate.pdf
+  outputs/figures/aya_cult_8b_blend_accuracy.pdf
+  outputs/figures/aya_cult_8b_blend_us_default_rate.pdf
+  outputs/figures/aya_cult_8b_boolq_accuracy.pdf
+  outputs/figures/aya_cult_8b_csqa_accuracy.pdf
 """
 from __future__ import annotations
 
+import argparse
 import json
 import math
 from pathlib import Path
@@ -35,18 +36,18 @@ CULT_CONDITIONS   = ["base", "sft_aya_cult",   "sftdpo_aya_cult"]
 NOCULT_CONDITIONS = ["base", "sft_aya_nocult", "sftdpo_aya_nocult"]
 
 
-def load_normad_preds(cond: str) -> list[dict]:
-    path = BEHAVIORAL_DIR / f"normad_{cond}_8b_nfs_mpw_usprobe_batch_calibrated.json"
+def load_normad_preds(cond: str, model_size: str) -> list[dict]:
+    path = BEHAVIORAL_DIR / f"normad_{cond}_{model_size}_nfs_mpw_usprobe_batch_calibrated.json"
     return json.loads(path.read_text())["predictions"]
 
 
-def load_blend_preds(cond: str) -> list[dict]:
-    path = BEHAVIORAL_DIR / f"blend_{cond}_8b_nfs_usprobe.json"
+def load_blend_preds(cond: str, model_size: str) -> list[dict]:
+    path = BEHAVIORAL_DIR / f"blend_{cond}_{model_size}_nfs_usprobe.json"
     return json.loads(path.read_text())["predictions"]
 
 
-def load_nlu_preds(dataset: str, cond: str) -> list[dict]:
-    path = BEHAVIORAL_DIR / f"nlu_{dataset}_{cond}_8b_nfs.json"
+def load_nlu_preds(dataset: str, cond: str, model_size: str) -> list[dict]:
+    path = BEHAVIORAL_DIR / f"nlu_{dataset}_{cond}_{model_size}_nfs.json"
     return json.loads(path.read_text())["predictions"]
 
 
@@ -181,9 +182,15 @@ def make_figure(
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model-size", default="8b", choices=["8b", "gemma4", "qwen35"])
+    args = parser.parse_args()
+    ms = args.model_size
+    pfx = f"aya_cult_{ms}"
+
     # --- NormAd ---
-    cult_preds   = [load_normad_preds(c) for c in CULT_CONDITIONS]
-    nocult_preds = [load_normad_preds(c) for c in NOCULT_CONDITIONS]
+    cult_preds   = [load_normad_preds(c, ms) for c in CULT_CONDITIONS]
+    nocult_preds = [load_normad_preds(c, ms) for c in NOCULT_CONDITIONS]
 
     cult_acc   = [accuracy_by_group(p, yn_only=True) for p in cult_preds]
     nocult_acc = [accuracy_by_group(p, yn_only=True) for p in nocult_preds]
@@ -194,7 +201,7 @@ def main():
         nocult_western    = [d["Western"]     for d in nocult_acc],
         nocult_nonwestern = [d["Non-Western"] for d in nocult_acc],
         ylabel="NormAd Accuracy",
-        out_path=FIGURES_DIR / "aya_cult_normad_accuracy.pdf",
+        out_path=FIGURES_DIR / f"{pfx}_normad_accuracy.pdf",
         y_range=0.15,
     )
 
@@ -202,12 +209,12 @@ def main():
         cult_vals   = [us_default_overall(p, yn_only=True) for p in cult_preds],
         nocult_vals = [us_default_overall(p, yn_only=True) for p in nocult_preds],
         ylabel="NormAd US-Default Rate Among Errors",
-        out_path=FIGURES_DIR / "aya_cult_normad_us_default_rate.pdf",
+        out_path=FIGURES_DIR / f"{pfx}_normad_us_default_rate.pdf",
     )
 
     # --- BLEnD ---
-    cult_blend   = [load_blend_preds(c) for c in CULT_CONDITIONS]
-    nocult_blend = [load_blend_preds(c) for c in NOCULT_CONDITIONS]
+    cult_blend   = [load_blend_preds(c, ms) for c in CULT_CONDITIONS]
+    nocult_blend = [load_blend_preds(c, ms) for c in NOCULT_CONDITIONS]
 
     cult_blend_acc   = [accuracy_by_group(p, yn_only=False) for p in cult_blend]
     nocult_blend_acc = [accuracy_by_group(p, yn_only=False) for p in nocult_blend]
@@ -218,7 +225,7 @@ def main():
         nocult_western    = [d["Western"]     for d in nocult_blend_acc],
         nocult_nonwestern = [d["Non-Western"] for d in nocult_blend_acc],
         ylabel="BLEnD Accuracy",
-        out_path=FIGURES_DIR / "aya_cult_blend_accuracy.pdf",
+        out_path=FIGURES_DIR / f"{pfx}_blend_accuracy.pdf",
         y_range=0.15,
     )
 
@@ -226,19 +233,18 @@ def main():
         cult_vals   = [us_default_overall(p, yn_only=False) for p in cult_blend],
         nocult_vals = [us_default_overall(p, yn_only=False) for p in nocult_blend],
         ylabel="BLEnD US-Default Rate Among Errors",
-        out_path=FIGURES_DIR / "aya_cult_blend_us_default_rate.pdf",
+        out_path=FIGURES_DIR / f"{pfx}_blend_us_default_rate.pdf",
     )
-
 
     # --- NLU: BoolQ and CSQA (overall accuracy only, no group split) ---
     for dataset, label in [("boolq", "BoolQ"), ("csqa", "CSQA")]:
-        cult_nlu   = [load_nlu_preds(dataset, c) for c in CULT_CONDITIONS]
-        nocult_nlu = [load_nlu_preds(dataset, c) for c in NOCULT_CONDITIONS]
+        cult_nlu   = [load_nlu_preds(dataset, c, ms) for c in CULT_CONDITIONS]
+        nocult_nlu = [load_nlu_preds(dataset, c, ms) for c in NOCULT_CONDITIONS]
         make_figure_overall(
             cult_vals   = [accuracy_overall(p) for p in cult_nlu],
             nocult_vals = [accuracy_overall(p) for p in nocult_nlu],
             ylabel=f"{label} Accuracy",
-            out_path=FIGURES_DIR / f"aya_cult_{dataset}_accuracy.pdf",
+            out_path=FIGURES_DIR / f"{pfx}_{dataset}_accuracy.pdf",
             y_range=0.15,
         )
 
