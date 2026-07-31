@@ -1,8 +1,10 @@
 """Sanity check: run spaCy NER on a small sample and print results.
 
+Routes by the 'language' field: English → en_core_web_lg, other → xx_ent_wiki_sm.
+
 Usage:
     python scripts/check_referenced_culture.py
-    python scripts/check_referenced_culture.py --n 30 --model en_core_web_lg
+    python scripts/check_referenced_culture.py --n 30
 """
 from __future__ import annotations
 
@@ -29,14 +31,15 @@ def extract_entities(text: str, nlp) -> list[str]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data")
-    parser.add_argument("--model",    default="en_core_web_lg")
     parser.add_argument("--n",        type=int, default=30)
     parser.add_argument("--seed",     type=int, default=42)
     args = parser.parse_args()
 
     import spacy
-    print(f"Loading {args.model}...")
-    nlp = spacy.load(args.model)
+    print("Loading en_core_web_lg...")
+    nlp_en = spacy.load("en_core_web_lg")
+    print("Loading xx_ent_wiki_sm...")
+    nlp_xx = spacy.load("xx_ent_wiki_sm")
 
     from datasets import load_from_disk
     data_dir = PROJECT_ROOT / args.data_dir
@@ -61,10 +64,12 @@ def main() -> None:
         for ex in sample:
             raw = ex[field]
             scan_text = raw.split("\n\n")[0] if aya_mode else raw
+            language = ex.get("language", "")
+            nlp = nlp_en if language == "English" else nlp_xx
             entities = extract_entities(scan_text, nlp)
             culture_tag = ex.get("culture_tag", "")
             display_text = scan_text[:120].replace("\n", " ")
-            print(f"\n  [{culture_tag}]")
+            print(f"\n  [{culture_tag}] [{language}]")
             print(f"  text:     {display_text}{'...' if len(scan_text) > 120 else ''}")
             print(f"  entities: {entities if entities else '(none)'}")
 

@@ -4,16 +4,21 @@ Uses spaCy NER to find GPE (countries/cities/states), NORP (nationalities/groups
 and LOC (geographic locations) entities. Saves a 'referenced_culture' field as a list
 of unique entity strings found in the text.
 
+Routes by the 'language' field already in each dataset:
+  - English examples  → en_core_web_lg  (higher accuracy)
+  - All other languages → xx_ent_wiki_sm (multilingual, ~40 languages)
+
 For AYA datasets ('text' = inputs + '\n\n' + targets) only the inputs portion is scanned.
 For DPO datasets the 'prompt' field is scanned.
 
 Prerequisites:
     pip install spacy
     python -m spacy download en_core_web_lg
+    python -m spacy download xx_ent_wiki_sm
 
 Usage:
     python scripts/extract_referenced_culture.py
-    python scripts/extract_referenced_culture.py --data-dir data --model en_core_web_lg --batch-size 256
+    python scripts/extract_referenced_culture.py --data-dir data
 """
 from __future__ import annotations
 
@@ -26,18 +31,33 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENTITY_LABELS = {"GPE", "NORP", "LOC"}
 
 
-def extract_entities(texts: list[str], nlp) -> list[list[str]]:
-    results = []
-    for doc in nlp.pipe(texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"]):
-        seen = []
-        seen_lower = set()
-        for ent in doc.ents:
-            if ent.label_ in ENTITY_LABELS:
-                text = ent.text.strip()
-                if text.lower() not in seen_lower:
-                    seen.append(text)
-                    seen_lower.add(text.lower())
-        results.append(seen)
+def _dedupe_entities(doc) -> list[str]:
+    seen, seen_lower = [], set()
+    for ent in doc.ents:
+        if ent.label_ in ENTITY_LABELS:
+            t = ent.text.strip()
+            if t.lower() not in seen_lower:
+                seen.append(t)
+                seen_lower.add(t.lower())
+    return seen
+
+
+def extract_entities_batched(texts: list[str], languages: list[str],
+                              nlp_en, nlp_xx) -> list[list[str]]:
+    """Route each text to the right NER model by language, run in batches."""
+    results: list[list[str]] = [[] for _ in texts]
+
+    en_indices = [i for i, lang in enumerate(languages) if lang == "English"]
+    xx_indices = [i for i, lang in enumerate(languages) if lang != "English"]
+
+    for nlp, indices in [(nlp_en, en_indices), (nlp_xx, xx_indices)]:
+        if not indices:
+            continue
+        batch_texts = [texts[i] for i in indices]
+        for batch_idx, doc in enumerate(nlp.pipe(
+                batch_texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"])):
+            results[indices[batch_idx]] = _dedupe_entities(doc)
+
     return results
 
 
@@ -50,7 +70,8 @@ def save_in_place(ds, path: Path) -> None:
     shutil.rmtree(str(backup), ignore_errors=True)
 
 
-def process_dataset(name: str, path: Path, nlp, text_field: str, aya_mode: bool) -> None:
+def process_dataset(name: str, path: Path, nlp_en, nlp_xx,
+                    text_field: str, aya_mode: bool) -> None:
     from datasets import load_from_disk
 
     print(f"\nProcessing {name}...")
@@ -60,16 +81,17 @@ def process_dataset(name: str, path: Path, nlp, text_field: str, aya_mode: bool)
         print(f"  {name}: 'referenced_culture' already present, skipping")
         return
 
-    def get_scan_text(ex):
+    texts, languages = [], []
+    for ex in ds:
         raw = ex[text_field]
-        if aya_mode:
-            # text = inputs + '\n\n' + targets — scan inputs portion only
-            return raw.split("\n\n")[0]
-        return raw
+        texts.append(raw.split("\n\n")[0] if aya_mode else raw)
+        languages.append(ex.get("language", ""))
 
-    texts = [get_scan_text(ex) for ex in ds]
-    print(f"  Extracting entities from {len(texts):,} examples...")
-    entity_lists = extract_entities(texts, nlp)
+    n_en = sum(1 for l in languages if l == "English")
+    print(f"  {len(texts):,} examples: {n_en:,} English → en_core_web_lg, "
+          f"{len(texts)-n_en:,} other → xx_ent_wiki_sm")
+
+    entity_lists = extract_entities_batched(texts, languages, nlp_en, nlp_xx)
 
     n_with_culture = sum(1 for e in entity_lists if e)
     print(f"  {n_with_culture:,}/{len(texts):,} examples have at least one entity "
@@ -85,21 +107,20 @@ def process_dataset(name: str, path: Path, nlp, text_field: str, aya_mode: bool)
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir",   default="data")
-    parser.add_argument("--model",      default="en_core_web_lg",
-                        help="spaCy model name (must be downloaded)")
+    parser.add_argument("--data-dir", default="data")
     args = parser.parse_args()
 
     import spacy
-    print(f"Loading spaCy model: {args.model}")
-    nlp = spacy.load(args.model)
+    print("Loading en_core_web_lg...")
+    nlp_en = spacy.load("en_core_web_lg")
+    print("Loading xx_ent_wiki_sm...")
+    nlp_xx = spacy.load("xx_ent_wiki_sm")
 
     data_dir = PROJECT_ROOT / args.data_dir
 
     datasets_cfg = [
-        # (name,        text_field, aya_mode)
-        ("aya_cult",  "text",   True),
-        ("dpo_cult",  "prompt", False),
+        ("aya_cult", "text",   True),
+        ("dpo_cult", "prompt", False),
     ]
 
     for name, field, aya_mode in datasets_cfg:
@@ -107,7 +128,7 @@ def main() -> None:
         if not path.exists():
             print(f"\nSkipping {name}: not found at {path}")
             continue
-        process_dataset(name, path, nlp, field, aya_mode)
+        process_dataset(name, path, nlp_en, nlp_xx, field, aya_mode)
 
     print("\nDone.")
 
