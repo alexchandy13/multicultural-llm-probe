@@ -66,10 +66,11 @@ def main() -> None:
             scan_text = raw.split("\n\n")[0] if aya_mode else raw
             language = ex.get("language", "")
             entities = extract_entities(scan_text, nlp_en)
-            model_used = "en"
-            if not entities:
+            if entities:
+                model_used = "en"
+            else:
                 entities = extract_entities(scan_text, nlp_xx)
-                model_used = "xx" if entities else "en"
+                model_used = "xx" if entities else "en+xx→none"
             culture_tag = ex.get("culture_tag", "")
             display_text = scan_text[:120].replace("\n", " ")
             print(f"\n  [{culture_tag}] [{language}] [model={model_used}]")
