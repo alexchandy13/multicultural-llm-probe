@@ -3,6 +3,10 @@
 Rebuilds rich tag caches by re-streaming CultureMarkers (skipped if already rich),
 then joins with each saved dataset to add metadata columns without changing examples.
 
+For AYA datasets the saved 'text' field is '{inputs}\\n\\n{targets}', but the cache
+is keyed on _norm(inputs). We re-stream the AYA source dataset to build a
+{_norm(full_text): metadata} lookup so the join works correctly.
+
 Usage:
     python scripts/add_metadata_to_splits.py
     python scripts/add_metadata_to_splits.py --data-dir data
@@ -11,16 +15,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
+import tempfile
 from pathlib import Path
 
-from datasets import load_from_disk
+from datasets import load_dataset, load_from_disk
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-try:
-    from datasets import load_dataset
-except ImportError:
-    raise SystemExit("datasets package required")
 
 
 def _norm(s: str) -> str:
@@ -34,16 +35,16 @@ def _is_rich(tags: dict) -> bool:
 
 
 def build_rich_cache(cache_dir: Path) -> tuple[dict, dict, dict]:
-    """Build or load rich {text: {culture_tag, domain_tag, task_intent_tag, language}} caches."""
+    """Build or load rich {inputs_text: tag_dict} caches from CultureMarkers."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         "aya":   cache_dir / "aya_tags.json",
         "uf":    cache_dir / "uf_tags.json",
         "prism": cache_dir / "prism_tags.json",
     }
-    tags = {"aya": {}, "uf": {}, "prism": {}}
+    tags: dict[str, dict] = {"aya": {}, "uf": {}, "prism": {}}
 
-    need = {}
+    need: dict[str, bool] = {}
     for src, path in paths.items():
         if path.exists():
             with open(path) as f:
@@ -94,6 +95,26 @@ def build_rich_cache(cache_dir: Path) -> tuple[dict, dict, dict]:
     return tags["aya"], tags["uf"], tags["prism"]
 
 
+def build_aya_text_lookup(aya_cache: dict) -> dict:
+    """Build {_norm(full_text): metadata} by joining AYA source dataset with cache.
+
+    Needed because saved AYA rows store '{inputs}\\n\\n{targets}' as 'text',
+    but the cache is keyed on _norm(inputs) only.
+    """
+    print("  Building AYA full-text lookup (streaming aya_dataset)...")
+    ds = load_dataset("CohereForAI/aya_dataset", split="train")
+    lookup: dict[str, dict] = {}
+    n_matched = 0
+    for ex in ds:
+        key = _norm(ex["inputs"])
+        if key in aya_cache:
+            full_text_key = _norm(f"{ex['inputs']}\n\n{ex['targets']}")
+            lookup[full_text_key] = aya_cache[key]
+            n_matched += 1
+    print(f"  AYA lookup: {n_matched:,} entries built from {len(ds):,} source examples")
+    return lookup
+
+
 def add_metadata(ds, cache: dict, key_field: str, name: str):
     """Add metadata columns to dataset by joining on key_field."""
     meta_fields = ["culture_tag", "domain_tag", "task_intent_tag", "language"]
@@ -120,6 +141,14 @@ def add_metadata(ds, cache: dict, key_field: str, name: str):
     return ds
 
 
+def save_in_place(ds, path: Path) -> None:
+    """Save dataset to path, working around the can't-overwrite-itself restriction."""
+    tmp = path.parent / (path.name + "_tmp")
+    ds.save_to_disk(str(tmp))
+    shutil.rmtree(str(path))
+    tmp.rename(path)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data")
@@ -131,11 +160,14 @@ def main() -> None:
     aya_cache, uf_cache, prism_cache = build_rich_cache(cache_dir)
     dpo_cache = {**uf_cache, **prism_cache}
 
+    # AYA needs a full-text lookup because saved 'text' = inputs + '\n\n' + targets
+    aya_text_lookup = build_aya_text_lookup(aya_cache)
+
     datasets_cfg = [
-        ("aya_cult",   aya_cache,  "text"),
-        ("aya_nocult", aya_cache,  "text"),
-        ("dpo_cult",   dpo_cache,  "prompt"),
-        ("dpo_nocult", dpo_cache,  "prompt"),
+        ("aya_cult",   aya_text_lookup, "text"),
+        ("aya_nocult", aya_text_lookup, "text"),
+        ("dpo_cult",   dpo_cache,       "prompt"),
+        ("dpo_nocult", dpo_cache,       "prompt"),
     ]
 
     for name, cache, key_field in datasets_cfg:
@@ -146,7 +178,7 @@ def main() -> None:
         print(f"\nProcessing {name}...")
         ds = load_from_disk(str(path))
         ds = add_metadata(ds, cache, key_field, name)
-        ds.save_to_disk(str(path))
+        save_in_place(ds, path)
         print(f"  Saved {name}: {len(ds):,} examples, columns: {ds.column_names}")
 
 
