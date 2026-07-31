@@ -142,11 +142,16 @@ def add_metadata(ds, cache: dict, key_field: str, name: str):
 
 
 def save_in_place(ds, path: Path) -> None:
-    """Save dataset to path, working around the can't-overwrite-itself restriction."""
-    tmp = path.parent / (path.name + "_tmp")
+    """Save dataset to path, working around the can't-overwrite-itself restriction.
+
+    Uses rename-aside strategy to avoid NFS rmtree issues with lingering .nfs* files.
+    """
+    tmp    = path.parent / (path.name + "_tmp")
+    backup = path.parent / (path.name + "_old")
     ds.save_to_disk(str(tmp))
-    shutil.rmtree(str(path))
+    path.rename(backup)
     tmp.rename(path)
+    shutil.rmtree(str(backup), ignore_errors=True)
 
 
 def main() -> None:
