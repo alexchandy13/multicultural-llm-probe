@@ -65,11 +65,14 @@ def main() -> None:
             raw = ex[field]
             scan_text = raw.split("\n\n")[0] if aya_mode else raw
             language = ex.get("language", "")
-            nlp = nlp_en if language == "English" else nlp_xx
-            entities = extract_entities(scan_text, nlp)
+            entities = extract_entities(scan_text, nlp_en)
+            model_used = "en"
+            if not entities:
+                entities = extract_entities(scan_text, nlp_xx)
+                model_used = "xx" if entities else "en"
             culture_tag = ex.get("culture_tag", "")
             display_text = scan_text[:120].replace("\n", " ")
-            print(f"\n  [{culture_tag}] [{language}]")
+            print(f"\n  [{culture_tag}] [{language}] [model={model_used}]")
             print(f"  text:     {display_text}{'...' if len(scan_text) > 120 else ''}")
             print(f"  entities: {entities if entities else '(none)'}")
 

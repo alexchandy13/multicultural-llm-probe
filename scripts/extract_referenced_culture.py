@@ -42,21 +42,22 @@ def _dedupe_entities(doc) -> list[str]:
     return seen
 
 
-def extract_entities_batched(texts: list[str], languages: list[str],
-                              nlp_en, nlp_xx) -> list[list[str]]:
-    """Route each text to the right NER model by language, run in batches."""
+def extract_entities_batched(texts: list[str], nlp_en, nlp_xx) -> list[list[str]]:
+    """Run en_core_web_lg on all texts; fall back to xx_ent_wiki_sm where nothing is found."""
     results: list[list[str]] = [[] for _ in texts]
 
-    en_indices = [i for i, lang in enumerate(languages) if lang == "English"]
-    xx_indices = [i for i, lang in enumerate(languages) if lang != "English"]
+    # Pass 1: English model on everything
+    for i, doc in enumerate(nlp_en.pipe(
+            texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"])):
+        results[i] = _dedupe_entities(doc)
 
-    for nlp, indices in [(nlp_en, en_indices), (nlp_xx, xx_indices)]:
-        if not indices:
-            continue
-        batch_texts = [texts[i] for i in indices]
-        for batch_idx, doc in enumerate(nlp.pipe(
-                batch_texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"])):
-            results[indices[batch_idx]] = _dedupe_entities(doc)
+    # Pass 2: multilingual model only where English found nothing
+    fallback_indices = [i for i, r in enumerate(results) if not r]
+    if fallback_indices:
+        fallback_texts = [texts[i] for i in fallback_indices]
+        for batch_idx, doc in enumerate(nlp_xx.pipe(
+                fallback_texts, batch_size=256, disable=["tagger", "parser", "lemmatizer"])):
+            results[fallback_indices[batch_idx]] = _dedupe_entities(doc)
 
     return results
 
@@ -81,17 +82,15 @@ def process_dataset(name: str, path: Path, nlp_en, nlp_xx,
         print(f"  {name}: 'referenced_culture' already present, skipping")
         return
 
-    texts, languages = [], []
+    texts = []
     for ex in ds:
         raw = ex[text_field]
         texts.append(raw.split("\n\n")[0] if aya_mode else raw)
-        languages.append(ex.get("language", ""))
 
-    n_en = sum(1 for l in languages if l == "English")
-    print(f"  {len(texts):,} examples: {n_en:,} English → en_core_web_lg, "
-          f"{len(texts)-n_en:,} other → xx_ent_wiki_sm")
-
-    entity_lists = extract_entities_batched(texts, languages, nlp_en, nlp_xx)
+    print(f"  Pass 1: en_core_web_lg on all {len(texts):,} examples...")
+    entity_lists = extract_entities_batched(texts, nlp_en, nlp_xx)
+    n_fallback = sum(1 for e in entity_lists if not e)
+    print(f"  Pass 2: xx_ent_wiki_sm fallback on {n_fallback:,} examples with no entities found")
 
     n_with_culture = sum(1 for e in entity_lists if e)
     print(f"  {n_with_culture:,}/{len(texts):,} examples have at least one entity "
