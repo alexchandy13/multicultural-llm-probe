@@ -202,7 +202,7 @@ def main():
         nocult_nonwestern = [d["Non-Western"] for d in nocult_acc],
         ylabel="NormAd Accuracy",
         out_path=FIGURES_DIR / f"{pfx}_normad_accuracy.pdf",
-        y_range=0.15,
+        y_range=0.30,
     )
 
     make_figure_overall(
@@ -210,6 +210,7 @@ def main():
         nocult_vals = [us_default_overall(p, yn_only=True) for p in nocult_preds],
         ylabel="NormAd US-Default Rate Among Errors",
         out_path=FIGURES_DIR / f"{pfx}_normad_us_default_rate.pdf",
+        y_range=0.30,
     )
 
     # --- BLEnD ---
@@ -226,7 +227,7 @@ def main():
         nocult_nonwestern = [d["Non-Western"] for d in nocult_blend_acc],
         ylabel="BLEnD Accuracy",
         out_path=FIGURES_DIR / f"{pfx}_blend_accuracy.pdf",
-        y_range=0.15,
+        y_range=0.30,
     )
 
     make_figure_overall(
@@ -234,6 +235,7 @@ def main():
         nocult_vals = [us_default_overall(p, yn_only=False) for p in nocult_blend],
         ylabel="BLEnD US-Default Rate Among Errors",
         out_path=FIGURES_DIR / f"{pfx}_blend_us_default_rate.pdf",
+        y_range=0.30,
     )
 
     # --- NLU: BoolQ and CSQA (overall accuracy only, no group split) ---
@@ -245,7 +247,7 @@ def main():
             nocult_vals = [accuracy_overall(p) for p in nocult_nlu],
             ylabel=f"{label} Accuracy",
             out_path=FIGURES_DIR / f"{pfx}_{dataset}_accuracy.pdf",
-            y_range=0.15,
+            y_range=0.30,
         )
 
 

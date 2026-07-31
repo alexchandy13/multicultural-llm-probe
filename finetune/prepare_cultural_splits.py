@@ -1,7 +1,10 @@
 """Build culturally-split training sets by joining CultureMarkers tags with source datasets.
 
-Streams CultureMarkers once to build {inputs_text: culture_tag} lookups for Aya,
+Streams CultureMarkers once to build {inputs_text: tag_dict} lookups for Aya,
 UltraFeedback, and PRISM, then joins with the original datasets to recover responses.
+
+Each saved example includes metadata fields: culture_tag, domain_tag, task_intent_tag,
+and language (from AYA dataset directly; from CultureMarkers for UF/PRISM).
 
 Outputs (saved to --out-dir):
   aya_cult/    — Aya examples tagged as cultural (culture_tag != NoCulture), ~TARGET_SFT rows
@@ -13,6 +16,8 @@ Outputs (saved to --out-dir):
 
 The tag lookup dicts are cached as JSON so a re-run after partial failure skips
 the ~30-min CultureMarkers stream. Delete tag_cache/ to force a re-stream.
+Cache format: {inputs_text: {culture_tag, domain_tag, task_intent_tag, language}}
+Old caches storing plain strings are detected and ignored (triggers re-stream).
 
 Usage:
     python finetune/prepare_cultural_splits.py
@@ -38,35 +43,45 @@ def _norm(s: str) -> str:
     return " ".join(s.split())
 
 
+def _is_rich_cache(tags: dict) -> bool:
+    """Return True if the cache stores dicts (new format) rather than plain strings (old)."""
+    if not tags:
+        return True
+    sample = next(iter(tags.values()))
+    return isinstance(sample, dict)
+
+
 def build_tag_lookups(do_aya: bool, do_uf: bool, do_prism: bool,
                       cache_dir: Path) -> tuple[dict, dict, dict]:
-    """Stream CultureMarkers once, build {inputs_text: culture_tag} for each source.
+    """Stream CultureMarkers once, build {inputs_text: tag_dict} for each source.
 
-    Results are cached to cache_dir/*.json so a re-run after partial failure
-    skips the expensive stream. Delete tag_cache/ to force a full re-stream.
+    tag_dict contains: culture_tag, domain_tag, task_intent_tag, language.
+    Results are cached to cache_dir/*.json. Old-format caches (plain strings)
+    are detected and ignored, triggering a re-stream.
+    Delete tag_cache/ to force a full re-stream.
     """
     cache_dir.mkdir(parents=True, exist_ok=True)
     aya_cache   = cache_dir / "aya_tags.json"
     uf_cache    = cache_dir / "uf_tags.json"
     prism_cache = cache_dir / "prism_tags.json"
 
-    aya_tags:   dict[str, str] = {}
-    uf_tags:    dict[str, str] = {}
-    prism_tags: dict[str, str] = {}
+    aya_tags:   dict[str, dict] = {}
+    uf_tags:    dict[str, dict] = {}
+    prism_tags: dict[str, dict] = {}
 
     def _load_cache(path, tags):
         with open(path) as f:
-            tags.update(json.load(f))
+            loaded = json.load(f)
+        if not _is_rich_cache(loaded):
+            print(f"  {path}: old-format cache (plain strings), ignoring — will re-stream")
+            return False
+        tags.update(loaded)
         print(f"  loaded {len(tags):,} entries from {path}")
+        return True
 
-    need_aya   = do_aya   and not aya_cache.exists()
-    need_uf    = do_uf    and not uf_cache.exists()
-    need_prism = do_prism and not prism_cache.exists()
-
-    # Load whatever is already cached
-    if do_aya   and not need_aya:   _load_cache(aya_cache,   aya_tags)
-    if do_uf    and not need_uf:    _load_cache(uf_cache,    uf_tags)
-    if do_prism and not need_prism: _load_cache(prism_cache, prism_tags)
+    need_aya   = do_aya   and (not aya_cache.exists()   or not _load_cache(aya_cache,   aya_tags))
+    need_uf    = do_uf    and (not uf_cache.exists()    or not _load_cache(uf_cache,    uf_tags))
+    need_prism = do_prism and (not prism_cache.exists() or not _load_cache(prism_cache, prism_tags))
 
     if need_aya or need_uf or need_prism:
         print("Streaming CultureMarkers to build tag lookups (5.6M rows, ~30 min)...")
@@ -74,12 +89,18 @@ def build_tag_lookups(do_aya: bool, do_uf: bool, do_prism: bool,
         total = 0
         for ex in ds:
             src = ex["dataset_source"]
+            tag_dict = {
+                "culture_tag":     ex.get("culture_tag", ""),
+                "domain_tag":      ex.get("domain_tag", ""),
+                "task_intent_tag": ex.get("task_intent_tag", ""),
+                "language":        ex.get("language", ""),
+            }
             if need_aya and src == "Aya":
-                aya_tags[_norm(ex["inputs"])] = ex["culture_tag"]
+                aya_tags[_norm(ex["inputs"])] = tag_dict
             elif need_uf and src == "UltraFeedback-Alignment":
-                uf_tags[_norm(ex["inputs"])] = ex["culture_tag"]
+                uf_tags[_norm(ex["inputs"])] = tag_dict
             elif need_prism and src == "Prism-Alignment":
-                prism_tags[_norm(ex["inputs"])] = ex["culture_tag"]
+                prism_tags[_norm(ex["inputs"])] = tag_dict
             total += 1
             if total % 200_000 == 0:
                 print(f"  {total:,} rows | aya={len(aya_tags):,} "
@@ -99,7 +120,7 @@ def build_tag_lookups(do_aya: bool, do_uf: bool, do_prism: bool,
     return aya_tags, uf_tags, prism_tags
 
 
-def prepare_aya(aya_tags: dict[str, str], out_dir: Path, seed: int = 42) -> None:
+def prepare_aya(aya_tags: dict[str, dict], out_dir: Path, seed: int = 42) -> None:
     """Join Aya dataset with culture tags, save cultural/nocult splits as SFT text."""
     print("\nLoading Aya dataset...")
     ds = load_dataset("CohereForAI/aya_dataset", split="train")
@@ -109,12 +130,18 @@ def prepare_aya(aya_tags: dict[str, str], out_dir: Path, seed: int = 42) -> None
     n_matched = 0
 
     for ex in ds:
-        tag = aya_tags.get(_norm(ex["inputs"]))
-        if tag is None:
+        tags = aya_tags.get(_norm(ex["inputs"]))
+        if tags is None:
             continue
         n_matched += 1
-        row = {"text": f"{ex['inputs']}\n\n{ex['targets']}"}
-        if tag == "NoCulture":
+        row = {
+            "text":            f"{ex['inputs']}\n\n{ex['targets']}",
+            "language":        ex.get("language", tags.get("language", "")),
+            "culture_tag":     tags.get("culture_tag", ""),
+            "domain_tag":      tags.get("domain_tag", ""),
+            "task_intent_tag": tags.get("task_intent_tag", ""),
+        }
+        if tags.get("culture_tag") == "NoCulture":
             nocult_rows.append(row)
         else:
             cult_rows.append(row)
@@ -143,16 +170,20 @@ def prepare_ultrafeedback(uf_tags: dict[str, str], out_dir: Path, seed: int = 42
     n_matched = 0
 
     for ex in ds:
-        tag = uf_tags.get(_norm(ex["prompt"]))
-        if tag is None:
+        tags = uf_tags.get(_norm(ex["prompt"]))
+        if tags is None:
             continue
         n_matched += 1
         row = {
-            "prompt":   ex["prompt"],
-            "chosen":   ex["chosen"][-1]["content"],
-            "rejected": ex["rejected"][-1]["content"],
+            "prompt":          ex["prompt"],
+            "chosen":          ex["chosen"][-1]["content"],
+            "rejected":        ex["rejected"][-1]["content"],
+            "language":        tags.get("language", ""),
+            "culture_tag":     tags.get("culture_tag", ""),
+            "domain_tag":      tags.get("domain_tag", ""),
+            "task_intent_tag": tags.get("task_intent_tag", ""),
         }
-        if tag == "NoCulture":
+        if tags.get("culture_tag") == "NoCulture":
             nocult_rows.append(row)
         else:
             cult_rows.append(row)
@@ -196,19 +227,23 @@ def prepare_prism(prism_tags: dict[str, str], out_dir: Path, seed: int = 42) -> 
             continue
 
         prompt = chosen_rows[0]["user_prompt"]
-        tag = prism_tags.get(_norm(prompt))
-        if tag is None:
+        tags = prism_tags.get(_norm(prompt))
+        if tags is None:
             continue
         n_matched += 1
 
         # pick lowest-scored rejected to maximize preference signal
         rejected = min(rejected_rows, key=lambda r: r["score"])
         row = {
-            "prompt":   prompt,
-            "chosen":   chosen_rows[0]["model_response"],
-            "rejected": rejected["model_response"],
+            "prompt":          prompt,
+            "chosen":          chosen_rows[0]["model_response"],
+            "rejected":        rejected["model_response"],
+            "language":        tags.get("language", ""),
+            "culture_tag":     tags.get("culture_tag", ""),
+            "domain_tag":      tags.get("domain_tag", ""),
+            "task_intent_tag": tags.get("task_intent_tag", ""),
         }
-        if tag == "NoCulture":
+        if tags.get("culture_tag") == "NoCulture":
             nocult_rows.append(row)
         else:
             cult_rows.append(row)
