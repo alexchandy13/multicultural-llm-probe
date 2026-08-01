@@ -1,6 +1,4 @@
-"""Sanity check: run spaCy NER on a small sample and print results.
-
-Routes by the 'language' field: English → en_core_web_lg, other → xx_ent_wiki_sm.
+"""Sanity check: run spaCy en_core_web_lg NER on a small sample and print results.
 
 Usage:
     python scripts/check_referenced_culture.py
@@ -37,9 +35,7 @@ def main() -> None:
 
     import spacy
     print("Loading en_core_web_lg...")
-    nlp_en = spacy.load("en_core_web_lg")
-    print("Loading xx_ent_wiki_sm...")
-    nlp_xx = spacy.load("xx_ent_wiki_sm")
+    nlp = spacy.load("en_core_web_lg")
 
     from datasets import load_from_disk
     data_dir = PROJECT_ROOT / args.data_dir
@@ -65,15 +61,10 @@ def main() -> None:
             raw = ex[field]
             scan_text = raw.split("\n\n")[0] if aya_mode else raw
             language = ex.get("language", "")
-            entities = extract_entities(scan_text, nlp_en)
-            if entities:
-                model_used = "en"
-            else:
-                entities = extract_entities(scan_text, nlp_xx)
-                model_used = "xx" if entities else "en+xx→none"
             culture_tag = ex.get("culture_tag", "")
+            entities = extract_entities(scan_text, nlp)
             display_text = scan_text[:120].replace("\n", " ")
-            print(f"\n  [{culture_tag}] [{language}] [model={model_used}]")
+            print(f"\n  [{culture_tag}] [{language}]")
             print(f"  text:     {display_text}{'...' if len(scan_text) > 120 else ''}")
             print(f"  entities: {entities if entities else '(none)'}")
 
