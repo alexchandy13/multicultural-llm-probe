@@ -1,4 +1,4 @@
-"""Sanity check: run spaCy en_core_web_lg NER on a small sample and print results.
+"""Sanity check: run spaCy NER + geo normalization on a small sample and print results.
 
 Usage:
     python scripts/check_referenced_culture.py
@@ -14,18 +14,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ENTITY_LABELS = {"GPE", "NORP", "LOC"}
 
 
-def extract_entities(text: str, nlp) -> list[str]:
-    doc = nlp(text, disable=["tagger", "parser", "lemmatizer"])
-    seen, seen_lower = [], set()
-    for ent in doc.ents:
-        if ent.label_ in ENTITY_LABELS:
-            t = ent.text.strip()
-            if t.lower() not in seen_lower:
-                seen.append(t)
-                seen_lower.add(t.lower())
-    return seen
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data-dir", default="data")
@@ -34,8 +22,14 @@ def main() -> None:
     args = parser.parse_args()
 
     import spacy
+    from extract_referenced_culture import (
+        build_geo_lookup, _extract_raw, resolve_entities,
+    )
+
     print("Loading en_core_web_lg...")
     nlp = spacy.load("en_core_web_lg")
+    print("Building geo lookup...")
+    country_names, city_to_country, extras, countries_by_code = build_geo_lookup()
 
     from datasets import load_from_disk
     data_dir = PROJECT_ROOT / args.data_dir
@@ -58,15 +52,21 @@ def main() -> None:
         print(f"{'='*70}")
 
         for ex in sample:
-            raw = ex[field]
-            scan_text = raw.split("\n\n")[0] if aya_mode else raw
-            language = ex.get("language", "")
+            raw_text = ex[field]
+            scan_text = raw_text.split("\n\n")[0] if aya_mode else raw_text
+            language   = ex.get("language", "")
             culture_tag = ex.get("culture_tag", "")
-            entities = extract_entities(scan_text, nlp)
+
+            doc = nlp(scan_text, disable=["tagger", "parser", "lemmatizer"])
+            raw_ents = _extract_raw(doc)
+            normalized = resolve_entities(raw_ents, country_names, city_to_country,
+                                          extras, countries_by_code)
+
             display_text = scan_text[:120].replace("\n", " ")
             print(f"\n  [{culture_tag}] [{language}]")
-            print(f"  text:     {display_text}{'...' if len(scan_text) > 120 else ''}")
-            print(f"  entities: {entities if entities else '(none)'}")
+            print(f"  text:       {display_text}{'...' if len(scan_text) > 120 else ''}")
+            print(f"  raw NER:    {raw_ents if raw_ents else '(none)'}")
+            print(f"  normalized: {normalized if normalized else '(none)'}")
 
 
 if __name__ == "__main__":
