@@ -75,6 +75,16 @@ def us_default_overall(preds: list[dict], yn_only: bool = True) -> float:
     return sum(1 for p in errors if p["pred"] == p["us_pred"]) / len(errors) if errors else float("nan")
 
 
+def us_default_all(preds: list[dict], yn_only: bool = True) -> float:
+    """US-default rate over all non-US predictions (not just errors)."""
+    subset = [p for p in preds
+              if p.get("country") != "US"
+              and p.get("us_pred") is not None]
+    if yn_only:
+        subset = [p for p in subset if p["gold"] in ("yes", "no")]
+    return sum(1 for p in subset if p["pred"] == p["us_pred"]) / len(subset) if subset else float("nan")
+
+
 def make_figure_overall(cult_vals: list[float], nocult_vals: list[float],
                         ylabel: str, out_path: Path, y_range: float | None = None) -> None:
     x = np.arange(len(X_LABELS))
@@ -213,6 +223,14 @@ def main():
         y_range=0.30,
     )
 
+    make_figure_overall(
+        cult_vals   = [us_default_all(p, yn_only=True) for p in cult_preds],
+        nocult_vals = [us_default_all(p, yn_only=True) for p in nocult_preds],
+        ylabel="NormAd Overall US-Default Rate",
+        out_path=FIGURES_DIR / f"{pfx}_normad_us_default_rate_all.pdf",
+        y_range=0.30,
+    )
+
     # --- BLEnD ---
     cult_blend   = [load_blend_preds(c, ms) for c in CULT_CONDITIONS]
     nocult_blend = [load_blend_preds(c, ms) for c in NOCULT_CONDITIONS]
@@ -235,6 +253,14 @@ def main():
         nocult_vals = [us_default_overall(p, yn_only=False) for p in nocult_blend],
         ylabel="BLEnD US-Default Rate Among Errors",
         out_path=FIGURES_DIR / f"{pfx}_blend_us_default_rate.pdf",
+        y_range=0.30,
+    )
+
+    make_figure_overall(
+        cult_vals   = [us_default_all(p, yn_only=False) for p in cult_blend],
+        nocult_vals = [us_default_all(p, yn_only=False) for p in nocult_blend],
+        ylabel="BLEnD Overall US-Default Rate",
+        out_path=FIGURES_DIR / f"{pfx}_blend_us_default_rate_all.pdf",
         y_range=0.30,
     )
 
