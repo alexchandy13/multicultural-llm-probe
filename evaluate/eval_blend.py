@@ -315,7 +315,7 @@ def main():
     parser.add_argument("--condition", required=True, choices=ALL_CONDITIONS)
     parser.add_argument(
         "--model-size", default="3b",
-        choices=["3b", "8b", "8b_instruct", "gemma4", "qwen35"],
+        choices=["3b", "8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35"],
     )
     parser.add_argument(
         "--precision", default="matched_bf16",
