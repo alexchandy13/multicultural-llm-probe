@@ -21,7 +21,7 @@ from typing import Optional
 
 import torch
 from peft import PeftModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoProcessor, AutoTokenizer, BitsAndBytesConfig
 
 
 # Mapping from size label to HF model id. Extend this dict to add new models.
@@ -224,7 +224,10 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
         result set. Kept for backward compatibility / robustness checks
         ("does the headline finding survive both precision regimes?").
     """
-    tokenizer = AutoTokenizer.from_pretrained(cond.base)
+    if is_instruct(cond.model_size):
+        tokenizer = AutoProcessor.from_pretrained(cond.base)
+    else:
+        tokenizer = AutoTokenizer.from_pretrained(cond.base)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -259,6 +262,37 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
         model = PeftModel.from_pretrained(model, str(cond.adapter))
     model.eval()
     return tokenizer, model
+
+
+def is_instruct(model_size: str) -> bool:
+    return "instruct" in model_size
+
+
+def build_chat_prompt(processor, user_content: str,
+                      fewshot: list[tuple[str, str]] | None = None,
+                      generation_suffix: str = "") -> str:
+    """Wrap user_content in the processor's chat template.
+
+    fewshot: list of (user_text, assistant_text) pairs prepended as prior turns.
+    generation_suffix: appended after the model-turn opener (e.g. BLEnD scoring suffix).
+    enable_thinking=False is always passed to suppress reasoning traces that would
+    interpose tokens before the answer and break log-prob scoring.
+    """
+    messages = []
+    for u, a in (fewshot or []):
+        messages.append({"role": "user", "content": u})
+        messages.append({"role": "assistant", "content": a})
+    messages.append({"role": "user", "content": user_content})
+    try:
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
+        )
+    except TypeError:
+        # Fallback for processors/tokenizers that don't accept enable_thinking
+        text = processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    return text + generation_suffix
 
 
 def culture_group(country: str) -> str:

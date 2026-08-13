@@ -17,6 +17,8 @@ from tqdm import tqdm
 
 from evaluate._common import (
     PROJECT_ROOT,
+    build_chat_prompt,
+    is_instruct,
     load_model_for_eval,
     resolve_condition,
 )
@@ -212,8 +214,9 @@ def build_neutral_prefix(dataset: str) -> str:
 
 
 @torch.no_grad()
-def score_choices(model, tokenizer, prompt: str, choices: list[str]) -> list[float]:
-    """Score each choice as the log-prob of ' {choice}' after the prompt."""
+def score_choices(model, tokenizer, prompt: str, choices: list[str],
+                  leading_space: bool = True) -> list[float]:
+    """Score each choice as the log-prob of ' {choice}' (or '{choice}') after the prompt."""
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
     out = model(**enc)
@@ -221,7 +224,8 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str]) -> list[flo
 
     scores = []
     for choice in choices:
-        ids = tokenizer.encode(" " + choice, add_special_tokens=False)
+        token_str = (" " + choice) if leading_space else choice
+        ids = tokenizer.encode(token_str, add_special_tokens=False)
         scores.append(last_logits[ids[0]].item() if ids else float("-inf"))
     return scores
 
@@ -238,10 +242,17 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
     else:
         ds = load_dataset(cfg["hf_path"], split=cfg["split"])
 
+    instruct = is_instruct(model_size)
     choices = cfg["choices"]
     prefix = build_neutral_prefix(dataset) if neutral_fewshot else ""
+    fewshot_turns: list[tuple[str, str]] | None = None
     if neutral_fewshot:
         print(f"Neutral few-shot: {len(cfg['neutral_shots'])} examples")
+        if instruct:
+            fewshot_turns = [
+                (format_neutral_prompt(dataset, shot), shot["gold"])
+                for shot in cfg["neutral_shots"]
+            ]
 
     correct = 0
     total = 0
@@ -252,8 +263,11 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
         if gold not in choices:
             continue  # skip examples with missing labels (e.g. GLUE test set)
 
-        prompt = prefix + format_prompt(dataset, ex)
-        raw_scores = score_choices(model, tokenizer, prompt, choices)
+        if instruct:
+            prompt = build_chat_prompt(tokenizer, format_prompt(dataset, ex), fewshot=fewshot_turns)
+        else:
+            prompt = prefix + format_prompt(dataset, ex)
+        raw_scores = score_choices(model, tokenizer, prompt, choices, leading_space=not instruct)
         pred = choices[max(range(len(choices)), key=raw_scores.__getitem__)]
 
         total += 1

@@ -21,7 +21,9 @@ from tqdm import tqdm
 
 from evaluate._common import (
     PROJECT_ROOT,
+    build_chat_prompt,
     culture_group,
+    is_instruct,
     load_model_for_eval,
     resolve_condition,
 )
@@ -356,27 +358,31 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 @torch.no_grad()
 def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
                    mc_format: bool = False, yn_only: bool = False,
-                   multi_prompt_word: bool = False) -> list[float] | list[list[float]]:
-    """Compute unconditional log-probs for each choice using a content-free prompt.
-
-    For multi_prompt_word, returns a list of per-template priors (one per YN_WORD_PROMPTS).
-    Otherwise returns a single list of log-probs.
-    If few-shot prefix is provided, it's prepended so the prior is estimated in
-    the same context as the actual prompts.
-    """
+                   multi_prompt_word: bool = False,
+                   instruct: bool = False,
+                   fewshot_turns: list[tuple[str, str]] | None = None) -> list[float] | list[list[float]]:
+    """Compute unconditional log-probs for each choice using a content-free prompt."""
+    leading_space = not instruct
     if multi_prompt_word:
         priors_list = []
         for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
-            null = pfx + tmpl.format(country="N/A", scenario="N/A")
-            priors_list.append(score_choices(model, tokenizer, null, choices, priors=None))
+            if instruct:
+                null = build_chat_prompt(tokenizer, tmpl.format(country="N/A", scenario="N/A"), fewshot=fewshot_turns)
+            else:
+                null = pfx + tmpl.format(country="N/A", scenario="N/A")
+            priors_list.append(score_choices(model, tokenizer, null, choices, priors=None, leading_space=leading_space))
         return priors_list
     if yn_only:
-        null = YN_NULL_PROMPT
+        null_tmpl = YN_NULL_PROMPT
     elif mc_format:
-        null = MC_NULL_PROMPT
+        null_tmpl = MC_NULL_PROMPT
     else:
-        null = NULL_PROMPT
-    return score_choices(model, tokenizer, prefix + null, choices, priors=None)
+        null_tmpl = NULL_PROMPT
+    if instruct:
+        null = build_chat_prompt(tokenizer, null_tmpl, fewshot=fewshot_turns)
+    else:
+        null = prefix + null_tmpl
+    return score_choices(model, tokenizer, null, choices, priors=None, leading_space=leading_space)
 
 
 def parse_label(text: str) -> str:
@@ -471,8 +477,15 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     holdout_excluded = {i for i, ex in enumerate(ds) if country(ex) in HOLDOUT_COUNTRIES}
     print(f"Holdout countries excluded from eval: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
+    instruct = is_instruct(model_size)
+    # For instruct models, few-shot examples are passed as chat turns rather than
+    # prepended as raw strings. fewshot_turns is only used when instruct=True.
+    fewshot_turns: list[tuple[str, str]] | None = None
+
     if neutral_fewshot:
         prefix = build_neutral_fewshot_prefix(multi_prompt_word=multi_prompt_word)
+        if instruct:
+            fewshot_turns = NEUTRAL_SHOTS_NORMAD
         excluded = set()  # no dataset examples used; evaluate all countries
         print("Neutral few-shot: 2 culturally-agnostic examples (1 yes + 1 no), full eval set")
     elif few_shot > 0:
@@ -488,7 +501,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
     priors = compute_priors(model, tokenizer, choices, prefix=prefix,
                             mc_format=mc_format, yn_only=yn_only,
-                            multi_prompt_word=multi_prompt_word) if calibrate else None
+                            multi_prompt_word=multi_prompt_word,
+                            instruct=instruct, fewshot_turns=fewshot_turns) if calibrate else None
     if calibrate:
         labels = ["yes", "no"] if multi_prompt_word else (["A", "B", "C"] if mc_format else ["yes", "no", "neutral"])
         if multi_prompt_word:
@@ -508,13 +522,17 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         if (yn_only or multi_prompt_word) and gold_label(ex) == "neutral":
             continue
         c = country(ex)
+        leading_space = not instruct
         raw_scores = None  # uncalibrated, saved for post-hoc calibration
         if multi_prompt_word:
             raw_acc = [0.0, 0.0]   # uncalibrated sums across templates
             cal_acc = [0.0, 0.0]   # calibrated sums (same as raw when priors=None)
             for j, (tmpl, pfx) in enumerate(zip(YN_WORD_PROMPTS, prefix)):
-                p = pfx + tmpl.format(country=c, scenario=scenario_text(ex))
-                s = score_choices(model, tokenizer, p, choices)
+                if instruct:
+                    p = build_chat_prompt(tokenizer, tmpl.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                else:
+                    p = pfx + tmpl.format(country=c, scenario=scenario_text(ex))
+                s = score_choices(model, tokenizer, p, choices, leading_space=leading_space)
                 raw_acc[0] += s[0]
                 raw_acc[1] += s[1]
                 if priors is not None:
@@ -524,13 +542,16 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             pred = "yes" if cal_acc[0] > cal_acc[1] else "no"
             raw_scores = raw_acc  # [yes_logprob_sum, no_logprob_sum] before calibration
         else:
-            prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
+            if instruct:
+                prompt = build_chat_prompt(tokenizer, template.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+            else:
+                prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
             if generate:
                 pred = generate_answer(model, tokenizer, prompt)
                 if pred == "unparseable":
                     n_unparseable += 1
             else:
-                raw = score_choices(model, tokenizer, prompt, choices)
+                raw = score_choices(model, tokenizer, prompt, choices, leading_space=leading_space)
                 if priors is not None:
                     scores = [raw[k] - priors[k] for k in range(len(raw))]
                 else:
@@ -554,18 +575,24 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             if multi_prompt_word:
                 us_accumulated = [0.0, 0.0]
                 for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
-                    up = pfx + tmpl.format(country="United States", scenario=scenario_text(ex))
-                    us_s = score_choices(model, tokenizer, up, choices)
+                    if instruct:
+                        up = build_chat_prompt(tokenizer, tmpl.format(country="United States", scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    else:
+                        up = pfx + tmpl.format(country="United States", scenario=scenario_text(ex))
+                    us_s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
                     us_accumulated[0] += us_s[0]
                     us_accumulated[1] += us_s[1]
                 us_pred = "yes" if us_accumulated[0] > us_accumulated[1] else "no"
                 us_raw_scores = us_accumulated
             else:
-                us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
+                if instruct:
+                    us_prompt = build_chat_prompt(tokenizer, template.format(country="United States", scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                else:
+                    us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
                 if generate:
                     us_pred = generate_answer(model, tokenizer, us_prompt)
                 else:
-                    us_scores = score_choices(model, tokenizer, us_prompt, choices, priors=priors)
+                    us_scores = score_choices(model, tokenizer, us_prompt, choices, priors=priors, leading_space=leading_space)
                     us_pred_token = choices[max(range(len(us_scores)), key=us_scores.__getitem__)]
                     us_pred = MC_CHOICE_MAP[us_pred_token] if mc_format else us_pred_token
                     us_raw_scores = list(us_scores)

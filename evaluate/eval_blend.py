@@ -25,7 +25,9 @@ from tqdm import tqdm
 
 from evaluate._common import (
     PROJECT_ROOT,
+    build_chat_prompt,
     culture_group,
+    is_instruct,
     load_model_for_eval,
     resolve_condition,
 )
@@ -207,12 +209,17 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
 
+    instruct = is_instruct(model_size)
+    fewshot_turns: list[tuple[str, str]] | None = None
+
     holdout_excluded = {ex["MCQID"] for ex in ds if ex["country"] in HOLDOUT_COUNTRIES}
     print(f"Holdout excluded: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
     if neutral_fewshot:
         prefix = build_neutral_fewshot_prefix(multi_prompt=multi_prompt)
         excluded_mcqids: set = set()  # no dataset examples used; evaluate all 16 countries
+        if instruct:
+            fewshot_turns = [(q, lbl) for q, lbl in NEUTRAL_SHOTS_BLEND]
         print("Neutral few-shot: 4 culturally-agnostic examples (A/B/C/D each once), full eval set")
     elif few_shot > 0:
         prefix, excluded_mcqids = build_fewshot_prefix(ds, few_shot, multi_prompt=multi_prompt)
@@ -238,14 +245,20 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         if multi_prompt:
             accumulated = [0.0, 0.0, 0.0, 0.0]
             for pfx_str, pfx_tmpl in zip(prefix, BLEND_MP_PREFIXES):
-                p = pfx_str + pfx_tmpl + prompt + SCORING_SUFFIX
+                if instruct:
+                    p = build_chat_prompt(tokenizer, pfx_tmpl + prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                else:
+                    p = pfx_str + pfx_tmpl + prompt + SCORING_SUFFIX
                 s = score_choices(model, tokenizer, p)
                 for j, sj in enumerate(s):
                     accumulated[j] += sj
             pred = CHOICES[max(range(4), key=accumulated.__getitem__)]
             raw_scores = list(accumulated)
         else:
-            p = prefix + prompt + SCORING_SUFFIX
+            if instruct:
+                p = build_chat_prompt(tokenizer, prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+            else:
+                p = prefix + prompt + SCORING_SUFFIX
             raw_scores = score_choices(model, tokenizer, p)
             pred = CHOICES[max(range(4), key=raw_scores.__getitem__)]
 
@@ -263,13 +276,19 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             if multi_prompt:
                 us_acc = [0.0, 0.0, 0.0, 0.0]
                 for pfx_str, pfx_tmpl in zip(prefix, BLEND_MP_PREFIXES):
-                    up = pfx_str + pfx_tmpl + us_prompt + SCORING_SUFFIX
+                    if instruct:
+                        up = build_chat_prompt(tokenizer, pfx_tmpl + us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                    else:
+                        up = pfx_str + pfx_tmpl + us_prompt + SCORING_SUFFIX
                     us_s = score_choices(model, tokenizer, up)
                     for j, sj in enumerate(us_s):
                         us_acc[j] += sj
                 us_pred = CHOICES[max(range(4), key=us_acc.__getitem__)]
             else:
-                up = prefix + us_prompt + SCORING_SUFFIX
+                if instruct:
+                    up = build_chat_prompt(tokenizer, us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                else:
+                    up = prefix + us_prompt + SCORING_SUFFIX
                 us_scores = score_choices(model, tokenizer, up)
                 us_pred = CHOICES[max(range(4), key=us_scores.__getitem__)]
 
