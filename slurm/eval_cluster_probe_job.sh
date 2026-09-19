@@ -2,7 +2,7 @@
 #SBATCH --job-name=culture_eval_cluster_probe
 #SBATCH --partition=clip
 #SBATCH --account=clip
-#SBATCH --qos=medium
+#SBATCH --qos=high
 #SBATCH --gres=gpu:rtxa4000:1
 #SBATCH --time=20:00:00
 #SBATCH --mem=48G
