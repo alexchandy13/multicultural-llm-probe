@@ -49,7 +49,7 @@ MODEL_COLORS = {
     "qwen35": "#DDCC77",
 }
 MODEL_LABELS = {
-    "8b":     "Llama 8B",
+    "8b":     "LLaMA 3.1 8B",
     "gemma4": "Gemma4",
     "3b":     "Llama 3B",
     "qwen35": "Qwen3.5",

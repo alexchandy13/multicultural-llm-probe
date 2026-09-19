@@ -454,7 +454,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
-                 multi_prompt_word: bool = False, neutral_fewshot: bool = False):
+                 multi_prompt_word: bool = False, neutral_fewshot: bool = False,
+                 probe_country: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -571,14 +572,15 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
         us_pred = None
         us_raw_scores = None
-        if us_probe and c != "US":
+        _probe = probe_country or ("United States" if us_probe else None)
+        if _probe and c != _probe:
             if multi_prompt_word:
                 us_accumulated = [0.0, 0.0]
                 for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
                     if instruct:
-                        up = build_chat_prompt(tokenizer, tmpl.format(country="United States", scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                        up = build_chat_prompt(tokenizer, tmpl.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
                     else:
-                        up = pfx + tmpl.format(country="United States", scenario=scenario_text(ex))
+                        up = pfx + tmpl.format(country=_probe, scenario=scenario_text(ex))
                     us_s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
                     us_accumulated[0] += us_s[0]
                     us_accumulated[1] += us_s[1]
@@ -586,9 +588,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_raw_scores = us_accumulated
             else:
                 if instruct:
-                    us_prompt = build_chat_prompt(tokenizer, template.format(country="United States", scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    us_prompt = build_chat_prompt(tokenizer, template.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
                 else:
-                    us_prompt = prefix + template.format(country="United States", scenario=scenario_text(ex))
+                    us_prompt = prefix + template.format(country=_probe, scenario=scenario_text(ex))
                 if generate:
                     us_pred = generate_answer(model, tokenizer, us_prompt)
                 else:
@@ -693,6 +695,12 @@ def main():
              "each prediction entry. Roughly doubles eval time. Output gains a _usprobe suffix.",
     )
     parser.add_argument(
+        "--probe-country", default=None,
+        help="Generalised probe: replace country token with this country name for every "
+             "example that doesn't already use it. Stored as us_pred in output (for "
+             "compatibility). Output gains a _<slug>probe suffix. Overrides --us-probe.",
+    )
+    parser.add_argument(
         "--generate", action="store_true",
         help="Use greedy generation + label parsing instead of log-prob scoring. "
              "The model generates up to 10 tokens; 'yes'/'no'/'neutral'/'neither' "
@@ -728,7 +736,13 @@ def main():
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     yn_sfx = "_yn" if args.yn_only else ""
     mp_sfx = "_mpw" if args.multi_prompt_word else ""
-    usprobe_sfx = "_usprobe" if args.us_probe else ""
+    if args.probe_country:
+        slug = args.probe_country.lower().replace(" ", "_")
+        usprobe_sfx = f"_{slug}probe"
+    elif args.us_probe:
+        usprobe_sfx = "_usprobe"
+    else:
+        usprobe_sfx = ""
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
@@ -750,6 +764,7 @@ def main():
         us_probe=args.us_probe,
         multi_prompt_word=args.multi_prompt_word,
         neutral_fewshot=args.neutral_fewshot,
+        probe_country=args.probe_country,
     )
 
 

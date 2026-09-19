@@ -79,7 +79,7 @@ def main() -> None:
         ("BLEnD",  blend_8b,  blend_gemma,  False),
     ]):
         ax.plot(x, vals_8b,    marker="o", markersize=8, linewidth=2.4,
-                color=COLOR_8B,    linestyle="-",  label="LLaMA 3 8B")
+                color=COLOR_8B,    linestyle="-",  label="LLaMA 3.1 8B")
         ax.plot(x, vals_gemma, marker="s", markersize=8, linewidth=2.4,
                 color=COLOR_GEMMA, linestyle="-",  label="Gemma 4 12B")
 

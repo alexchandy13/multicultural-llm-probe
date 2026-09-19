@@ -94,7 +94,7 @@ def print_summary(label: str, counts: dict[str, int]) -> None:
 def main():
     clusters = load_iw_clusters()
 
-    models = [("8b", "Llama 8B"), ("gemma4", "Gemma4")]
+    models = [("8b", "LLaMA 3.1 8B"), ("gemma4", "Gemma 4 12B")]
     conditions = ["base", "sft", "dpo", "sftdpo"]
     shots = [("yn_usprobe", "0-shot"), ("fs2_yn_usprobe", "fs2")]
 
