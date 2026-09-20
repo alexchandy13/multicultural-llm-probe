@@ -117,11 +117,11 @@ def score_choices(model, tokenizer, prompt: str) -> list[float]:
     return scores
 
 
-def us_probe_prompt(prompt: str, country: str) -> str:
-    """Replace country name in prompt with 'US' for US-probe scoring."""
-    replaced = prompt.replace(country, "US")
+def us_probe_prompt(prompt: str, country: str, probe: str = "US") -> str:
+    """Replace country name in prompt with probe country for probe scoring."""
+    replaced = prompt.replace(country, probe)
     if replaced == prompt and "_" in country:
-        replaced = prompt.replace(country.replace("_", " "), "US")
+        replaced = prompt.replace(country.replace("_", " "), probe)
     return replaced
 
 
@@ -204,7 +204,7 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False,
-                 neutral_fewshot: bool = False):
+                 neutral_fewshot: bool = False, probe_country: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
@@ -271,8 +271,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             correct[("group", group)] += 1
 
         us_pred = None
-        if us_probe and c != "US":
-            us_prompt = us_probe_prompt(prompt, c)
+        _probe = probe_country or ("US" if us_probe else None)
+        if _probe and c != _probe:
+            us_prompt = us_probe_prompt(prompt, c, probe=_probe)
             if multi_prompt:
                 us_acc = [0.0, 0.0, 0.0, 0.0]
                 for pfx_str, pfx_tmpl in zip(prefix, BLEND_MP_PREFIXES):
@@ -361,6 +362,12 @@ def main():
              "Records us_pred in each prediction entry. Output gains a _usprobe suffix.",
     )
     parser.add_argument(
+        "--probe-country", default=None,
+        help="Generalised probe: replace country name with this string for every example "
+             "that doesn't already use it. Stored as us_pred (for compatibility). "
+             "Output gains a _{slug}probe suffix. Overrides --us-probe.",
+    )
+    parser.add_argument(
         "--neutral-fewshot", action="store_true",
         help="Prepend 4 culturally-agnostic MCQ examples (one per answer letter A/B/C/D) "
              "to teach task format without injecting cultural knowledge. No holdout "
@@ -376,7 +383,13 @@ def main():
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     mp_sfx = "_mp" if args.multi_prompt else ""
-    usprobe_sfx = "_usprobe" if args.us_probe else ""
+    if args.probe_country:
+        slug = args.probe_country.lower().replace(" ", "_")
+        usprobe_sfx = f"_{slug}probe"
+    elif args.us_probe:
+        usprobe_sfx = "_usprobe"
+    else:
+        usprobe_sfx = ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
@@ -392,6 +405,7 @@ def main():
         us_probe=args.us_probe,
         multi_prompt=args.multi_prompt,
         neutral_fewshot=args.neutral_fewshot,
+        probe_country=args.probe_country,
     )
 
 

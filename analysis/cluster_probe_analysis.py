@@ -59,9 +59,13 @@ def probe_slug(country: str) -> str:
     return country.lower().replace(" ", "_")
 
 
-def load_probe_file(condition: str, model: str, country: str) -> list[dict] | None:
+def load_probe_file(condition: str, model: str, country: str,
+                    benchmark: str = "normad") -> list[dict] | None:
     slug = probe_slug(country)
-    path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_{slug}probe.json"
+    if benchmark == "normad":
+        path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_{slug}probe.json"
+    else:
+        path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_{slug}probe.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())["predictions"]
@@ -98,8 +102,12 @@ def default_rate_among_errors(preds: list[dict], probe_country_name: str) -> tup
     return rate, correct, wrong_match, wrong_diverge
 
 
-def load_us_probe_file(condition: str, model: str) -> list[dict] | None:
-    path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
+def load_us_probe_file(condition: str, model: str,
+                       benchmark: str = "normad") -> list[dict] | None:
+    if benchmark == "normad":
+        path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
+    else:
+        path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_usprobe.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())["predictions"]
@@ -120,29 +128,22 @@ def us_default_rate_overall(preds: list[dict]) -> float | None:
     return match / wrong if wrong > 0 else None
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", default="8b", choices=["8b", "gemma4"])
-    parser.add_argument("--condition", default=None, help="Single condition to show (default: all)")
-    args = parser.parse_args()
-
-    conditions = [args.condition] if args.condition else CONDITIONS
-
-    print(f"\nCluster-representative probe analysis  (model={args.model})")
-    print("=" * 105)
+def print_table(conditions: list[str], model: str, benchmark: str) -> None:
+    print(f"\nCluster-representative probe analysis  (benchmark={benchmark}, model={model})")
+    print("=" * 113)
     print(f"\n{'Condition':<22}  {'Cluster':>18}  {'Rep country':<26}  "
           f"{'Own acc':>8}  {'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
     print("-" * 113)
 
     for cond in conditions:
-        us_preds = load_us_probe_file(cond, args.model)
+        us_preds = load_us_probe_file(cond, model, benchmark)
         us_dr = us_default_rate_overall(us_preds) if us_preds else None
         us_dr_s = f"{us_dr:.1%}" if us_dr is not None else "—"
 
         first = True
         for cluster in CLUSTER_ORDER:
             rep = CLUSTER_REPS[cluster]
-            preds = load_probe_file(cond, args.model, rep)
+            preds = load_probe_file(cond, model, rep, benchmark)
             if preds is None:
                 label = cond if first else ""
                 print(f"  {label:<20}  {cluster:>18}  {rep:<26}  [missing file]")
@@ -161,6 +162,20 @@ def main():
                   f"{own_s:>8}  {pr_s:>9}  {dr_s:>10}  {us_dr_s:>7}")
             first = False
         print()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default="8b", choices=["8b", "gemma4"])
+    parser.add_argument("--benchmark", default="normad", choices=["normad", "blend", "both"])
+    parser.add_argument("--condition", default=None, help="Single condition to show (default: all)")
+    args = parser.parse_args()
+
+    conditions = [args.condition] if args.condition else CONDITIONS
+    benchmarks = ["normad", "blend"] if args.benchmark == "both" else [args.benchmark]
+
+    for bm in benchmarks:
+        print_table(conditions, args.model, bm)
 
 
 if __name__ == "__main__":
