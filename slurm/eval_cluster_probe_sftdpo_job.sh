@@ -3,10 +3,9 @@
 #SBATCH --partition=clip
 #SBATCH --account=clip
 #SBATCH --qos=high
-#SBATCH --gres=gpu:rtxa4000:1
+#SBATCH --gres=gpu:rtxa4000:2
 #SBATCH --time=12:00:00
 #SBATCH --mem=48G
-#SBATCH --exclusive
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-13
 #SBATCH --output=slurm/eval_cluster_probe_sftdpo.%A_%a.out
