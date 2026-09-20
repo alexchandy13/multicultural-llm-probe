@@ -98,6 +98,28 @@ def default_rate_among_errors(preds: list[dict], probe_country_name: str) -> tup
     return rate, correct, wrong_match, wrong_diverge
 
 
+def load_us_probe_file(condition: str, model: str) -> list[dict] | None:
+    path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())["predictions"]
+
+
+def us_default_rate_overall(preds: list[dict]) -> float | None:
+    """Overall US default rate among errors (all non-US examples)."""
+    match = diverge = 0
+    for p in preds:
+        if p.get("us_pred") is None or p["country"] == "US":
+            continue
+        if p["pred"] != p["gold"]:
+            if p["pred"] == p["us_pred"]:
+                match += 1
+            else:
+                diverge += 1
+    wrong = match + diverge
+    return match / wrong if wrong > 0 else None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="8b", choices=["8b", "gemma4"])
@@ -107,12 +129,16 @@ def main():
     conditions = [args.condition] if args.condition else CONDITIONS
 
     print(f"\nCluster-representative probe analysis  (model={args.model})")
-    print("=" * 90)
+    print("=" * 105)
     print(f"\n{'Condition':<22}  {'Cluster':>18}  {'Rep country':<26}  "
-          f"{'Own acc':>8}  {'Probe acc':>9}  {'Default rate':>12}")
-    print("-" * 90)
+          f"{'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
+    print("-" * 105)
 
     for cond in conditions:
+        us_preds = load_us_probe_file(cond, args.model)
+        us_dr = us_default_rate_overall(us_preds) if us_preds else None
+        us_dr_s = f"{us_dr:.1%}" if us_dr is not None else "—"
+
         first = True
         for cluster in CLUSTER_ORDER:
             rep = CLUSTER_REPS[cluster]
@@ -123,17 +149,15 @@ def main():
                 first = False
                 continue
 
-            own_acc = accuracy(preds)
-            pr_acc  = probe_accuracy(preds, rep)
+            pr_acc = probe_accuracy(preds, rep)
             dr, n_c, n_m, n_d = default_rate_among_errors(preds, rep)
 
             label = cond if first else ""
-            own_s  = f"{own_acc:.3f}" if own_acc == own_acc else "—"
-            pr_s   = f"{pr_acc:.3f}"  if pr_acc  == pr_acc  else "—"
-            dr_s   = f"{dr:.1%}"      if dr      == dr      else "—"
+            pr_s = f"{pr_acc:.3f}" if pr_acc == pr_acc else "—"
+            dr_s = f"{dr:.1%}"     if dr     == dr     else "—"
+            us_s = us_dr_s if first else ""
             print(f"  {label:<20}  {cluster:>18}  {rep:<26}  "
-                  f"{own_s:>8}  {pr_s:>9}  {dr_s:>12}  "
-                  f"(correct={n_c}, probe_match={n_m}, other={n_d})")
+                  f"{pr_s:>9}  {dr_s:>10}  {us_s:>7}")
             first = False
         print()
 
