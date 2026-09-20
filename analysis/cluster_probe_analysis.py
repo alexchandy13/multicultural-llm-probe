@@ -131,8 +131,8 @@ def main():
     print(f"\nCluster-representative probe analysis  (model={args.model})")
     print("=" * 105)
     print(f"\n{'Condition':<22}  {'Cluster':>18}  {'Rep country':<26}  "
-          f"{'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
-    print("-" * 105)
+          f"{'Own acc':>8}  {'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
+    print("-" * 113)
 
     for cond in conditions:
         us_preds = load_us_probe_file(cond, args.model)
@@ -149,15 +149,16 @@ def main():
                 first = False
                 continue
 
-            pr_acc = probe_accuracy(preds, rep)
+            own_acc = accuracy(preds)
+            pr_acc  = probe_accuracy(preds, rep)
             dr, n_c, n_m, n_d = default_rate_among_errors(preds, rep)
 
-            label = cond if first else ""
-            pr_s = f"{pr_acc:.3f}" if pr_acc == pr_acc else "—"
-            dr_s = f"{dr:.1%}"     if dr     == dr     else "—"
-            us_s = us_dr_s if first else ""
+            label  = cond if first else ""
+            own_s  = f"{own_acc:.3f}" if own_acc == own_acc else "—"
+            pr_s   = f"{pr_acc:.3f}"  if pr_acc  == pr_acc  else "—"
+            dr_s   = f"{dr:.1%}"      if dr      == dr      else "—"
             print(f"  {label:<20}  {cluster:>18}  {rep:<26}  "
-                  f"{pr_s:>9}  {dr_s:>10}  {us_s:>7}")
+                  f"{own_s:>8}  {pr_s:>9}  {dr_s:>10}  {us_dr_s:>7}")
             first = False
         print()
 
