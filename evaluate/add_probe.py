@@ -71,7 +71,7 @@ def main():
     slug = probe.lower().replace(" ", "_")
 
     out_path = Path(args.out) if args.out else (
-        BEHAVIORAL / re.sub(r"_usprobe.*$", f"_nfs_mpw_{slug}probe.json",
+        BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json",
                             base_path.name)
     )
 
