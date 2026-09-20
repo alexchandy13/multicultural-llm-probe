@@ -7,12 +7,13 @@
 #SBATCH --time=20:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-34
+#SBATCH --array=0-9
 #SBATCH --output=slurm/eval_cluster_probe_gemma4.%A_%a.out
 #SBATCH --error=slurm/eval_cluster_probe_gemma4.%A_%a.err
 
 # Cluster-representative probe eval for Gemma 4 12B on NormAd.
-# Array: 5 conditions × 7 countries = 35 tasks (0-34)
+# Uses add_probe.py — reads pred from existing usprobe file, runs probe pass only.
+# Array: 5 conditions × 2 countries = 10 tasks (0-9)
 # Submit with: sbatch slurm/eval_cluster_probe_gemma4_job.sh
 
 set -euo pipefail
@@ -21,7 +22,7 @@ source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
 CONDS=(base sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult)
-COUNTRIES=(netherlands hungary bosnia_and_herzegovina mexico taiwan philippines iran)
+COUNTRIES=(taiwan iran)
 
 N_COUNTRIES=${#COUNTRIES[@]}
 
@@ -31,11 +32,12 @@ COUNTRY_IDX=$(( SLURM_ARRAY_TASK_ID % N_COUNTRIES ))
 COND=${CONDS[$COND_IDX]}
 COUNTRY=${COUNTRIES[$COUNTRY_IDX]}
 
+BASE="outputs/behavioral/normad_${COND}_gemma4_nfs_mpw_usprobe.json"
+
 echo "[cluster_probe_gemma4] condition=$COND  probe_country=$COUNTRY"
 
-python evaluate/eval_normad.py \
+python evaluate/add_probe.py \
+    --base "$BASE" \
+    --probe-country "$COUNTRY" \
     --condition "$COND" \
-    --model-size gemma4 \
-    --neutral-fewshot \
-    --multi-prompt-word \
-    --probe-country "$COUNTRY"
+    --model-size gemma4
