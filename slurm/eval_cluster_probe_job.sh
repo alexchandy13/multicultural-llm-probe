@@ -38,6 +38,8 @@ COUNTRY=${COUNTRIES[$COUNTRY_IDX]}
 
 echo "[cluster_probe] condition=$COND  probe_country=$COUNTRY"
 
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
 python evaluate/eval_normad.py \
     --condition "$COND" \
     --model-size 8b \
