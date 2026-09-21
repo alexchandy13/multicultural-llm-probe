@@ -1,20 +1,18 @@
-"""Reformat CulturalBench questions into binary True/False prompts.
+"""Reformat CulturalBench questions into binary Yes/No prompts.
 
-For each (question, option) row, produces:
-  "In [country], is [option] [predicate]?"
+For each (question, option) row, produces a grammatically natural Y/N question
+by passing the full question + all options to claude-haiku-4-5.
 
-Uses claude-haiku-4-5 to extract the predicate for each unique question.
 Output: data/culturalbench_reformatted.json
 
 Usage:
     python data/prep_culturalbench.py
-    python data/prep_culturalbench.py --dry-run   # show 20 examples, no API calls
+    python data/prep_culturalbench.py --dry-run   # show raw rows, no API calls
 """
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import time
 from pathlib import Path
 
@@ -23,6 +21,7 @@ from datasets import load_dataset
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = PROJECT_ROOT / "data" / "culturalbench_reformatted.json"
+CACHE  = PROJECT_ROOT / "data" / "culturalbench_reformat_cache.json"
 
 # Countries that take "the" as a determiner
 THE_COUNTRIES = {
@@ -32,77 +31,49 @@ THE_COUNTRIES = {
 }
 
 SYSTEM = """\
-You reformat cultural knowledge questions into a binary predicate fragment.
+You reformat multiple-choice cultural knowledge questions into natural Yes/No questions.
 
-Given a question like "In the Netherlands, which of the following is an unusual common public practice?"
-extract the predicate so the question can be rewritten as:
-  "In [country], is [option] [predicate]?"
+Given an original question and its answer options, rewrite each (question, option) pair
+as a single, grammatically correct Yes/No question that can be answered with "Yes" or "No".
 
 Rules:
-- Output ONLY the predicate fragment — nothing else, no punctuation at the end
-- The fragment must grammatically follow "is [option]"
-- "which of the following is X?" → "X"
-- "what is X?" → "X"
-- "what are X?" → "X"
-- "how do people X?" → "a common way to X"
-- "when do people X?" → "a common time to X"
-- "who is typically X?" → "typically X"
-- Questions without explicit country prefix (e.g. "What do Indians traditionally prefer for...") are still
-  about the country given — extract the predicate the same way
-- Do NOT include a question mark or trailing period
-- Keep it concise and preserve meaning"""
+- Always start with "In [country]," using the canonical country name provided
+- The question must be natural and fluent — fix grammar, tense, and phrasing as needed
+- Preserve the meaning of the original question + option combination
+- Do NOT include the answer — just ask the question
+- Output a JSON array of strings, one per option, in the same order as the input options
+- No extra text, just the JSON array"""
 
 
 def country_with_article(country: str) -> str:
     return f"the {country}" if country in THE_COUNTRIES else country
 
 
-def extract_predicates(client: anthropic.Anthropic,
-                       questions: dict[int, dict]) -> dict[int, str]:
-    predicates: dict[int, str] = {}
-    items = list(questions.items())
-    for i, (qidx, info) in enumerate(items):
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=80,
-            system=SYSTEM,
-            messages=[{"role": "user", "content": info["question"]}],
-        )
-        predicates[qidx] = msg.content[0].text.strip().rstrip(".")
-        if (i + 1) % 100 == 0:
-            print(f"  {i + 1}/{len(items)}")
-        time.sleep(0.05)
-    return predicates
-
-
-def build_reformatted_prompt(country: str, option: str, predicate: str) -> str:
+def reformat_question(client: anthropic.Anthropic, country: str,
+                      question: str, options: list[str]) -> list[str]:
     phrase = country_with_article(country)
-    if not option:
-        return None
-    opt = option.strip().rstrip(".")
-    opt = opt[0].lower() + opt[1:] if opt else opt
-    return f"In {phrase}, is {opt} {predicate}?"
-
-
-def dry_run(ds) -> None:
-    for i in range(20):
-        r = ds[i]
-        print(f"country:   {r['country']}")
-        print(f"question:  {r['prompt_question']}")
-        print(f"option:    {r['prompt_option']}")
-        print(f"answer:    {r['answer']}")
-        # Show what the assembled prompt would look like with a placeholder predicate
-        phrase = country_with_article(r["country"])
-        opt = r["prompt_option"]
-        opt = opt[0].lower() + opt[1:]
-        print(f"→ draft:   In {phrase}, is {opt} [PREDICATE]?")
-        print()
+    user_msg = (
+        f"Country: {phrase}\n"
+        f"Original question: {question}\n"
+        f"Options:\n" + "\n".join(f"- {o}" for o in options)
+    )
+    msg = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        system=SYSTEM,
+        messages=[{"role": "user", "content": user_msg}],
+    )
+    text = msg.content[0].text.strip()
+    # Parse JSON array
+    start = text.find("[")
+    end   = text.rfind("]") + 1
+    return json.loads(text[start:end])
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true",
-                        help="Print 20 example rows without calling the API")
+                        help="Print raw rows without calling the API")
     args = parser.parse_args()
 
     print("Loading CulturalBench...")
@@ -110,57 +81,85 @@ def main():
     print(f"  {len(ds)} rows")
 
     if args.dry_run:
-        dry_run(ds)
+        for r in ds[:8]:
+            print(f"[{'T' if r['answer'] else 'F'}] {r['country']} | {r['prompt_question']} | {r['prompt_option']}")
         return
 
-    # Collect unique questions
-    questions: dict[int, dict] = {}
+    # Group rows by question_idx
+    groups: dict[int, dict] = {}
     for r in ds:
         qidx = r["question_idx"]
-        if qidx not in questions:
-            questions[qidx] = {"question": r["prompt_question"], "country": r["country"]}
-    print(f"  {len(questions)} unique questions — calling API...")
+        if qidx not in groups:
+            groups[qidx] = {
+                "question": r["prompt_question"],
+                "country":  r["country"],
+                "options":  [],
+                "data_idxs": [],
+                "answers":  [],
+            }
+        groups[qidx]["options"].append(r["prompt_option"] or "")
+        groups[qidx]["data_idxs"].append(r["data_idx"])
+        groups[qidx]["answers"].append(r["answer"])
 
-    cache_path = OUTPUT.parent / "culturalbench_predicates_cache.json"
-    if cache_path.exists():
-        cached = json.loads(cache_path.read_text())
-        predicates = {int(k): v for k, v in cached.items()}
-        remaining = {k: v for k, v in questions.items() if k not in predicates}
-        print(f"  Loaded {len(predicates)} from cache, {len(remaining)} remaining...")
-    else:
-        predicates = {}
-        remaining = questions
+    print(f"  {len(groups)} unique questions")
 
-    if remaining:
-        client = anthropic.Anthropic()
-        new_preds = extract_predicates(client, remaining)
-        predicates.update(new_preds)
-        cache_path.write_text(json.dumps({str(k): v for k, v in predicates.items()}))
-        print(f"  Saved {len(predicates)} predicates to cache")
+    # Load cache
+    cache: dict[str, list[str]] = {}
+    if CACHE.exists():
+        cache = json.loads(CACHE.read_text())
+        print(f"  Loaded {len(cache)} from cache")
 
-    # Assemble output rows
+    client = anthropic.Anthropic()
+    items = list(groups.items())
+    for i, (qidx, info) in enumerate(items[:50]):
+        key = str(qidx)
+        if key in cache:
+            continue
+        try:
+            reformatted = reformat_question(
+                client, info["country"], info["question"], info["options"]
+            )
+            # Pad if LLM returned fewer items than options
+            while len(reformatted) < len(info["options"]):
+                reformatted.append(None)
+            cache[key] = reformatted
+        except Exception as e:
+            print(f"  Warning: q{qidx} failed ({e}), skipping")
+            cache[key] = [None] * len(info["options"])
+        if (i + 1) % 100 == 0:
+            CACHE.write_text(json.dumps(cache))
+            print(f"  {i + 1}/{len(items)}")
+        time.sleep(0.05)
+
+    CACHE.write_text(json.dumps(cache))
+    print(f"  Done. Saved cache ({len(cache)} entries)")
+
+    # Assemble flat output rows
+    # Build a lookup: data_idx → reformatted prompt
+    reformatted_by_dataidx: dict[int, str] = {}
+    for qidx, info in groups.items():
+        key = str(qidx)
+        rephrased = cache.get(key, [])
+        for j, didx in enumerate(info["data_idxs"]):
+            reformatted_by_dataidx[didx] = rephrased[j] if j < len(rephrased) else None
+
     rows = []
     for r in ds:
-        qidx = r["question_idx"]
-        predicate = predicates[qidx]
-        reformatted = build_reformatted_prompt(r["country"], r["prompt_option"], predicate)
         rows.append({
-            "data_idx":          r["data_idx"],
-            "question_idx":      qidx,
-            "country":           r["country"],
-            "original_question": r["prompt_question"],
-            "prompt_option":     r["prompt_option"],
-            "answer":            r["answer"],
-            "predicate":         predicate,
-            "reformatted_prompt": reformatted,
+            "data_idx":           r["data_idx"],
+            "question_idx":       r["question_idx"],
+            "country":            r["country"],
+            "original_question":  r["prompt_question"],
+            "prompt_option":      r["prompt_option"],
+            "answer":             r["answer"],
+            "reformatted_prompt": reformatted_by_dataidx.get(r["data_idx"]),
         })
 
     OUTPUT.write_text(json.dumps(rows, indent=2))
     print(f"Saved {len(rows)} rows → {OUTPUT}")
 
-    # Print 10 examples
     print("\nSample reformatted prompts:")
-    for row in rows[:10]:
+    for row in rows[:50]:
         mark = "T" if row["answer"] else "F"
         print(f"  [{mark}] {row['reformatted_prompt']}")
 
