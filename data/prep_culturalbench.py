@@ -111,7 +111,7 @@ def main():
 
     client = anthropic.Anthropic()
     items = list(groups.items())
-    for i, (qidx, info) in enumerate(items[:50]):
+    for i, (qidx, info) in enumerate(items):
         key = str(qidx)
         if key in cache:
             continue
