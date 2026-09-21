@@ -77,6 +77,8 @@ def extract_predicates(client: anthropic.Anthropic,
 
 def build_reformatted_prompt(country: str, option: str, predicate: str) -> str:
     phrase = country_with_article(country)
+    if not option:
+        return None
     opt = option.strip().rstrip(".")
     opt = opt[0].lower() + opt[1:] if opt else opt
     return f"In {phrase}, is {opt} {predicate}?"
@@ -119,8 +121,22 @@ def main():
             questions[qidx] = {"question": r["prompt_question"], "country": r["country"]}
     print(f"  {len(questions)} unique questions — calling API...")
 
-    client = anthropic.Anthropic()
-    predicates = extract_predicates(client, questions)
+    cache_path = OUTPUT.parent / "culturalbench_predicates_cache.json"
+    if cache_path.exists():
+        cached = json.loads(cache_path.read_text())
+        predicates = {int(k): v for k, v in cached.items()}
+        remaining = {k: v for k, v in questions.items() if k not in predicates}
+        print(f"  Loaded {len(predicates)} from cache, {len(remaining)} remaining...")
+    else:
+        predicates = {}
+        remaining = questions
+
+    if remaining:
+        client = anthropic.Anthropic()
+        new_preds = extract_predicates(client, remaining)
+        predicates.update(new_preds)
+        cache_path.write_text(json.dumps({str(k): v for k, v in predicates.items()}))
+        print(f"  Saved {len(predicates)} predicates to cache")
 
     # Assemble output rows
     rows = []
