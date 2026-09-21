@@ -136,40 +136,42 @@ def us_probe_accuracy(preds: list[dict]) -> float:
     return sum(1 for p in eligible if p["us_pred"] == p["gold"]) / len(eligible)
 
 
+def fmt_diff(val: float, pct: bool = False) -> str:
+    if val != val:
+        return "—"
+    s = f"{val:+.1%}" if pct else f"{val:+.3f}"
+    return s
+
+
 def print_table(conditions: list[str], model: str, benchmark: str) -> None:
     print(f"\nCluster-representative probe analysis  (benchmark={benchmark}, model={model})")
-    print("=" * 123)
+    print("=" * 105)
     print(f"\n{'Condition':<22}  {'Cluster':>18}  {'Rep country':<26}  "
-          f"{'Own acc':>8}  {'US acc':>7}  {'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
-    print("-" * 123)
+          f"{'Probe-Own':>10}  {'Probe-US':>9}  {'ClustDR-USDR':>13}")
+    print("-" * 105)
 
     for cond in conditions:
         us_preds = load_us_probe_file(cond, model, benchmark)
-        us_dr = us_default_rate_overall(us_preds) if us_preds else None
-        us_dr_s = f"{us_dr:.1%}" if us_dr is not None else "—"
-        us_acc = us_probe_accuracy(us_preds) if us_preds else float("nan")
-        us_acc_s = f"{us_acc:.3f}" if us_acc == us_acc else "—"
+        us_dr  = us_default_rate_overall(us_preds) if us_preds else float("nan")
+        us_acc = us_probe_accuracy(us_preds)        if us_preds else float("nan")
 
         first = True
         for cluster in CLUSTER_ORDER:
             rep = CLUSTER_REPS[cluster]
             preds = load_probe_file(cond, model, rep, benchmark)
             if preds is None:
-                label = cond if first else ""
-                print(f"  {label:<20}  {cluster:>18}  {rep:<26}  [missing file]")
-                first = False
                 continue
 
             own_acc = accuracy(preds)
             pr_acc  = probe_accuracy(preds, rep)
-            dr, n_c, n_m, n_d = default_rate_among_errors(preds, rep)
+            dr, *_  = default_rate_among_errors(preds, rep)
 
-            label  = cond if first else ""
-            own_s  = f"{own_acc:.3f}" if own_acc == own_acc else "—"
-            pr_s   = f"{pr_acc:.3f}"  if pr_acc  == pr_acc  else "—"
-            dr_s   = f"{dr:.1%}"      if dr      == dr      else "—"
+            label = cond if first else ""
+            d_own = fmt_diff(pr_acc - own_acc)
+            d_us  = fmt_diff(pr_acc - us_acc)
+            d_dr  = fmt_diff(dr - us_dr, pct=True)
             print(f"  {label:<20}  {cluster:>18}  {rep:<26}  "
-                  f"{own_s:>8}  {us_acc_s:>7}  {pr_s:>9}  {dr_s:>10}  {us_dr_s:>7}")
+                  f"{d_own:>10}  {d_us:>9}  {d_dr:>13}")
             first = False
         print()
 

@@ -7,13 +7,13 @@
 #SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-9
+#SBATCH --array=0-24
 #SBATCH --output=slurm/eval_cluster_probe_blend_8b.%A_%a.out
 #SBATCH --error=slurm/eval_cluster_probe_blend_8b.%A_%a.err
 
 # Cluster-representative probe eval for LLaMA 3.1 8B on BLEnD.
 # Uses add_probe.py — reads pred from existing usprobe file, runs probe pass only.
-# Array: 5 conditions × 2 countries = 10 tasks (0-9)
+# Array: 5 conditions × 5 countries = 25 tasks (0-24)
 # Submit with: sbatch slurm/eval_cluster_probe_blend_8b_job.sh
 
 set -euo pipefail
@@ -22,7 +22,7 @@ source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
 CONDS=(base sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult)
-COUNTRIES=(taiwan iran)
+COUNTRIES=(netherlands hungary bosnia_and_herzegovina mexico philippines)
 
 N_COUNTRIES=${#COUNTRIES[@]}
 
