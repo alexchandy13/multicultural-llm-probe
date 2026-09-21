@@ -1,0 +1,184 @@
+
+Cluster-representative probe analysis  (benchmark=normad, model=8b)
+=================================================================================================================
+
+Condition                          Cluster  Rep country                  Own acc  Probe acc  Cluster DR    US DR
+-----------------------------------------------------------------------------------------------------------------
+  base                    ProtestantEurope  netherlands                    0.841      0.817       85.5%    79.4%
+                            CatholicEurope  hungary                        0.841      0.841       81.9%    79.4%
+                                  Orthodox  bosnia_and_herzegovina         0.841      0.842       76.2%    79.4%
+                              LatinAmerica  mexico                         0.841      0.834       83.4%    79.4%
+                                 Confucian  taiwan                         0.841      0.839       81.7%    79.4%
+                                 SouthAsia  philippines                    0.841      0.845       78.5%    79.4%
+                            AfricanIslamic  iran                           0.841      0.794       66.1%    79.4%
+
+  sft_aya_cult            ProtestantEurope  netherlands                    0.820      0.796       79.8%    85.3%
+                            CatholicEurope  hungary                        0.820      0.822       85.5%    85.3%
+                                  Orthodox  bosnia_and_herzegovina         0.820      0.815       83.0%    85.3%
+                              LatinAmerica  mexico                         0.820      0.810       85.9%    85.3%
+                                 Confucian  taiwan                         0.820      0.799       79.5%    85.3%
+                                 SouthAsia  philippines                    0.820      0.829       79.8%    85.3%
+                            AfricanIslamic  iran                           0.820      0.800       72.8%    85.3%
+
+  sft_aya_nocult          ProtestantEurope  netherlands                    0.766      0.793       77.2%    79.1%
+                            CatholicEurope  hungary                        0.766      0.789       81.6%    79.1%
+                                  Orthodox  bosnia_and_herzegovina         0.766      0.731       89.3%    79.1%
+                              LatinAmerica  mexico                         0.766      0.772       84.0%    79.1%
+                                 Confucian  taiwan                         0.766      0.820       68.1%    79.1%
+                                 SouthAsia  philippines                    0.766      0.789       80.5%    79.1%
+                            AfricanIslamic  iran                           0.766      0.654       91.1%    79.1%
+
+  sftdpo_aya_cult         ProtestantEurope  netherlands                    0.732      0.680       63.3%    95.9%
+                            CatholicEurope  hungary                        0.732      0.697       56.8%    95.9%
+                                  Orthodox  bosnia_and_herzegovina         0.732      0.694       57.9%    95.9%
+                              LatinAmerica  mexico                         0.732      0.702       55.8%    95.9%
+                                 Confucian  taiwan                         0.732      0.689       60.4%    95.9%
+                                 SouthAsia  philippines                    0.732      0.701       55.6%    95.9%
+                            AfricanIslamic  iran                           0.732      0.764       40.0%    95.9%
+
+  sftdpo_aya_nocult       ProtestantEurope  netherlands                    0.788      0.786       29.8%    67.9%
+                            CatholicEurope  hungary                        0.788      0.775       31.9%    67.9%
+                                  Orthodox  bosnia_and_herzegovina         0.788      0.727       40.3%    67.9%
+                              LatinAmerica  mexico                         0.788      0.764       32.9%    67.9%
+                                 Confucian  taiwan                         0.788      0.784       29.8%    67.9%
+                                 SouthAsia  philippines                    0.788      0.779       31.2%    67.9%
+                            AfricanIslamic  iran                           0.788      0.636       55.2%    67.9%
+
+
+Cluster-representative probe analysis  (benchmark=blend, model=8b)
+=================================================================================================================
+
+Condition                          Cluster  Rep country                  Own acc  Probe acc  Cluster DR    US DR
+-----------------------------------------------------------------------------------------------------------------
+  base                    ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.630      0.329       67.9%    57.0%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.630      0.355       72.5%    57.0%
+
+  sft_aya_cult            ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.604      0.326       67.7%    57.4%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.604      0.350       72.7%    57.4%
+
+  sft_aya_nocult          ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.595      0.307       65.9%    54.5%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.595      0.329       69.5%    54.5%
+
+  sftdpo_aya_cult         ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.605      0.319       65.7%    52.8%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.605      0.348       69.8%    52.8%
+
+  sftdpo_aya_nocult       ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.593      0.302       65.3%    55.0%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.593      0.327       68.5%    55.0%
+
+
+Cluster-representative probe analysis  (benchmark=normad, model=gemma4)
+=================================================================================================================
+
+Condition                          Cluster  Rep country                  Own acc  Probe acc  Cluster DR    US DR
+-----------------------------------------------------------------------------------------------------------------
+  base                    ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.778      0.760       43.0%    86.9%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.778      0.761       39.8%    86.9%
+
+  sft_aya_cult            ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.662      0.641       74.2%    88.2%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.662      0.658       68.2%    88.2%
+
+  sft_aya_nocult          ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.793      0.768       43.5%    89.4%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.793      0.785       35.2%    89.4%
+
+  sftdpo_aya_cult         ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.745      0.722       45.6%    94.2%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.745      0.730       40.5%    94.2%
+
+  sftdpo_aya_nocult       ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.836      0.810       22.9%    83.2%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.836      0.795       24.4%    83.2%
+
+
+Cluster-representative probe analysis  (benchmark=blend, model=gemma4)
+=================================================================================================================
+
+Condition                          Cluster  Rep country                  Own acc  Probe acc  Cluster DR    US DR
+-----------------------------------------------------------------------------------------------------------------
+  base                    ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.660      0.333       64.0%    51.7%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.660      0.358       70.9%    51.7%
+
+  sft_aya_cult            ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.656      0.334       65.6%    54.7%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.656      0.359       69.5%    54.7%
+
+  sft_aya_nocult          ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.648      0.324       63.7%    53.7%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.648      0.350       68.9%    53.7%
+
+  sftdpo_aya_cult         ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.657      0.333       65.1%    54.4%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.657      0.364       70.3%    54.4%
+
+  sftdpo_aya_nocult       ProtestantEurope  netherlands                 [missing file]
+                            CatholicEurope  hungary                     [missing file]
+                                  Orthodox  bosnia_and_herzegovina      [missing file]
+                              LatinAmerica  mexico                      [missing file]
+                                 Confucian  taiwan                         0.647      0.332       62.0%    51.7%
+                                 SouthAsia  philippines                 [missing file]
+                            AfricanIslamic  iran                           0.647      0.350       67.9%    51.7%
+

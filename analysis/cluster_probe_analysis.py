@@ -128,17 +128,27 @@ def us_default_rate_overall(preds: list[dict]) -> float | None:
     return match / wrong if wrong > 0 else None
 
 
+def us_probe_accuracy(preds: list[dict]) -> float:
+    """Fraction of non-US examples where us_pred == gold."""
+    eligible = [p for p in preds if p.get("us_pred") is not None and p["country"] != "US"]
+    if not eligible:
+        return float("nan")
+    return sum(1 for p in eligible if p["us_pred"] == p["gold"]) / len(eligible)
+
+
 def print_table(conditions: list[str], model: str, benchmark: str) -> None:
     print(f"\nCluster-representative probe analysis  (benchmark={benchmark}, model={model})")
-    print("=" * 113)
+    print("=" * 123)
     print(f"\n{'Condition':<22}  {'Cluster':>18}  {'Rep country':<26}  "
-          f"{'Own acc':>8}  {'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
-    print("-" * 113)
+          f"{'Own acc':>8}  {'US acc':>7}  {'Probe acc':>9}  {'Cluster DR':>10}  {'US DR':>7}")
+    print("-" * 123)
 
     for cond in conditions:
         us_preds = load_us_probe_file(cond, model, benchmark)
         us_dr = us_default_rate_overall(us_preds) if us_preds else None
         us_dr_s = f"{us_dr:.1%}" if us_dr is not None else "—"
+        us_acc = us_probe_accuracy(us_preds) if us_preds else float("nan")
+        us_acc_s = f"{us_acc:.3f}" if us_acc == us_acc else "—"
 
         first = True
         for cluster in CLUSTER_ORDER:
@@ -159,7 +169,7 @@ def print_table(conditions: list[str], model: str, benchmark: str) -> None:
             pr_s   = f"{pr_acc:.3f}"  if pr_acc  == pr_acc  else "—"
             dr_s   = f"{dr:.1%}"      if dr      == dr      else "—"
             print(f"  {label:<20}  {cluster:>18}  {rep:<26}  "
-                  f"{own_s:>8}  {pr_s:>9}  {dr_s:>10}  {us_dr_s:>7}")
+                  f"{own_s:>8}  {us_acc_s:>7}  {pr_s:>9}  {dr_s:>10}  {us_dr_s:>7}")
             first = False
         print()
 
