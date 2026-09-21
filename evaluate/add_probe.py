@@ -122,6 +122,50 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
     return new_predictions
 
 
+def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
+                            instruct: bool) -> list[dict]:
+    from evaluate.eval_culturalbench import (
+        CHOICES, NEUTRAL_SHOTS, build_neutral_fewshot_prefix,
+        build_prompt, make_probe_prompt, DATA_PATH,
+    )
+    import json
+    rows = json.loads(DATA_PATH.read_text())
+    prefix = build_neutral_fewshot_prefix()
+    fewshot_turns = NEUTRAL_SHOTS if instruct else None
+    leading_space = not instruct
+
+    from evaluate.eval_normad import score_choices
+    pred_iter = iter(base_data["predictions"])
+    new_predictions = []
+
+    for row in tqdm(rows, desc=f"add_probe(culturalbench)/{probe}"):
+        if not row.get("reformatted_prompt"):
+            continue
+        existing = next(pred_iter)
+        country = row["country"]
+
+        us_pred = us_raw_scores = None
+        if country != probe:
+            probe_q = make_probe_prompt(row["reformatted_prompt"], country, probe)
+            probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns)
+            us_scores = score_choices(model, tokenizer, probe_prompt, CHOICES, leading_space=leading_space)
+            us_pred = CHOICES[0] if us_scores[0] > us_scores[1] else CHOICES[1]
+            us_raw_scores = list(us_scores)
+
+        new_predictions.append({
+            "data_idx":     existing["data_idx"],
+            "question_idx": existing["question_idx"],
+            "country":      existing["country"],
+            "group":        existing["group"],
+            "gold":         existing["gold"],
+            "pred":         existing["pred"],
+            "us_pred":      us_pred,
+            "scores":       existing.get("scores"),
+            "us_scores":    us_raw_scores,
+        })
+    return new_predictions
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True,
@@ -141,7 +185,12 @@ def main():
     probe = args.probe_country
     slug = probe.lower().replace(" ", "_")
 
-    benchmark = "blend" if base_path.name.startswith("blend_") else "normad"
+    if base_path.name.startswith("blend_"):
+        benchmark = "blend"
+    elif base_path.name.startswith("culturalbench_"):
+        benchmark = "culturalbench"
+    else:
+        benchmark = "normad"
 
     out_path = Path(args.out) if args.out else (
         BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json", base_path.name)
@@ -165,6 +214,8 @@ def main():
 
     if benchmark == "blend":
         new_predictions = run_blend_probe(base_data, probe, model, tokenizer, instruct, data_path)
+    elif benchmark == "culturalbench":
+        new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
     else:
         new_predictions = run_normad_probe(base_data, probe, model, tokenizer, instruct, data_path)
 
