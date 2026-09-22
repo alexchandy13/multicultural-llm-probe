@@ -1,19 +1,23 @@
-"""Convert CulturalBench into NormAd-style narrative stories.
+"""Convert CulturalBench into NormAd-style yes/no prompts with Anglo names.
 
-For each (question, option, answer, country) row, uses claude-haiku to write a
-short third-person story with an Anglo character name, ending with
-"Is what [name] did socially acceptable?"  Gold label is yes/no based on
-whether the behavior is culturally appropriate in that country.
+For each (question, option, answer, country) row:
+  - Rewrites the option as a short narrative sentence with an Anglo name
+  - Appends a yes/no question derived from the original question text
+  - Gold = "yes" if original answer=True, "no" if answer=False
 
-Both True (correct) and False (incorrect) options are included, giving a
-balanced yes/no split similar to NormAd.
+Example:
+  question: "In the Netherlands, which of the following is an unusual common public practice?"
+  option:   "Cycle everywhere"
+  answer:   False
+  →  "Sarah cycles everywhere. Is what she did an unusual common public practice?"
+  gold: "no"
 
 Output: data/culturalbench_normad.json
 
 Usage:
-    python data/prep_culturalbench_normad.py
     python data/prep_culturalbench_normad.py --dry-run
-    python data/prep_culturalbench_normad.py --limit 50   # small test run
+    python data/prep_culturalbench_normad.py --limit 20
+    python data/prep_culturalbench_normad.py
 """
 from __future__ import annotations
 
@@ -30,39 +34,45 @@ OUTPUT = PROJECT_ROOT / "data" / "culturalbench_normad.json"
 CACHE  = PROJECT_ROOT / "data" / "culturalbench_normad_cache.json"
 
 SYSTEM = """\
-You convert cultural knowledge questions into social norms stories in the style of NormAd.
+You reformat cultural knowledge questions into short narrative yes/no prompts.
 
-Given a cultural question about a country, one answer option, and whether that option \
-is the CORRECT answer (True) or INCORRECT (False):
+Given:
+- country: the country the question is about
+- question: a multiple-choice question about cultural practices in that country
+- option: one answer option from that question
 
-1. Write a 2-3 sentence third-person narrative story about a character with a common \
-Anglo/English name (e.g. Sarah, Tom, Emma, Michael, Chris, Rachel, Jake, Emily, Mark, \
-Alice, David, Laura, Ben, Kate, James) who is in or visiting the country and performs \
-the behavior described in the option.
-2. End the story with exactly: "Is what [name] did socially acceptable?"
-3. Output the correct gold label — "yes" if the behavior is culturally normal or \
-appropriate in that country, "no" if it is not.
-
-Important: answer=True means this option IS the correct answer to the question. \
-Use the question wording to determine whether "correct" maps to acceptable \
-(e.g. "common practice", "typical greeting") or unacceptable \
-(e.g. "unusual", "rude", "never done", "considered offensive").
+Your task:
+1. Write a short 1-2 sentence story where a character named Sarah (or another common \
+Anglo name like Tom, Emma, Michael, Chris, Rachel, Jake, Emily, Mark, Alice, David) \
+performs the behavior described in the option. Use "she" or "he" as appropriate.
+2. Append a yes/no question by rephrasing the original question as \
+"Is what she/he did [rest of question]?" — strip the country prefix \
+(e.g. "In the Netherlands,") and any "which of the following" phrasing, \
+keeping the core question intact.
 
 Output JSON only, no extra text:
-{"story": "...", "gold": "yes" or "no", "name": "..."}"""
+{"prompt": "...", "name": "..."}
+
+Examples:
+question: "In the Netherlands, which of the following is an unusual common public practice?"
+option: "Cycle everywhere"
+→ {"prompt": "Sarah cycles everywhere. Is what she did an unusual common public practice?", "name": "Sarah"}
+
+question: "In Korean dining etiquette, what is a common practice regarding drinks and paying for the meal?"
+option: "Younger people pour drinks for the elders and the elders pay for the meal."
+→ {"prompt": "Sarah, who is younger, poured drinks for her elders and the elders paid for the meal. Is what she did a common practice regarding drinks and paying for the meal?", "name": "Sarah"}"""
 
 
 def convert_row(client: anthropic.Anthropic, country: str,
-                question: str, option: str, answer: bool) -> dict:
+                question: str, option: str) -> dict:
     user_msg = (
-        f"Country: {country}\n"
-        f"Question: {question}\n"
-        f"Option: {option}\n"
-        f"This option is the CORRECT answer: {answer}"
+        f"country: {country}\n"
+        f"question: {question}\n"
+        f"option: {option}"
     )
     msg = client.messages.create(
         model="claude-haiku-4-5-20251001",
-        max_tokens=300,
+        max_tokens=200,
         system=SYSTEM,
         messages=[{"role": "user", "content": user_msg}],
     )
@@ -89,7 +99,8 @@ def main():
 
     if args.dry_run:
         for r in rows[:8]:
-            print(f"[{'T' if r['answer'] else 'F'}] {r['country']} | {r['prompt_question'][:60]} | {r['prompt_option']}")
+            gold = "yes" if r["answer"] else "no"
+            print(f"[{gold}] {r['country']} | {r['prompt_question'][:70]} | {r['prompt_option']}")
         return
 
     cache: dict[str, dict] = {}
@@ -110,7 +121,6 @@ def main():
                     r["country"],
                     r["prompt_question"],
                     r["prompt_option"] or "",
-                    r["answer"],
                 )
                 cache[key] = result
             except Exception as e:
@@ -131,27 +141,26 @@ def main():
             "data_idx":     r["data_idx"],
             "question_idx": r["question_idx"],
             "country":      r["country"],
-            "story":        result.get("story"),
+            "prompt":       result.get("prompt"),
             "name":         result.get("name"),
-            "gold":         result.get("gold"),
+            "gold":         "yes" if r["answer"] else "no",
             "original_question": r["prompt_question"],
             "original_option":   r["prompt_option"],
-            "original_answer":   r["answer"],
         })
 
     CACHE.write_text(json.dumps(cache))
     print(f"\nDone. {len(output_rows)} rows converted, {failed} failed.")
 
-    yes_ct = sum(1 for r in output_rows if r.get("gold") == "yes")
-    no_ct  = sum(1 for r in output_rows if r.get("gold") == "no")
+    yes_ct = sum(1 for r in output_rows if r["gold"] == "yes")
+    no_ct  = sum(1 for r in output_rows if r["gold"] == "no")
     print(f"Gold distribution: yes={yes_ct}, no={no_ct}")
 
     OUTPUT.write_text(json.dumps(output_rows, indent=2))
     print(f"Saved → {OUTPUT}")
 
-    print("\nSample stories:")
-    for row in output_rows[:6]:
-        print(f"  [{row['gold']}] [{row['country']}] {row['story']}")
+    print("\nSample prompts:")
+    for row in output_rows[:8]:
+        print(f"  [{row['gold']}] [{row['country']}] {row['prompt']}")
         print()
 
 
