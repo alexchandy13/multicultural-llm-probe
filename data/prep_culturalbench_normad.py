@@ -44,11 +44,13 @@ Given:
 Your task:
 1. Write a short 1-2 sentence story where a character named Sarah (or another common \
 Anglo name like Tom, Emma, Michael, Chris, Rachel, Jake, Emily, Mark, Alice, David) \
-performs the behavior described in the option. Use "she" or "he" as appropriate.
+performs the behavior described in the option. Use "she" or "he" as appropriate. \
+Do NOT mention the country name anywhere in the story.
 2. Append a yes/no question by rephrasing the original question as \
 "Is what she/he did [rest of question]?" — strip the country prefix \
-(e.g. "In the Netherlands,") and any "which of the following" phrasing, \
-keeping the core question intact.
+(e.g. "In the Netherlands,", "In Korean dining etiquette,", "In [country]") \
+and any "which of the following" phrasing. Do NOT mention the country \
+anywhere in the question ending either.
 
 Output JSON only, no extra text:
 {"prompt": "...", "name": "..."}
@@ -60,7 +62,9 @@ option: "Cycle everywhere"
 
 question: "In Korean dining etiquette, what is a common practice regarding drinks and paying for the meal?"
 option: "Younger people pour drinks for the elders and the elders pay for the meal."
-→ {"prompt": "Sarah, who is younger, poured drinks for her elders and the elders paid for the meal. Is what she did a common practice regarding drinks and paying for the meal?", "name": "Sarah"}"""
+→ {"prompt": "Sarah, who is younger, poured drinks for her elders and the elders paid for the meal. Is what she did a common practice regarding drinks and paying for the meal?", "name": "Sarah"}
+
+Note: the story must NOT mention the country name — the country will be injected separately at eval time."""
 
 
 def convert_row(client: anthropic.Anthropic, country: str,
