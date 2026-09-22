@@ -3,7 +3,9 @@
 # git seeing them. .gitkeep stubs no longer needed since `data/`,
 # `checkpoints/`, and `outputs/` are reconstructed at first run by the
 # training/eval/CULNIG scripts themselves.
-data/
+data/*
+!data/*.py
+!data/*.csv
 models/
 checkpoints/
 outputs/
