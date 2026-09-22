@@ -7,7 +7,7 @@
 #SBATCH --time=48:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-3
+#SBATCH --array=0-4
 #SBATCH --output=slurm/culnig_gemma4.%A_%a.out
 #SBATCH --error=slurm/culnig_gemma4.%A_%a.err
 
@@ -23,7 +23,7 @@ read -ra CONDS <<< "$CONDITIONS"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_gemma4] condition=$COND"
 
-# NormAd novel extension — score, control, then select
-python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normad
+# NormAd novel extension — score, control, then select (binary yes/no only, no neutral)
+python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normad --yn-only
 python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normadcontrol
-python culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size gemma4 --dataset-names normad
+python culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size gemma4 --dataset-names normad --yn-only

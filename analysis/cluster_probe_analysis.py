@@ -64,6 +64,8 @@ def load_probe_file(condition: str, model: str, country: str,
     slug = probe_slug(country)
     if benchmark == "normad":
         path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_{slug}probe.json"
+    elif benchmark == "culturalbench_normy":
+        path = BEHAVIORAL / f"culturalbench_normy_{condition}_{model}_nfs_mpw_{slug}probe.json"
     elif benchmark == "culturalbench":
         path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_{slug}probe.json"
     else:
@@ -112,6 +114,8 @@ def load_us_probe_file(condition: str, model: str,
                        benchmark: str = "normad") -> list[dict] | None:
     if benchmark == "normad":
         path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
+    elif benchmark == "culturalbench_normy":
+        path = BEHAVIORAL / f"culturalbench_normy_{condition}_{model}_nfs_mpw_usprobe.json"
     elif benchmark == "culturalbench":
         path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_usprobe.json"
     else:
@@ -187,7 +191,7 @@ def print_table(conditions: list[str], model: str, benchmark: str) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="8b", choices=["8b", "gemma4"])
-    parser.add_argument("--benchmark", default="normad", choices=["normad", "blend", "culturalbench", "both", "all"])
+    parser.add_argument("--benchmark", default="normad", choices=["normad", "blend", "culturalbench", "culturalbench_normy", "both", "all"])
     parser.add_argument("--condition", default=None, help="Single condition to show (default: all)")
     args = parser.parse_args()
 
@@ -195,7 +199,7 @@ def main():
     if args.benchmark == "both":
         benchmarks = ["normad", "blend"]
     elif args.benchmark == "all":
-        benchmarks = ["normad", "blend", "culturalbench"]
+        benchmarks = ["normad", "blend", "culturalbench", "culturalbench_normy"]
     else:
         benchmarks = [args.benchmark]
 

@@ -11,8 +11,6 @@ idempotent.
 """
 from __future__ import annotations
 
-import hashlib
-import random
 import sys
 from pathlib import Path
 
@@ -27,23 +25,42 @@ from datasets import load_dataset  # noqa: E402
 
 
 
-NORMAD_CTRL_PROMPT = (
-    "You will be given a short story involving 2 or more characters about everyday "
-    "situations. Read the story and determine if the character's behavior aligns with "
-    "common social norms.\nRespond only with the number 1, 2, or 3.\n\n"
-    "Story: {story}\nOptions: {options}\n"
+# Neutral fewshot prefix — identical to eval_normad.py's NEUTRAL_SHOTS_NORMAD.
+# Prepended to every prompt so CULNIG sees the same context as behavioral eval.
+_FEWSHOT_PREFIX = (
+    "Is the Earth round?\nAnswer: yes\n\n"
+    "Is fire cold?\nAnswer: no\n\n"
 )
 
-# Binary (yes/no only) prompt variants — mirrors upstream's NORMAD_PROMPTS but
-# without neutral as an option. Answer is 1 or 2 only.
+# Binary yes/no prompts — exact match to eval_normad.py's YN_WORD_PROMPTS,
+# with fewshot prefix prepended. Answer token is "yes" or "no".
 NORMAD_YN_PROMPTS = [
-    (
+    _FEWSHOT_PREFIX + (
         "You will be given a short story involving 2 or more characters about everyday "
         "situations. You will also be given a country of relevance. Read the story and "
         "determine if the character's behavior aligns with the social norms of that country.\n"
-        "Only consider the provided context and country. Do not include any outside assumptions. "
-        "Respond **only** with the number 1 or 2.\n\n"
-        "country: {country}\nStory: {story}\nOptions: {options}\n"
+        "Respond **only** with yes or no.\n\n"
+        "country: {country}\nStory: {story}\nAnswer:"
+    ),
+    _FEWSHOT_PREFIX + (
+        "Read a short story describing everyday events with at least two characters. "
+        "You'll also receive a country. Your task is to judge whether the character's "
+        "actions are in line with the cultural expectations of that country.\n"
+        "Answer strictly with yes or no.\n\n"
+        "country: {country}\nStory: {story}\nAnswer:"
+    ),
+    _FEWSHOT_PREFIX + (
+        "A short scenario featuring multiple characters will be provided, along with the "
+        "cultural background of a specific country. Your role is to determine how well "
+        "the behavior shown fits that country's social norms.\n"
+        "Only respond with yes or no.\n\n"
+        "country: {country}\nStory: {story}\nAnswer:"
+    ),
+    _FEWSHOT_PREFIX + (
+        "Given a short daily-life story involving multiple characters, along with the "
+        "country, assess whether the behavior depicted fits within the social norms of "
+        "that culture.\nAnswer with just yes or no.\n\n"
+        "country: {country}\nStory: {story}\nAnswer:"
     ),
 ]
 
@@ -95,30 +112,14 @@ def _normad_yn_block(tokenizer, target_data):
 
     def make_preprocess(instruction, inst_idx):
         def preprocess(examples):
-            hash_input = f"{examples['ID']}_{instruction}"
-            seed = int(hashlib.md5(hash_input.encode()).hexdigest()[:8], 16) % (2 ** 32)
-            rng = random.Random(seed)
-
-            options = [1, 2]
-            rng.shuffle(options)
-            option_labels = sorted(
-                {options[0]: "yes", options[1]: "no"}.items()
-            )
-            option_str = ", ".join(f"{k}: {v}" for k, v in option_labels)
-
             gold = examples["Gold Label"]
-            if gold == "yes":
-                label = options[0]
-            elif gold == "no":
-                label = options[1]
-            else:
+            if gold not in ("yes", "no"):
                 raise ValueError(f"Unexpected label in normad_yn: {gold}")
 
             country_key = rev_c2n.get(examples["Country"], examples["Country"])
             input_text = instruction.format(
                 country=examples["Country"],
                 story=examples["Story"],
-                options=option_str,
             )
             tokenized = tokenizer(
                 input_text, return_tensors="pt", add_special_tokens=True
@@ -127,12 +128,12 @@ def _normad_yn_block(tokenizer, target_data):
                 "input_text": input_text,
                 "input_ids": tokenized["input_ids"][0],
                 "attention_mask": tokenized["attention_mask"][0],
-                "label": str(label),
+                "label": gold,
                 "country": country_key,
                 "id": str(examples["ID"]),
                 "instruction_id": inst_idx,
                 "dataset_name": "normad_yn",
-                "options": [str(o) for o in options],
+                "options": [gold],
             }
         return preprocess
 
@@ -151,29 +152,37 @@ def _normad_yn_block(tokenizer, target_data):
 def _normadcontrol_block(tokenizer, target_countries, target_data):
     """Build the processed dataset for `normadcontrol`.
 
-    Mirrors upstream's `normad` block but with full content removal:
-      - Country field is absent from the prompt.
-      - Story field is empty — no story content at all.
-      - Options are still shuffled per-example (seeded on ID) and gold label
-        still varies, giving CULNIG enough signal for a null-content baseline.
-      - Tags `dataset_name='normadcontrol'` so the decide-script suffix matches.
+    Same format as normad_yn (yes/no labels, same 4 prompt templates, fewshot
+    prefix) but with all cultural content removed:
+      - story="" — no story text
+      - country="" — no country injected
+    This makes the only variable between normad_yn and normadcontrol the
+    presence of cultural content, not prompt format, so gradient comparisons
+    are not confounded by format differences.
     """
     c2n = _upstream_dataset.COUNTRY_TO_NAME["normad"]
     rev_c2n = {v: k for k, v in c2n.items()}
 
     dataset = load_dataset("akhilayerukola/NormAd", split="train")
+    # Same filters as normad_yn: drop holdout countries and neutral labels.
+    dataset = dataset.filter(
+        lambda x: x["Country"] not in HOLDOUT_NORMAD_COUNTRIES
+        and x["Gold Label"] in ("yes", "no")
+    )
+
+    all_countries = np.unique(dataset["Country"]).tolist()
 
     if target_countries is not None:
         target = [c2n[c] for c in target_countries]
         dataset = dataset.filter(lambda x: x["Country"] in target)
     else:
-        target = np.unique(dataset["Country"]).tolist()
+        target = all_countries
 
     if target_data != "all":
         ids = []
         for country in target:
             cdata = dataset.filter(lambda x, c=country: x["Country"] == c)
-            for label in ["yes", "no", "neutral"]:
+            for label in ["yes", "no"]:
                 ldata = cdata.filter(lambda x, l=label: x["Gold Label"] == l)
                 n = len(ldata)
                 half = n // 2
@@ -183,36 +192,14 @@ def _normadcontrol_block(tokenizer, target_countries, target_data):
                     ids.extend(ldata.select(range(half, n))["ID"])
         dataset = dataset.filter(lambda x: x["ID"] in ids)
 
-    instructions = [NORMAD_CTRL_PROMPT]
-
     def make_preprocess(instruction, inst_idx):
         def preprocess(examples):
-            hash_input = f"{examples['ID']}_{instruction}"
-            seed = int(hashlib.md5(hash_input.encode()).hexdigest()[:8], 16) % (2 ** 32)
-            rng = random.Random(seed)
-
-            options = [1, 2, 3]
-            rng.shuffle(options)
-            option_labels = sorted(
-                {options[0]: "yes", options[1]: "no", options[2]: "neutral"}.items()
-            )
-            option_str = ", ".join(f"{k}: {v}" for k, v in option_labels)
-
             gold = examples["Gold Label"]
-            if gold == "yes":
-                label = options[0]
-            elif gold == "no":
-                label = options[1]
-            elif gold == "neutral":
-                label = options[2]
-            else:
-                raise ValueError(f"Unknown gold label: {gold}")
+            if gold not in ("yes", "no"):
+                raise ValueError(f"Unexpected label in normadcontrol: {gold}")
 
-            input_text = instruction.format(story="", options=option_str)
-            # No chat template: caller strips tokenizer.chat_template to None so
-            # all four conditions (C1 base, C2 SFT, C3 DPO, C4 Instruct) see the
-            # same raw-text prompt format. Without this, C4 would be chat-formatted
-            # and C1-C3 raw-text, invalidating cross-condition comparisons.
+            # Inject empty country and story — no cultural content.
+            input_text = instruction.format(country="", story="")
             tokenized = tokenizer(
                 input_text, return_tensors="pt", add_special_tokens=True
             )
@@ -220,17 +207,17 @@ def _normadcontrol_block(tokenizer, target_countries, target_data):
                 "input_text": input_text,
                 "input_ids": tokenized["input_ids"][0],
                 "attention_mask": tokenized["attention_mask"][0],
-                "label": str(label),
+                "label": gold,
                 "country": rev_c2n.get(examples["Country"], examples["Country"]),
                 "id": str(examples["ID"]),
                 "instruction_id": inst_idx,
                 "dataset_name": "normadcontrol",
-                "options": [str(o) for o in options],
+                "options": [gold],
             }
         return preprocess
 
     processed = []
-    for inst_idx, instruction in enumerate(instructions):
+    for inst_idx, instruction in enumerate(NORMAD_YN_PROMPTS):
         processed.append(
             dataset.map(
                 make_preprocess(instruction, inst_idx),

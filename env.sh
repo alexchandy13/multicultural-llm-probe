@@ -29,9 +29,9 @@ export PYTHONUNBUFFERED=1   # flush stdout live so `tail -f *.out` shows progres
 # segments give the allocator room to repack as tensors are freed.
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
-# The four conditions used everywhere downstream:
-#   base, sft (C2), dpo (C3), sftdpo (C4).
-export CONDITIONS="${CONDITIONS:-base sft dpo sftdpo}"
+# The five conditions used everywhere downstream:
+#   base, sft_aya_cult, sft_aya_nocult, sftdpo_aya_cult, sftdpo_aya_nocult.
+export CONDITIONS="${CONDITIONS:-base sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult}"
 
 # Cultures from NormAd; split for paper-side analysis.
 export WESTERN_CULTURES="US UK Germany Spain Australia"
