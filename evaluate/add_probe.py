@@ -166,6 +166,57 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
     return new_predictions
 
 
+def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
+                                  instruct: bool) -> list[dict]:
+    from evaluate.eval_culturalbench_normy import DATA_PATH
+    from evaluate.eval_normad import (
+        NEUTRAL_SHOTS_NORMAD, YN_WORD_CHOICES, YN_WORD_PROMPTS,
+        build_neutral_fewshot_prefix, score_choices,
+    )
+    import json
+    rows = json.loads(DATA_PATH.read_text())
+    prefix = build_neutral_fewshot_prefix(multi_prompt_word=True)
+    fewshot_turns = NEUTRAL_SHOTS_NORMAD if instruct else None
+    choices = YN_WORD_CHOICES
+    leading_space = not instruct
+
+    pred_iter = iter(base_data["predictions"])
+    new_predictions = []
+
+    for row in tqdm(rows, desc=f"add_probe(culturalbench_normy)/{probe}"):
+        story = row.get("prompt")
+        if not story:
+            continue
+        existing = next(pred_iter)
+        country = row["country"]
+
+        us_pred = us_raw_scores = None
+        if country.lower().replace(" ", "_") != probe.lower().replace(" ", "_"):
+            acc = [0.0, 0.0]
+            for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
+                if instruct:
+                    up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=story), fewshot=fewshot_turns)
+                else:
+                    up = pfx + tmpl.format(country=probe, scenario=story)
+                s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
+                acc[0] += s[0]; acc[1] += s[1]
+            us_pred = choices[0] if acc[0] > acc[1] else choices[1]
+            us_raw_scores = acc
+
+        new_predictions.append({
+            "data_idx":     existing["data_idx"],
+            "question_idx": existing["question_idx"],
+            "country":      existing["country"],
+            "group":        existing["group"],
+            "gold":         existing["gold"],
+            "pred":         existing["pred"],
+            "us_pred":      us_pred,
+            "scores":       existing.get("scores"),
+            "us_scores":    us_raw_scores,
+        })
+    return new_predictions
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True,
@@ -187,6 +238,8 @@ def main():
 
     if base_path.name.startswith("blend_"):
         benchmark = "blend"
+    elif base_path.name.startswith("culturalbench_normy_"):
+        benchmark = "culturalbench_normy"
     elif base_path.name.startswith("culturalbench_"):
         benchmark = "culturalbench"
     else:
@@ -214,6 +267,8 @@ def main():
 
     if benchmark == "blend":
         new_predictions = run_blend_probe(base_data, probe, model, tokenizer, instruct, data_path)
+    elif benchmark == "culturalbench_normy":
+        new_predictions = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
     elif benchmark == "culturalbench":
         new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
     else:
