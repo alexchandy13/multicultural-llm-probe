@@ -64,6 +64,8 @@ def load_probe_file(condition: str, model: str, country: str,
     slug = probe_slug(country)
     if benchmark == "normad":
         path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_{slug}probe.json"
+    elif benchmark == "culturalbench":
+        path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_{slug}probe.json"
     else:
         path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_{slug}probe.json"
     if not path.exists():
@@ -77,9 +79,13 @@ def accuracy(preds: list[dict]) -> float:
     return sum(1 for p in preds if p["pred"] == p["gold"]) / len(preds)
 
 
+def same_country(a: str, b: str) -> bool:
+    return a.lower().replace(" ", "_") == b.lower().replace(" ", "_")
+
+
 def probe_accuracy(preds: list[dict], probe_country_name: str) -> float:
     """Fraction where us_pred == gold (how often the probe country's answer is correct)."""
-    eligible = [p for p in preds if p.get("us_pred") is not None and p["country"] != probe_country_name]
+    eligible = [p for p in preds if p.get("us_pred") is not None and not same_country(p["country"], probe_country_name)]
     if not eligible:
         return float("nan")
     return sum(1 for p in eligible if p["us_pred"] == p["gold"]) / len(eligible)
@@ -89,7 +95,7 @@ def default_rate_among_errors(preds: list[dict], probe_country_name: str) -> tup
     """Returns (default_rate, n_correct, n_probe_match, n_other) for non-probe-country examples."""
     correct = wrong_match = wrong_diverge = 0
     for p in preds:
-        if p.get("us_pred") is None or p["country"] == probe_country_name:
+        if p.get("us_pred") is None or same_country(p["country"], probe_country_name):
             continue
         if p["pred"] == p["gold"]:
             correct += 1
@@ -106,6 +112,8 @@ def load_us_probe_file(condition: str, model: str,
                        benchmark: str = "normad") -> list[dict] | None:
     if benchmark == "normad":
         path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
+    elif benchmark == "culturalbench":
+        path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_usprobe.json"
     else:
         path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_usprobe.json"
     if not path.exists():
@@ -179,12 +187,17 @@ def print_table(conditions: list[str], model: str, benchmark: str) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="8b", choices=["8b", "gemma4"])
-    parser.add_argument("--benchmark", default="normad", choices=["normad", "blend", "both"])
+    parser.add_argument("--benchmark", default="normad", choices=["normad", "blend", "culturalbench", "both", "all"])
     parser.add_argument("--condition", default=None, help="Single condition to show (default: all)")
     args = parser.parse_args()
 
     conditions = [args.condition] if args.condition else CONDITIONS
-    benchmarks = ["normad", "blend"] if args.benchmark == "both" else [args.benchmark]
+    if args.benchmark == "both":
+        benchmarks = ["normad", "blend"]
+    elif args.benchmark == "all":
+        benchmarks = ["normad", "blend", "culturalbench"]
+    else:
+        benchmarks = [args.benchmark]
 
     for bm in benchmarks:
         print_table(conditions, args.model, bm)

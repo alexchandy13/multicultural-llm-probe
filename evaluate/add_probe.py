@@ -145,7 +145,7 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
         country = row["country"]
 
         us_pred = us_raw_scores = None
-        if country != probe:
+        if country.lower().replace(" ", "_") != probe.lower().replace(" ", "_"):
             probe_q = make_probe_prompt(row["reformatted_prompt"], country, probe)
             probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns)
             us_scores = score_choices(model, tokenizer, probe_prompt, CHOICES, leading_space=leading_space)
