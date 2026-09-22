@@ -374,7 +374,9 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", required=True,
-                        choices=["base", "dpo", "sft", "sftdpo"])
+                        choices=["base", "dpo", "sft", "sftdpo",
+                                 "sft_aya_cult", "sft_aya_nocult",
+                                 "sftdpo_aya_cult", "sftdpo_aya_nocult"])
     parser.add_argument("--dataset-names", nargs="+", required=True,
                         help="e.g. `normad` or `normadcontrol` (single name per run).")
     parser.add_argument("--yn-only", action="store_true",
