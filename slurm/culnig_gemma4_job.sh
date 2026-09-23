@@ -5,7 +5,7 @@
 #SBATCH --qos=medium
 #SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --time=48:00:00
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-4
 #SBATCH --output=slurm/culnig_gemma4.%A_%a.out
