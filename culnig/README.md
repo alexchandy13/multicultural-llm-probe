@@ -13,10 +13,10 @@ algorithm."
 |---|---|
 | [construct_normad_ctrl.py](construct_normad_ctrl.py) | Regex utilities for stripping country/demonym mentions from NormAd story text. Runs standalone to produce a manual-verification sample. |
 | [dataset_ext.py](dataset_ext.py) | Monkey-patches upstream's `load_dataset_neuron_scores` to add a `normadcontrol` block (NormAd story stripped + country dropped from prompt). |
-| [calc_neuron_score_normad.py](calc_neuron_score_normad.py) | Drives upstream's `calculate_scores` against a given condition: QLoRA-loads the (base + optional LoRA) Llama 3.2 3B, extends the model whitelist for Llama 3.2, writes scores under `outputs/neurons/{condition}/`. |
-| [decide_culture_neurons_normad.py](decide_culture_neurons_normad.py) | Selection step: top-t% per module on (NormAd − NormAdctrl), minus top-r% on CountryRC. Output dirs adjusted to our `outputs/neurons/` tree. |
+| [calc_neuron_score.py](calc_neuron_score.py) | Drives upstream's `calculate_scores` against a given condition: QLoRA-loads the (base + optional LoRA) Llama 3.2 3B, extends the model whitelist for Llama 3.2, writes scores under `outputs/neurons/{condition}/`. |
+| [decide_culture_neurons.py](decide_culture_neurons.py) | Selection step: top-t% per module on (NormAd − NormAdctrl), minus top-r% on CountryRC. Output dirs adjusted to our `outputs/neurons/` tree. |
 
-The same `calc_neuron_score_normad.py` runs both 5a (BLEnD) and 5b (NormAd) by
+The same `calc_neuron_score.py` runs both 5a (BLEnD) and 5b (NormAd) by
 varying `--dataset-names`. This keeps the model loading, quantization, and
 whitelist patches in one place.
 
@@ -28,24 +28,24 @@ Two things need to change for our setup:
 2. A `normadcontrol` block added to `dataset.py` (upstream stubs out the name in
    its `__main__` test but never implements the block).
 
-Both are handled at import time by `dataset_ext.py` and `calc_neuron_score_normad.py`
+Both are handled at import time by `dataset_ext.py` and `calc_neuron_score.py`
 via monkey-patching, so `culnig/_upstream/` can be re-pulled from git without
 losing local modifications.
 
 ## Pipeline (one condition)
 
 ```bash
-python culnig/calc_neuron_score_normad.py --condition sft --dataset-names normad
-python culnig/calc_neuron_score_normad.py --condition sft --dataset-names normadcontrol
-python culnig/decide_culture_neurons_normad.py --condition sft --dataset-names normad
+python culnig/calc_neuron_score.py --condition sft --dataset-names normad
+python culnig/calc_neuron_score.py --condition sft --dataset-names normadcontrol
+python culnig/decide_culture_neurons.py --condition sft --dataset-names normad
 ```
 
 Then the BLEnD baseline (Step 5a) for cross-source overlap:
 
 ```bash
-python culnig/calc_neuron_score_normad.py --condition sft --dataset-names blend
-python culnig/calc_neuron_score_normad.py --condition sft --dataset-names blendcontrol
-python culnig/decide_culture_neurons_normad.py --condition sft --dataset-names blend
+python culnig/calc_neuron_score.py --condition sft --dataset-names blend
+python culnig/calc_neuron_score.py --condition sft --dataset-names blendcontrol
+python culnig/decide_culture_neurons.py --condition sft --dataset-names blend
 ```
 
 The SLURM wrapper [slurm/culnig_job.sh](../slurm/culnig_job.sh) runs the NormAd

@@ -177,7 +177,7 @@ sbatch slurm/eval_job.sh
 # Edit slurm/culnig_job.sh temporarily to add `--dataset-names normad` only
 # and skip the normadcontrol + decide steps, then submit. Or just run it on
 # the login node briefly:
-python3.12 culnig/calc_neuron_score_normad.py --condition base --dataset-names normad
+python3.12 culnig/calc_neuron_score.py --condition base --dataset-names normad
 # Ctrl-C after a few batches print; you just want to confirm the model loads
 # and dataloader iterates. Delete the partial output.
 ```

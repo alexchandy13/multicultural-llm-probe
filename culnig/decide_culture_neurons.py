@@ -6,7 +6,7 @@ The selection logic (top-t% on (NormAd - NormAdctrl), subtract CountryRC top-r%)
 is byte-for-byte upstream.
 
 Usage:
-    python culnig/decide_culture_neurons_normad.py --condition sft --dataset-names normad
+    python culnig/decide_culture_neurons.py --condition sft --dataset-names normad
 """
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def main():
         "--model-size", default="3b", choices=["3b", "8b", "gemma4", "qwen35"],
         help="Base model size. Reads scores from outputs/neurons/{condition}"
              "{_size_suffix}/ and writes selected neurons there. Must match the "
-             "size used during calc_neuron_score_normad.py.",
+             "size used during calc_neuron_score.py.",
     )
     parser.add_argument("--yn-only", action="store_true",
                         help="Read normad_yn_max_scores.json instead of normad_max_scores.json. "

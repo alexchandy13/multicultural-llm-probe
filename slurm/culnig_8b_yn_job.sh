@@ -26,6 +26,6 @@ read -ra CONDS <<< "$CONDITIONS"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_8b_yn] condition=$COND"
 
-python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad --yn-only
-python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
-python culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size 8b --dataset-names normad --yn-only
+python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad --yn-only
+python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
+python culnig/decide_culture_neurons.py --condition "$COND" --model-size 8b --dataset-names normad --yn-only

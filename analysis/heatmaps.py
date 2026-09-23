@@ -111,7 +111,7 @@ COND_LABELS = {
 # neurons. Restricted by:
 #   - culnig/_upstream/CULNIG/calc_neuron_score.py:TARGET_MODULES
 #     (scores 5 modules — adds mlp.up_proj — but never down_proj or o_proj)
-#   - culnig/decide_culture_neurons_normad.py:MLP_SAVE_MODULES / ATTENTION_SAVE_MODULES
+#   - culnig/decide_culture_neurons.py:MLP_SAVE_MODULES / ATTENTION_SAVE_MODULES
 #     (further drops mlp.up_proj from the saved selection)
 # So the modules that appear in all_neurons_normad_max.json are exactly these 4.
 # Ordered MLP-first, then attention Q/K/V in the natural QKV order.
@@ -186,7 +186,7 @@ def load_per_country_control_scores(cond: str) -> dict | None:
 
     Same shape as normad_max_scores, computed on the control prompts. Used to
     perform a per-country version of the (normad − normadcontrol) subtraction
-    that decide_culture_neurons_normad.py does at the all-countries-collapsed
+    that decide_culture_neurons.py does at the all-countries-collapsed
     level when computing the saved scalar `attribute_score`.
     """
     path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "normadcontrol_max_scores.json"

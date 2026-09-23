@@ -24,6 +24,6 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_gemma4] condition=$COND"
 
 # NormAd novel extension — score, control, then select (binary yes/no only, no neutral)
-python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normad --yn-only
-python culnig/calc_neuron_score_normad.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normadcontrol
-python culnig/decide_culture_neurons_normad.py --condition "$COND" --model-size gemma4 --dataset-names normad --yn-only
+python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normad --yn-only
+python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normadcontrol
+python culnig/decide_culture_neurons.py --condition "$COND" --model-size gemma4 --dataset-names normad --yn-only

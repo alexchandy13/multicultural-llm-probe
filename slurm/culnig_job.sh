@@ -33,13 +33,13 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig] condition=$COND"
 
 # 5b — NormAd novel extension (primary)
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names normad
-python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names normadcontrol
-python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --dataset-names normad
+python3.12 culnig/calc_neuron_score.py --condition "$COND" --dataset-names normad
+python3.12 culnig/calc_neuron_score.py --condition "$COND" --dataset-names normadcontrol
+python3.12 culnig/decide_culture_neurons.py --condition "$COND" --dataset-names normad
 
 # 5a — BLEnD baseline disabled. Upstream's BLEnD loader requires local metadata
 # (US_questions.csv etc.) that we never installed. To re-enable: clone BLEnD into
 # culnig/_upstream/data/BLEnD/, then uncomment the three lines below.
-# python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blend
-# python3.12 culnig/calc_neuron_score_normad.py --condition "$COND" --dataset-names blendcontrol
-# python3.12 culnig/decide_culture_neurons_normad.py --condition "$COND" --dataset-names blend
+# python3.12 culnig/calc_neuron_score.py --condition "$COND" --dataset-names blend
+# python3.12 culnig/calc_neuron_score.py --condition "$COND" --dataset-names blendcontrol
+# python3.12 culnig/decide_culture_neurons.py --condition "$COND" --dataset-names blend

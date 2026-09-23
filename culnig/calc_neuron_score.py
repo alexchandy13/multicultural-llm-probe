@@ -11,7 +11,7 @@ Outputs land in our project's outputs/neurons/ tree instead of upstream's
 default ../outputs/, so analysis scripts can find them.
 
 Usage:
-    python culnig/calc_neuron_score_normad.py \
+    python culnig/calc_neuron_score.py \
         --condition sft --dataset-names normad
 """
 from __future__ import annotations
@@ -303,6 +303,7 @@ def setup_logging():
 
 
 def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
+        target_data: str = "neuron",
         model_size: str = "3b", precision: str = "matched_bf16"):
     model, tokenizer = load_model_for_culnig(
         condition_name, model_size=model_size, precision=precision
@@ -315,7 +316,7 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
     # Main dataset(s)
     dataloader = upstream_score.load_dataset_neuron_scores(
         dataset_names, tokenizer, batch_size=BATCH_SIZE,
-        target_countries=None, target_data="neuron",
+        target_countries=None, target_data=target_data,
     )
     raw_scores, total_probs = calculate_scores_memory_efficient(
         model, tokenizer, dataloader, logger
@@ -385,6 +386,13 @@ def parse_args():
                              "Existing normadcontrol runs are unaffected.")
     parser.add_argument("--out-root", default=str(PROJECT_ROOT / "outputs" / "neurons"))
     parser.add_argument(
+        "--target-data", default="neuron", choices=["neuron", "non_neuron", "all"],
+        help="Data split to use for scoring. 'neuron' (default) uses the first half "
+             "of each country×label group, consistent with upstream CULNIG. 'all' uses "
+             "all examples — use for datasets where no downstream eval split is needed "
+             "(e.g. blend when skipping intervention evaluation).",
+    )
+    parser.add_argument(
         "--model-size", default="3b", choices=["3b", "8b", "gemma4", "qwen35"],
         help="Base model size. '3b'=Llama-3.2-3B (default), '8b'=Llama-3.1-8B, "
              "'gemma4'=Gemma 4 12B. Per-condition output dir is suffixed with "
@@ -410,6 +418,7 @@ def main():
     run(
         args.condition, dataset_names, Path(args.out_root), logger,
         model_size=args.model_size, precision=args.precision,
+        target_data=args.target_data,
     )
 
 
