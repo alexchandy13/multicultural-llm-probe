@@ -11,11 +11,10 @@
 #SBATCH --output=slurm/culnig_8b_yn.%A_%a.out
 #SBATCH --error=slurm/culnig_8b_yn.%A_%a.err
 
-# CULNIG gradient scoring with yn-only NormAd and updated normadcontrol (full
-# content removal). Outputs land in outputs/neurons/{cond}_8b/ with _yn suffix:
-#   normad_yn_max_scores.json        (from --yn-only scoring pass)
-#   normadcontrol_max_scores.json    (overwritten with full-content-removal version)
-#   all_neurons_normad_yn_max.json   (from decide step)
+# CULNIG gradient scoring for 8B across NormAd and CulturalBench.
+# Outputs land in outputs/neurons/{cond}_8b/:
+#   normad_yn_max_scores.json / normadcontrol_max_scores.json / all_neurons_normad_yn_max.json
+#   culturalbench_max_scores.json / culturalbenchcontrol_max_scores.json / all_neurons_culturalbench_max.json
 
 set -euo pipefail
 source env.sh
@@ -26,6 +25,12 @@ read -ra CONDS <<< "$CONDITIONS"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 echo "[culnig_8b_yn] condition=$COND"
 
+# NormAd (yes/no only)
 python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normad --yn-only
 python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names normadcontrol
 python culnig/decide_culture_neurons.py --condition "$COND" --model-size 8b --dataset-names normad --yn-only
+
+# CulturalBench
+python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names culturalbench
+python culnig/calc_neuron_score.py --condition "$COND" --model-size 8b --precision matched_bf16 --dataset-names culturalbenchcontrol
+python culnig/decide_culture_neurons.py --condition "$COND" --model-size 8b --dataset-names culturalbench

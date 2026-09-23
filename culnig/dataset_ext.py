@@ -1,9 +1,8 @@
-"""Extends upstream's `load_dataset_neuron_scores` with a `normadcontrol` block.
+"""Extends upstream's `load_dataset_neuron_scores` with custom dataset blocks.
 
-Upstream's `culnig/_upstream/dataset.py` already supports `normad` (lines 75-156)
-but only stubs out `normadcontrol` in its `__main__` test (line 862). The plan's
-Step 2 fills that gap: NormAd, but with the country field removed from the prompt
-and culture markers regex-stripped from the story.
+Adds loaders for:
+  - normad_yn / normadcontrol  (yes/no NormAd + null-content baseline)
+  - culturalbench / culturalbenchcontrol  (CulturalBench yes/no + null-country baseline)
 
 We do this by monkey-patching upstream's loader before any caller imports it.
 Import this module first (or set `PYTHONPATH` to include `culnig/`); the patch is
@@ -11,17 +10,20 @@ idempotent.
 """
 from __future__ import annotations
 
+import json
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UPSTREAM = Path(__file__).resolve().parent / "_upstream"
 if str(UPSTREAM) not in sys.path:
     sys.path.insert(0, str(UPSTREAM))
 
 import dataset as _upstream_dataset  # noqa: E402
-from datasets import load_dataset  # noqa: E402
+from datasets import load_dataset, Dataset as HFDataset  # noqa: E402
 
 
 
@@ -228,6 +230,93 @@ def _normadcontrol_block(tokenizer, target_countries, target_data):
     return processed
 
 
+# ── CulturalBench ────────────────────────────────────────────────────────────
+
+CULTURALBENCH_DATA_PATH = PROJECT_ROOT / "data" / "culturalbench_reformatted.json"
+
+# Countries that take "the" as a determiner — mirrors eval_culturalbench.py.
+_CB_THE_COUNTRIES = {
+    "Netherlands", "United Kingdom", "United States",
+    "United Arab Emirates", "Dominican Republic", "Philippines",
+    "Czech Republic",
+}
+
+_CB_PROMPT_SUFFIX = "\nAnswer with yes or no.\nAnswer:"
+
+
+def _country_with_article(country: str) -> str:
+    return f"the {country}" if country in _CB_THE_COUNTRIES else country
+
+
+def _cb_rows(target_data: str) -> list[dict]:
+    """Load and optionally half-split CulturalBench rows."""
+    rows = [r for r in json.loads(CULTURALBENCH_DATA_PATH.read_text())
+            if r.get("reformatted_prompt")]
+    if target_data == "all":
+        return rows
+    groups: dict = defaultdict(list)
+    for i, r in enumerate(rows):
+        label = "yes" if r["answer"] else "no"
+        groups[(r["country"], label)].append(i)
+    selected: set = set()
+    for indices in groups.values():
+        half = len(indices) // 2
+        selected.update(indices[:half] if target_data == "neuron" else indices[half:])
+    return [r for i, r in enumerate(rows) if i in selected]
+
+
+def _culturalbench_block(tokenizer, target_data: str) -> list:
+    """CulturalBench yes/no scoring dataset, matching eval_culturalbench.py format."""
+    rows = _cb_rows(target_data)
+
+    def make_example(r):
+        gold = "yes" if r["answer"] else "no"
+        prompt = _FEWSHOT_PREFIX + r["reformatted_prompt"] + _CB_PROMPT_SUFFIX
+        tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        return {
+            "input_text": prompt,
+            "input_ids": tok["input_ids"][0].tolist(),
+            "attention_mask": tok["attention_mask"][0].tolist(),
+            "label": gold,
+            "country": r["country"],
+            "id": str(r["data_idx"]),
+            "instruction_id": 0,
+            "dataset_name": "culturalbench",
+            "options": [gold],
+        }
+
+    return [HFDataset.from_list([make_example(r) for r in rows])]
+
+
+def _culturalbenchcontrol_block(tokenizer, target_data: str) -> list:
+    """CulturalBench control: same prompts but country name stripped.
+
+    Replaces 'In {country with article},' with 'In ,' so the only difference
+    from culturalbench is the presence of a named country.
+    """
+    rows = _cb_rows(target_data)
+
+    def make_example(r):
+        gold = "yes" if r["answer"] else "no"
+        src = f"In {_country_with_article(r['country'])},"
+        controlled = r["reformatted_prompt"].replace(src, "In ,", 1)
+        prompt = _FEWSHOT_PREFIX + controlled + _CB_PROMPT_SUFFIX
+        tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        return {
+            "input_text": prompt,
+            "input_ids": tok["input_ids"][0].tolist(),
+            "attention_mask": tok["attention_mask"][0].tolist(),
+            "label": gold,
+            "country": r["country"],
+            "id": str(r["data_idx"]),
+            "instruction_id": 0,
+            "dataset_name": "culturalbenchcontrol",
+            "options": [gold],
+        }
+
+    return [HFDataset.from_list([make_example(r) for r in rows])]
+
+
 def _patched_loader(dataset_names, tokenizer, batch_size,
                     target_countries=None, target_data="all"):
     """Drop-in replacement: handle `normadcontrol` and `normad_yn`, delegate the rest."""
@@ -235,14 +324,21 @@ def _patched_loader(dataset_names, tokenizer, batch_size,
     import torch
     from torch.nn.utils.rnn import pad_sequence
 
+    _local = {"normadcontrol", "normad_yn", "culturalbench", "culturalbenchcontrol"}
     has_ctrl = "normadcontrol" in dataset_names
     has_yn = "normad_yn" in dataset_names
-    remaining = [d for d in dataset_names if d not in ("normadcontrol", "normad_yn")]
+    has_cb = "culturalbench" in dataset_names
+    has_cb_ctrl = "culturalbenchcontrol" in dataset_names
+    remaining = [d for d in dataset_names if d not in _local]
     extra_processed = []
     if has_ctrl:
         extra_processed += _normadcontrol_block(tokenizer, target_countries, target_data)
     if has_yn:
         extra_processed += _normad_yn_block(tokenizer, target_data)
+    if has_cb:
+        extra_processed += _culturalbench_block(tokenizer, target_data)
+    if has_cb_ctrl:
+        extra_processed += _culturalbenchcontrol_block(tokenizer, target_data)
 
     if remaining:
         # Delegate the rest to the unmodified upstream loader.
