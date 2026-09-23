@@ -2,7 +2,7 @@
 #SBATCH --job-name=culture_culnig_8b_yn
 #SBATCH --partition=clip
 #SBATCH --account=clip
-#SBATCH --qos=medium
+#SBATCH --qos=high
 #SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --time=48:00:00
 #SBATCH --mem=128G
