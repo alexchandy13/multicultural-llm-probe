@@ -88,9 +88,10 @@ NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
-_SIZE_SUFFIX = ""  # set to "_8b" via --model-size 8b
-_N_LAYERS = 28     # 28 for Llama 3.2 3B, 32 for Llama 3.1 8B
-_YN_ONLY = False   # set via --yn-only; changes normad file names to *_yn variants
+_SIZE_SUFFIX = ""       # set to "_8b" via --model-size 8b
+_N_LAYERS = 28          # 28 for Llama 3.2 3B, 32 for Llama 3.1 8B
+_YN_ONLY = False        # set via --yn-only; changes normad file names to *_yn variants
+_DATASET = "normad"     # set via --dataset; controls which score files are loaded
 IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 
 # Same definition used by the cluster_accuracy_bars / accuracy_deltas_bars
@@ -168,16 +169,23 @@ def _layer_axis_figsize(n_conditions: int, transpose: bool,
 
 def load_neurons(cond: str) -> list[dict] | None:
     """Return the list of selected culture neurons for a condition, or None if missing."""
-    suffix = "_yn" if _YN_ONLY else ""
-    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / f"all_neurons_normad{suffix}_max.json"
+    if _DATASET == "normad":
+        suffix = "_yn" if _YN_ONLY else ""
+        fname = f"all_neurons_normad{suffix}_max.json"
+    else:
+        fname = f"all_neurons_{_DATASET}_max.json"
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / fname
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("top_neurons", [])
 
 
 def load_per_country_scores(cond: str) -> dict | None:
-    """Return raw per-neuron per-country scores from normad[_yn]_max_scores.json."""
-    name = "normad_yn_max_scores.json" if _YN_ONLY else "normad_max_scores.json"
+    """Return raw per-neuron per-country scores for the active dataset."""
+    if _DATASET == "normad":
+        name = "normad_yn_max_scores.json" if _YN_ONLY else "normad_max_scores.json"
+    else:
+        name = f"{_DATASET}_max_scores.json"
     path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / name
     if not path.exists():
         return None
@@ -185,14 +193,17 @@ def load_per_country_scores(cond: str) -> dict | None:
 
 
 def load_per_country_control_scores(cond: str) -> dict | None:
-    """Return raw per-neuron per-country scores from normadcontrol_max_scores.json.
+    """Return raw per-neuron per-country scores from the control variant of the active dataset.
 
-    Same shape as normad_max_scores, computed on the control prompts. Used to
-    perform a per-country version of the (normad − normadcontrol) subtraction
-    that decide_culture_neurons.py does at the all-countries-collapsed
-    level when computing the saved scalar `attribute_score`.
+    Returns None for datasets that have no control condition (e.g. blend).
     """
-    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "normadcontrol_max_scores.json"
+    if _DATASET == "normad":
+        ctrl_name = "normadcontrol_max_scores.json"
+    elif _DATASET == "culturalbench":
+        ctrl_name = "culturalbenchcontrol_max_scores.json"
+    else:
+        return None  # blend has no control condition
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / ctrl_name
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("neuron_scores", {})
@@ -1049,12 +1060,17 @@ def main():
     parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
     parser.add_argument("--yn-only", action="store_true",
                         help="Read normad_yn_max_scores.json and all_neurons_normad_yn_max.json "
-                             "instead of the plain normad variants.")
+                             "instead of the plain normad variants. Only applies to --dataset normad.")
+    parser.add_argument(
+        "--dataset", choices=["normad", "culturalbench", "blend"], default="normad",
+        help="Which scoring dataset's neuron files to load. Default: normad.",
+    )
     args = parser.parse_args()
 
-    global _SIZE_SUFFIX, _N_LAYERS, _YN_ONLY
+    global _SIZE_SUFFIX, _N_LAYERS, _YN_ONLY, _DATASET
     _SIZE_SUFFIX = "" if args.model_size == "3b" else f"_{args.model_size}"
     _YN_ONLY = args.yn_only
+    _DATASET = args.dataset
     _N_LAYERS = (48 if args.model_size == "gemma4" else
                  32 if args.model_size in ("8b", "qwen35") else 28)
     fig_size_suffix = f"_{args.model_size}"
@@ -1077,6 +1093,8 @@ def main():
         if args.exclude:
             suffix += "_no_" + "_".join(sorted(args.exclude))
     suffix += fig_size_suffix
+    if _DATASET != "normad":
+        suffix += f"_{_DATASET}"
 
     todo = ({"layer_count", "layer_attribution", "module_distribution", "cluster_activation"}
             if "all" in args.figures else set(args.figures))
