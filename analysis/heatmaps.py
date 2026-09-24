@@ -90,6 +90,7 @@ FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
 _SIZE_SUFFIX = ""  # set to "_8b" via --model-size 8b
 _N_LAYERS = 28     # 28 for Llama 3.2 3B, 32 for Llama 3.1 8B
+_YN_ONLY = False   # set via --yn-only; changes normad file names to *_yn variants
 IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 
 # Same definition used by the cluster_accuracy_bars / accuracy_deltas_bars
@@ -167,15 +168,17 @@ def _layer_axis_figsize(n_conditions: int, transpose: bool,
 
 def load_neurons(cond: str) -> list[dict] | None:
     """Return the list of selected culture neurons for a condition, or None if missing."""
-    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "all_neurons_normad_max.json"
+    suffix = "_yn" if _YN_ONLY else ""
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / f"all_neurons_normad{suffix}_max.json"
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("top_neurons", [])
 
 
 def load_per_country_scores(cond: str) -> dict | None:
-    """Return raw per-neuron per-country scores from normad_max_scores.json."""
-    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / "normad_max_scores.json"
+    """Return raw per-neuron per-country scores from normad[_yn]_max_scores.json."""
+    name = "normad_yn_max_scores.json" if _YN_ONLY else "normad_max_scores.json"
+    path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / name
     if not path.exists():
         return None
     return json.loads(path.read_text()).get("neuron_scores", {})
@@ -1044,10 +1047,14 @@ def main():
              "different --conditions sets) so they don't overwrite.",
     )
     parser.add_argument("--model-size", choices=["3b", "8b", "gemma4", "qwen35"], default="3b")
+    parser.add_argument("--yn-only", action="store_true",
+                        help="Read normad_yn_max_scores.json and all_neurons_normad_yn_max.json "
+                             "instead of the plain normad variants.")
     args = parser.parse_args()
 
-    global _SIZE_SUFFIX, _N_LAYERS
+    global _SIZE_SUFFIX, _N_LAYERS, _YN_ONLY
     _SIZE_SUFFIX = "" if args.model_size == "3b" else f"_{args.model_size}"
+    _YN_ONLY = args.yn_only
     _N_LAYERS = (48 if args.model_size == "gemma4" else
                  32 if args.model_size in ("8b", "qwen35") else 28)
     fig_size_suffix = f"_{args.model_size}"
