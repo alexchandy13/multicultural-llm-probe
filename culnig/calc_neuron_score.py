@@ -61,13 +61,13 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
          `torch.cuda.empty_cache()` at end of each batch to defrag (with
          `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` set in env.sh).
 
-    The Llama branch only — upstream's slicing for phi-4 etc. is not
-    reproduced here since we only run Llama in this fork. Algorithm output
-    is bit-identical to upstream's for Llama 3.x.
+    Uses our own _get_text_model/_get_target_module (not upstream's utils)
+    so it works for all our models (Llama-3, Gemma-3, Gemma-4, Qwen3)
+    without requiring any edits to _upstream/. Algorithm output is
+    bit-identical to upstream's for the Llama/pass branch.
     """
     import torch.nn.functional as F
     from CULNIG.calc_neuron_score import TARGET_MODULES
-    from utils import get_target_module, get_text_model
 
     max_neuron_scores = defaultdict(lambda: defaultdict(float))
     total_probabilities_per_country = defaultdict(float)
@@ -81,10 +81,10 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
         return hook
 
     hooks = []
-    text_model = get_text_model(model)
+    text_model = _get_text_model(model)
     for i in range(len(text_model.layers)):
         for module_name in TARGET_MODULES:
-            module = get_target_module(model, module_name, i)
+            module = _get_target_module(model, module_name, i)
             hooks.append(module.register_forward_hook(
                 save_activation(f"model.model.layers.{i}.{module_name}")
             ))
@@ -194,6 +194,29 @@ LLAMA_31_BRANCH = "meta-llama/Llama-3.1-8B-Instruct"
 # enough that the gradient pass also fits. CULNIG is bottlenecked on backward
 # memory, not throughput — going to 1 is the cheapest fix.
 BATCH_SIZE = 1
+
+
+def _get_text_model(model):
+    """Return the transformer core that exposes `.layers` (works for all our models).
+
+    For AutoModelForCausalLM (Llama-3, Gemma-3, Gemma-4, Qwen3) the hierarchy
+    is model → model.model → .layers. For multimodal wrappers the text body
+    lives at model.language_model.model, but we always load via
+    AutoModelForCausalLM so the simple path is always correct.
+    """
+    inner = getattr(model, "model", model)
+    if hasattr(inner, "language_model"):
+        inner = getattr(inner.language_model, "model", inner.language_model)
+    return inner
+
+
+def _get_target_module(model, module_name: str, layer_idx: int):
+    """Return the nn.Module at layers[layer_idx].{module_name}."""
+    layer = _get_text_model(model).layers[layer_idx]
+    obj = layer
+    for part in module_name.split("."):
+        obj = getattr(obj, part)
+    return obj
 
 
 def _pin_name_or_path(model):
