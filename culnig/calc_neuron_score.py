@@ -85,6 +85,8 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
     for i in range(len(text_model.layers)):
         for module_name in TARGET_MODULES:
             module = _get_target_module(model, module_name, i)
+            if module is None:
+                continue  # layer doesn't use this projection (e.g. Gemma4 local-attn layers)
             hooks.append(module.register_forward_hook(
                 save_activation(f"model.model.layers.{i}.{module_name}")
             ))
@@ -211,11 +213,18 @@ def _get_text_model(model):
 
 
 def _get_target_module(model, module_name: str, layer_idx: int):
-    """Return the nn.Module at layers[layer_idx].{module_name}."""
+    """Return the nn.Module at layers[layer_idx].{module_name}, or None if absent.
+
+    Some architectures (e.g. Gemma4 alternating local/global attention) set
+    certain projection attributes to None for layers that don't use them.
+    Returning None lets callers skip those layers cleanly.
+    """
     layer = _get_text_model(model).layers[layer_idx]
     obj = layer
     for part in module_name.split("."):
-        obj = getattr(obj, part)
+        obj = getattr(obj, part, None)
+        if obj is None:
+            return None
     return obj
 
 
