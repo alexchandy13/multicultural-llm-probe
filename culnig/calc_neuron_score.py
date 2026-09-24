@@ -116,9 +116,11 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
             labels = [str(label) for label in batch["labels"]]
             labels_ids = torch.tensor(
                 [tokenizer.convert_tokens_to_ids(l) for l in labels],
-                device=model.device,
+                device=logits.device,  # logits live on the last layer's device
             )
-            correct_probs = probabilities[torch.arange(probabilities.size(0)), labels_ids]
+            correct_probs = probabilities[
+                torch.arange(probabilities.size(0), device=logits.device), labels_ids
+            ]
             correct_probs.sum().backward()
 
             correct_probs_cpu_list = correct_probs.detach().cpu().tolist()
@@ -138,15 +140,18 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
                     if grads is None:
                         continue
 
+                    act_device = activation.device
                     # Llama branch (upstream: `if name in [llama list]: pass`).
                     scores = activation.detach() * grads
 
-                    padding_mask = attention_mask == 0
+                    # With device_map="auto" across multiple GPUs, attention_mask
+                    # and prob_total may live on a different device than this layer.
+                    padding_mask = (attention_mask == 0).to(act_device)
                     if padding_mask.any():
                         scores = scores.masked_fill(padding_mask.unsqueeze(-1), 0.0)
 
                     max_aggr_scores, _ = torch.max(scores, dim=1)
-                    max_aggr_scores = prob_total * max_aggr_scores
+                    max_aggr_scores = prob_total.to(act_device) * max_aggr_scores
                     if any(control):
                         max_aggr_scores[control] = torch.clamp(
                             max_aggr_scores[control], min=0.0
