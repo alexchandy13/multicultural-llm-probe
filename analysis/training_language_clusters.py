@@ -228,8 +228,8 @@ def main():
         grand_total += total
 
         row = f"{split:<18}" + "".join(
-            f"{cluster_counts.get(c, 0):<{col_w}}" for c in IW_ORDER
-        ) + f"{unmapped_count:<12}{total}"
+            f"{100*cluster_counts.get(c,0)/total:>{col_w-2}.1f}% " for c in IW_ORDER
+        ) + f"{100*unmapped_count/total:>9.1f}%  {total}"
         print(row)
 
         if unmapped_langs:
@@ -238,8 +238,8 @@ def main():
 
     print("-" * len(hdr))
     total_row = f"{'TOTAL':<18}" + "".join(
-        f"{grand_cluster.get(c, 0):<{col_w}}" for c in IW_ORDER
-    ) + f"{grand_unmapped:<12}{grand_total}"
+        f"{100*grand_cluster.get(c,0)/grand_total:>{col_w-2}.1f}% " for c in IW_ORDER
+    ) + f"{100*grand_unmapped/grand_total:>9.1f}%  {grand_total}"
     print(total_row)
 
     print()
