@@ -134,6 +134,16 @@ LANG_TO_CLUSTERS: dict[str, list[str]] = {
     "Khmer":                     ["Confucian"],   # Cambodia
     "Hebrew":                    ["ProtestantEurope"],  # Israel clusters near secular-rational/self-expression on IW map
     "Macedonian":                ["Orthodox"],
+    "Welsh":                     ["EnglishSpeaking"],
+    "Irish":                     ["EnglishSpeaking"],
+    "Waray":                     ["LatinAmerica"],       # Philippines
+    "Sanskrit":                  ["SouthAsia"],
+    "Sundanese":                 ["AfricanIslamic"],     # West Java, predominantly Muslim
+    "Burmese":                   ["Confucian"],          # Myanmar, Buddhist Southeast Asia
+    "Lao":                       ["Confucian"],          # Laos, Buddhist Southeast Asia
+    "Yiddish":                   ["ProtestantEurope"],   # European Jewish diaspora
+    "Latin":                     ["CatholicEurope"],
+    "Esperanto":                 ["EnglishSpeaking"],    # no geographic cluster; speaker base mostly Western
 }
 
 IW_ORDER = [
@@ -191,9 +201,8 @@ def main():
         print(row)
 
         if unmapped_langs:
-            top = unmapped_langs.most_common(5)
-            print(f"  {'':16}  unmapped top langs: " +
-                  ", ".join(f"{l}={n}" for l, n in top))
+            print(f"  {'':16}  unmapped langs: " +
+                  ", ".join(f"{l}={n}" for l, n in unmapped_langs.most_common()))
 
     print("-" * len(hdr))
     total_row = f"{'TOTAL':<18}" + "".join(
