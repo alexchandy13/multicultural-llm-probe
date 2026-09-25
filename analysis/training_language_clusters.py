@@ -122,6 +122,18 @@ LANG_TO_CLUSTERS: dict[str, list[str]] = {
     "Azerbaijani":               ["AfricanIslamic"],
     "Pashto":                    ["SouthAsia", "AfricanIslamic"],
     "Sindhi":                    ["SouthAsia", "AfricanIslamic"],
+
+    # Additional languages
+    "Panjabi":                   ["SouthAsia"],   # variant spelling of Punjabi
+    "Malagasy":                  ["AfricanIslamic"],
+    "Kyrgyz":                    ["AfricanIslamic"],
+    "Tagalog":                   ["LatinAmerica"],  # Philippines — shared Spanish Catholic colonial heritage
+    "Cebuano":                   ["LatinAmerica"],  # Philippines
+    "Chinese":                   ["Confucian"],   # unspecified script variant
+    "Thai":                      ["Confucian"],   # Buddhist Southeast Asia
+    "Khmer":                     ["Confucian"],   # Cambodia
+    "Hebrew":                    ["ProtestantEurope"],  # Israel clusters near secular-rational/self-expression on IW map
+    "Macedonian":                ["Orthodox"],
 }
 
 IW_ORDER = [
