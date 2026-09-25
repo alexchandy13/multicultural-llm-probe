@@ -99,14 +99,21 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 SETUP_CONDITIONS = {
-    "all": ["base", "sft", "dpo", "sftdpo"],
+    "all":   ["base", "sft", "dpo", "sftdpo"],
+    "aya":   ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
+    "sft":   ["base", "sft_aya_cult", "sft_aya_nocult"],
+    "dpo":   ["base", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
 }
 
 COND_LABELS = {
-    "base":   "Base",
-    "sft":    "SFT",
-    "dpo":    "DPO",
-    "sftdpo": "SFT+DPO",
+    "base":             "Base",
+    "sft":              "SFT",
+    "dpo":              "DPO",
+    "sftdpo":           "SFT+DPO",
+    "sft_aya_cult":     "SFT Cult.",
+    "sft_aya_nocult":   "SFT No-Cult.",
+    "sftdpo_aya_cult":  "SFT+DPO Cult.",
+    "sftdpo_aya_nocult":"SFT+DPO No-Cult.",
 }
 
 # The modules that this project's CULNIG pipeline actually saves as culture
@@ -396,6 +403,182 @@ def figure_cluster_activation(conditions: list[str], suffix: str):
     plt.colorbar(im, ax=ax, label="Mean activation score")
     fig.tight_layout()
     out = FIGURES_DIR / f"heatmap_cluster_activation{suffix}.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
+
+
+def figure_layer_cluster_attribution(conditions: list[str], suffix: str):
+    """One PDF per condition: rows=layers, cols=8 I-W clusters.
+    Cell = mean activation score of culture neurons at that layer for countries in that cluster.
+    """
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+
+        matrix = np.full((n_layers, len(cluster_order)), np.nan)
+        per_layer_cluster: dict[tuple, list[float]] = defaultdict(list)
+
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            country_scores = scores.get(key, {})
+            for raw_country, score in country_scores.items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    per_layer_cluster[(n["layer_idx"], cluster)].append(score)
+
+        for (layer, cluster), vals in per_layer_cluster.items():
+            ci = cluster_order.index(cluster)
+            matrix[layer, ci] = float(np.mean(vals))
+
+        fig, ax = plt.subplots(figsize=(max(6, 1.0 * len(cluster_order)), max(6, 0.3 * n_layers)))
+        im = ax.imshow(matrix, aspect="auto", cmap="magma", origin="upper")
+        ax.set_yticks(range(n_layers))
+        ax.set_yticklabels([f"L{i}" for i in range(n_layers)], fontsize=6)
+        ax.set_xticks(range(len(cluster_order)))
+        ax.set_xticklabels(cluster_order, fontsize=8, rotation=30, ha="right")
+        ax.set_xlabel("I-W Cluster")
+        ax.set_ylabel("Layer")
+        ax.set_title(f"Mean activation by layer × cluster — {COND_LABELS.get(cond, cond)}")
+        plt.colorbar(im, ax=ax, label="Mean activation score")
+        fig.tight_layout()
+        out_dir = FIGURES_DIR / "per_cluster_maps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"heatmap_layer_cluster_attribution_{cond}{suffix}.pdf"
+        fig.savefig(out, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {out}")
+
+
+def figure_layer_cluster_neuron_count(conditions: list[str], suffix: str):
+    """One PDF per condition: rows=layers, cols=8 I-W clusters.
+    Cell = count of culture neurons at that layer whose top-cluster (by mean per-country
+    activation) is that cluster. Each neuron counted once per layer.
+    """
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+
+        matrix = np.zeros((n_layers, len(cluster_order)))
+
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            country_scores = scores.get(key, {})
+            if not country_scores:
+                continue
+            cluster_means: dict[str, list[float]] = defaultdict(list)
+            for raw_country, score in country_scores.items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    cluster_means[cluster].append(score)
+            if not cluster_means:
+                continue
+            top = max(cluster_means, key=lambda c: float(np.mean(cluster_means[c])))
+            matrix[n["layer_idx"], cluster_order.index(top)] += 1
+
+        fig, ax = plt.subplots(figsize=(max(6, 1.0 * len(cluster_order)), max(6, 0.3 * n_layers)))
+        im = ax.imshow(matrix, aspect="auto", cmap="magma", origin="upper")
+        ax.set_yticks(range(n_layers))
+        ax.set_yticklabels([f"L{i}" for i in range(n_layers)], fontsize=6)
+        ax.set_xticks(range(len(cluster_order)))
+        ax.set_xticklabels(cluster_order, fontsize=8, rotation=30, ha="right")
+        ax.set_xlabel("I-W Cluster")
+        ax.set_ylabel("Layer")
+        ax.set_title(f"Neuron count by layer × cluster — {COND_LABELS.get(cond, cond)}")
+        plt.colorbar(im, ax=ax, label="# culture neurons")
+        vmax = matrix.max()
+        for i in range(matrix.shape[0]):
+            for j in range(matrix.shape[1]):
+                v = int(matrix[i, j])
+                if v > 0:
+                    ax.text(j, i, v, ha="center", va="center",
+                            color="white" if v < vmax / 2 else "black", fontsize=5)
+        fig.tight_layout()
+        out_dir = FIGURES_DIR / "per_cluster_maps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"heatmap_layer_cluster_neuron_count_{cond}{suffix}.pdf"
+        fig.savefig(out, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {out}")
+
+
+def figure_cluster_neuron_count(conditions: list[str], suffix: str):
+    """Heatmap of culture-neuron count per (I-W cluster × condition).
+
+    Each neuron is assigned exclusively to the cluster where its mean per-country
+    activation is highest. Cell = count of neurons assigned to that cluster.
+    Annotated with the raw count so the numbers are readable alongside the colour.
+    """
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+
+    matrix = np.zeros((len(cluster_order), len(conditions)))
+    for j, cond in enumerate(conditions):
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            matrix[:, j] = np.nan
+            continue
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            country_scores = scores.get(key, {})
+            if not country_scores:
+                continue
+            cluster_means: dict[str, list[float]] = defaultdict(list)
+            for raw_country, score in country_scores.items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    cluster_means[cluster].append(score)
+            if not cluster_means:
+                continue
+            top_cluster = max(cluster_means, key=lambda c: float(np.mean(cluster_means[c])))
+            matrix[cluster_order.index(top_cluster), j] += 1
+
+    fig, ax = plt.subplots(figsize=(max(7, 0.9 * len(conditions)), max(4, 0.6 * len(cluster_order))))
+    im = ax.imshow(matrix, aspect="auto", cmap="magma", origin="upper")
+    ax.set_yticks(range(len(cluster_order)))
+    ax.set_yticklabels(cluster_order, fontsize=9)
+    ax.set_xticks(range(len(conditions)))
+    ax.set_xticklabels([COND_LABELS.get(c, c) for c in conditions], fontsize=8)
+    ax.set_xlabel("Condition")
+    ax.set_ylabel("I-W cluster (ordered by distance from EnglishSpeaking, ascending)")
+    ax.set_title("Culture-neuron count by top-cluster assignment × condition")
+    plt.colorbar(im, ax=ax, label="# culture neurons")
+    vmax = np.nanmax(matrix)
+    for i in range(matrix.shape[0]):
+        for j in range(matrix.shape[1]):
+            v = matrix[i, j]
+            if not np.isnan(v) and v > 0:
+                ax.text(j, i, int(v), ha="center", va="center",
+                        color="white" if v < vmax / 2 else "black", fontsize=7)
+    fig.tight_layout()
+    out = FIGURES_DIR / f"heatmap_cluster_neuron_count{suffix}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
@@ -999,7 +1182,9 @@ def main():
     parser.add_argument(
         "--figures", nargs="+",
         choices=["layer_count", "layer_attribution", "module_distribution",
-                 "cluster_activation", "group_attribution",
+                 "cluster_activation", "cluster_neuron_count",
+                 "layer_cluster_attribution", "layer_cluster_neuron_count",
+                 "group_attribution",
                  "group_attribution_per_condition",
                  "group_attribution_by_module",
                  "group_attribution_per_condition_by_module",
@@ -1096,7 +1281,8 @@ def main():
     if _DATASET != "normad":
         suffix += f"_{_DATASET}"
 
-    todo = ({"layer_count", "layer_attribution", "module_distribution", "cluster_activation"}
+    todo = ({"layer_count", "layer_attribution", "module_distribution",
+             "cluster_activation", "cluster_neuron_count"}
             if "all" in args.figures else set(args.figures))
 
     if "layer_count" in todo:
@@ -1104,7 +1290,10 @@ def main():
     if "layer_attribution" in todo:
         figure_layer_attribution(conditions, suffix, transpose=args.transpose)
     if "module_distribution" in todo:    figure_module_distribution(conditions, suffix)
-    if "cluster_activation" in todo:     figure_cluster_activation(conditions, suffix)
+    if "cluster_activation" in todo:           figure_cluster_activation(conditions, suffix)
+    if "cluster_neuron_count" in todo:         figure_cluster_neuron_count(conditions, suffix)
+    if "layer_cluster_attribution" in todo:    figure_layer_cluster_attribution(conditions, suffix)
+    if "layer_cluster_neuron_count" in todo:   figure_layer_cluster_neuron_count(conditions, suffix)
     if "group_attribution" in todo:
         figure_group_attribution(conditions, suffix, args.subtract_control,
                                  transpose=args.transpose)
