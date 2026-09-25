@@ -144,6 +144,38 @@ LANG_TO_CLUSTERS: dict[str, list[str]] = {
     "Yiddish":                   ["ProtestantEurope"],   # European Jewish diaspora
     "Latin":                     ["CatholicEurope"],
     "Esperanto":                 ["EnglishSpeaking"],    # no geographic cluster; speaker base mostly Western
+
+    # Round 3
+    "Javanese":                  ["AfricanIslamic"],     # Java, Indonesia — Muslim majority
+    "Albanian":                  ["AfricanIslamic"],     # Albania — Muslim majority
+    "Tajik":                     ["AfricanIslamic"],     # Tajikistan — Central Asian Muslim
+    "Lombard":                   ["CatholicEurope"],     # Northern Italy/Switzerland
+    "Tatar":                     ["AfricanIslamic"],     # Turkic Muslim people of Russia
+    "Iloko":                     ["LatinAmerica"],       # Philippines
+    "Aragonese":                 ["CatholicEurope"],     # Spain
+    "Haitian Creole":            ["LatinAmerica"],       # Haiti
+    "Bashkir":                   ["AfricanIslamic"],     # Turkic Muslim, Russia
+    "Limburgish":                ["ProtestantEurope"],   # Netherlands/Belgium border
+    "Sicilian":                  ["CatholicEurope"],
+    "Sardinian":                 ["CatholicEurope"],
+    "Afrikaans":                 ["AfricanIslamic"],     # South Africa
+    "Uyghur":                    ["AfricanIslamic"],     # Xinjiang — Turkic Muslim
+    "Asturian":                  ["CatholicEurope"],     # Spain
+    "Mongolian":                 ["Confucian"],          # Mongolia
+    "Icelandic":                 ["ProtestantEurope"],
+    "Luxembourgish":             ["CatholicEurope"],
+    "Goan Konkani":              ["SouthAsia"],          # Goa, India
+    "Maltese":                   ["CatholicEurope"],
+    "Bosnian":                   ["AfricanIslamic"],     # Bosnia — Muslim majority
+    "Occitan":                   ["CatholicEurope"],     # Southern France/Spain
+    "Minangkabau":               ["AfricanIslamic"],     # West Sumatra, Indonesia — Muslim
+    "Venetian":                  ["CatholicEurope"],     # Northern Italy
+    "Guarani":                   ["LatinAmerica"],       # Paraguay
+    "Turkmen":                   ["AfricanIslamic"],     # Central Asia — Muslim
+    "Scottish Gaelic":           ["EnglishSpeaking"],    # Scotland
+    "Maithili":                  ["SouthAsia"],          # Bihar, India/Nepal
+    "Eastern Mari":              ["Orthodox"],           # Finno-Ugric, Russia
+    "Tuvan":                     ["Orthodox"],           # Russia/Mongolia border
 }
 
 IW_ORDER = [
