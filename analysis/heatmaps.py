@@ -461,6 +461,61 @@ def figure_layer_cluster_attribution(conditions: list[str], suffix: str):
         print(f"Wrote {out}")
 
 
+def figure_layer_cluster_attribution_lines(conditions: list[str], suffix: str):
+    """One PDF per condition: line plot with x=layer, y=mean activation score, one line per I-W cluster."""
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+
+    # Distinct colours for 8 clusters
+    cmap = plt.get_cmap("tab10")
+    cluster_colors = {c: cmap(i) for i, c in enumerate(cluster_order)}
+
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+
+        per_layer_cluster: dict[tuple, list[float]] = defaultdict(list)
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            for raw_country, score in scores.get(key, {}).items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    per_layer_cluster[(n["layer_idx"], cluster)].append(score)
+
+        fig, ax = plt.subplots(figsize=(max(8, 0.3 * n_layers), 5))
+        for cluster in cluster_order:
+            ys = [
+                float(np.mean(per_layer_cluster[(layer, cluster)]))
+                if (layer, cluster) in per_layer_cluster else np.nan
+                for layer in range(n_layers)
+            ]
+            ax.plot(range(n_layers), ys, label=cluster,
+                    color=cluster_colors[cluster], linewidth=1.5, marker="o",
+                    markersize=3)
+
+        ax.set_xlabel("Layer")
+        ax.set_ylabel("Mean activation score")
+        ax.set_title(f"Mean activation by layer × cluster — {COND_LABELS.get(cond, cond)}")
+        ax.set_xticks(range(0, n_layers, 2))
+        ax.legend(fontsize=7, loc="upper left", ncol=2)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        out_dir = FIGURES_DIR / "per_cluster_maps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"heatmap_layer_cluster_attribution_lines_{cond}{suffix}.pdf"
+        fig.savefig(out, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {out}")
+
+
 def figure_layer_cluster_neuron_count(conditions: list[str], suffix: str):
     """One PDF per condition: rows=layers, cols=8 I-W clusters.
     Cell = count of culture neurons at that layer whose top-cluster (by mean per-country
@@ -519,6 +574,86 @@ def figure_layer_cluster_neuron_count(conditions: list[str], suffix: str):
         out_dir = FIGURES_DIR / "per_cluster_maps"
         out_dir.mkdir(parents=True, exist_ok=True)
         out = out_dir / f"heatmap_layer_cluster_neuron_count_{cond}{suffix}.pdf"
+        fig.savefig(out, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {out}")
+
+
+def figure_layer_cluster_neuron_pct(conditions: list[str], suffix: str):
+    """One PDF per condition: rows=layers, cols=8 I-W clusters.
+    Cell = culture neurons at that layer assigned to that cluster, as a percentage
+    of all scored neurons at that layer. Denominator is computed from the score
+    file keys so it works for any model size.
+    """
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+
+        # Total scored neurons per layer (all modules combined)
+        total_per_layer: dict[int, int] = defaultdict(int)
+        for key in scores:
+            parts = key.rsplit("_", 2)
+            if len(parts) == 3:
+                try:
+                    layer_idx = int(parts[1])
+                    total_per_layer[layer_idx] += 1
+                except ValueError:
+                    pass
+
+        count_matrix = np.zeros((n_layers, len(cluster_order)))
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            country_scores = scores.get(key, {})
+            if not country_scores:
+                continue
+            cluster_means: dict[str, list[float]] = defaultdict(list)
+            for raw_country, score in country_scores.items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    cluster_means[cluster].append(score)
+            if not cluster_means:
+                continue
+            top = max(cluster_means, key=lambda c: float(np.mean(cluster_means[c])))
+            count_matrix[n["layer_idx"], cluster_order.index(top)] += 1
+
+        pct_matrix = np.full((n_layers, len(cluster_order)), np.nan)
+        for layer in range(n_layers):
+            denom = total_per_layer.get(layer, 0)
+            if denom > 0:
+                pct_matrix[layer, :] = 100.0 * count_matrix[layer, :] / denom
+
+        fig, ax = plt.subplots(figsize=(max(6, 1.0 * len(cluster_order)), max(6, 0.3 * n_layers)))
+        im = ax.imshow(pct_matrix, aspect="auto", cmap="magma", origin="upper")
+        ax.set_yticks(range(n_layers))
+        ax.set_yticklabels([f"L{i}" for i in range(n_layers)], fontsize=6)
+        ax.set_xticks(range(len(cluster_order)))
+        ax.set_xticklabels(cluster_order, fontsize=8, rotation=30, ha="right")
+        ax.set_xlabel("I-W Cluster")
+        ax.set_ylabel("Layer")
+        ax.set_title(f"Culture-neuron % of layer by cluster — {COND_LABELS.get(cond, cond)}")
+        plt.colorbar(im, ax=ax, label="% of layer neurons")
+        vmax = np.nanmax(pct_matrix)
+        for i in range(pct_matrix.shape[0]):
+            for j in range(pct_matrix.shape[1]):
+                v = pct_matrix[i, j]
+                if not np.isnan(v) and v > 0:
+                    ax.text(j, i, f"{v:.1f}", ha="center", va="center",
+                            color="white" if v < vmax / 2 else "black", fontsize=5)
+        fig.tight_layout()
+        out_dir = FIGURES_DIR / "per_cluster_maps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"heatmap_layer_cluster_neuron_pct_{cond}{suffix}.pdf"
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         print(f"Wrote {out}")
@@ -1183,7 +1318,8 @@ def main():
         "--figures", nargs="+",
         choices=["layer_count", "layer_attribution", "module_distribution",
                  "cluster_activation", "cluster_neuron_count",
-                 "layer_cluster_attribution", "layer_cluster_neuron_count",
+                 "layer_cluster_attribution", "layer_cluster_attribution_lines",
+                 "layer_cluster_neuron_count", "layer_cluster_neuron_pct",
                  "group_attribution",
                  "group_attribution_per_condition",
                  "group_attribution_by_module",
@@ -1292,8 +1428,10 @@ def main():
     if "module_distribution" in todo:    figure_module_distribution(conditions, suffix)
     if "cluster_activation" in todo:           figure_cluster_activation(conditions, suffix)
     if "cluster_neuron_count" in todo:         figure_cluster_neuron_count(conditions, suffix)
-    if "layer_cluster_attribution" in todo:    figure_layer_cluster_attribution(conditions, suffix)
+    if "layer_cluster_attribution" in todo:        figure_layer_cluster_attribution(conditions, suffix)
+    if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
     if "layer_cluster_neuron_count" in todo:   figure_layer_cluster_neuron_count(conditions, suffix)
+    if "layer_cluster_neuron_pct" in todo:     figure_layer_cluster_neuron_pct(conditions, suffix)
     if "group_attribution" in todo:
         figure_group_attribution(conditions, suffix, args.subtract_control,
                                  transpose=args.transpose)

@@ -200,6 +200,7 @@ def main():
     grand_cluster: dict[str, int] = defaultdict(int)
     grand_unmapped = 0
     grand_total = 0
+    _csv_rows = []
 
     for split in SPLITS:
         path = data_dir / split
@@ -232,6 +233,8 @@ def main():
         ) + f"{100*unmapped_count/total:>9.1f}%  {total}"
         print(row)
 
+        _csv_rows.append((split, dict(cluster_counts), unmapped_count, total))
+
         if unmapped_langs:
             print(f"  {'':16}  unmapped langs: " +
                   ", ".join(f"{l}={n}" for l, n in unmapped_langs.most_common()))
@@ -245,6 +248,26 @@ def main():
     print()
     print("Note: multi-cluster languages (French, Spanish, Portuguese, etc.) are")
     print("counted in each applicable cluster, so cluster totals can exceed split total.")
+
+    # Save to CSV
+    out_dir = PROJECT_ROOT / "outputs" / "figures" / "cluster_csvs"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "training_language_clusters.csv"
+    with open(out_path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["split"] + IW_ORDER + ["unmapped_pct", "total"])
+        for split, cluster_counts, unmapped_count, total in _csv_rows:
+            w.writerow(
+                [split] +
+                [f"{100*cluster_counts.get(c,0)/total:.1f}" for c in IW_ORDER] +
+                [f"{100*unmapped_count/total:.1f}", total]
+            )
+        w.writerow(
+            ["TOTAL"] +
+            [f"{100*grand_cluster.get(c,0)/grand_total:.1f}" for c in IW_ORDER] +
+            [f"{100*grand_unmapped/grand_total:.1f}", grand_total]
+        )
+    print(f"Saved {out_path}")
 
     # Also print per-split language breakdown
     print()
