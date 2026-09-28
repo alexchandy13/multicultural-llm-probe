@@ -516,6 +516,54 @@ def figure_layer_cluster_attribution_lines(conditions: list[str], suffix: str):
         print(f"Wrote {out}")
 
 
+def figure_layer_cluster_attribution_sum(conditions: list[str], suffix: str):
+    """One PDF per condition: rows=layers, cols=8 I-W clusters.
+    Cell = sum of activation scores across all culture neurons at that layer
+    for countries in that cluster. Captures both intensity and count.
+    """
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+
+        matrix = np.zeros((n_layers, len(cluster_order)))
+
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            for raw_country, score in scores.get(key, {}).items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    matrix[n["layer_idx"], cluster_order.index(cluster)] += score
+
+        fig, ax = plt.subplots(figsize=(max(6, 1.0 * len(cluster_order)), max(6, 0.3 * n_layers)))
+        im = ax.imshow(matrix, aspect="auto", cmap="magma", origin="upper")
+        ax.set_yticks(range(n_layers))
+        ax.set_yticklabels([f"L{i}" for i in range(n_layers)], fontsize=6)
+        ax.set_xticks(range(len(cluster_order)))
+        ax.set_xticklabels(cluster_order, fontsize=8, rotation=30, ha="right")
+        ax.set_xlabel("I-W Cluster")
+        ax.set_ylabel("Layer")
+        ax.set_title(f"Total activation score by layer × cluster — {COND_LABELS.get(cond, cond)}")
+        plt.colorbar(im, ax=ax, label="Sum activation score")
+        fig.tight_layout()
+        out_dir = FIGURES_DIR / "per_cluster_maps"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out = out_dir / f"heatmap_layer_cluster_attribution_sum_{cond}{suffix}.pdf"
+        fig.savefig(out, bbox_inches="tight")
+        plt.close(fig)
+        print(f"Wrote {out}")
+
+
 def figure_layer_cluster_neuron_count(conditions: list[str], suffix: str):
     """One PDF per condition: rows=layers, cols=8 I-W clusters.
     Cell = count of culture neurons at that layer whose top-cluster (by mean per-country
@@ -1318,7 +1366,7 @@ def main():
         "--figures", nargs="+",
         choices=["layer_count", "layer_attribution", "module_distribution",
                  "cluster_activation", "cluster_neuron_count",
-                 "layer_cluster_attribution", "layer_cluster_attribution_lines",
+                 "layer_cluster_attribution", "layer_cluster_attribution_lines", "layer_cluster_attribution_sum",
                  "layer_cluster_neuron_count", "layer_cluster_neuron_pct",
                  "group_attribution",
                  "group_attribution_per_condition",
@@ -1430,6 +1478,7 @@ def main():
     if "cluster_neuron_count" in todo:         figure_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_attribution" in todo:        figure_layer_cluster_attribution(conditions, suffix)
     if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
+    if "layer_cluster_attribution_sum" in todo:    figure_layer_cluster_attribution_sum(conditions, suffix)
     if "layer_cluster_neuron_count" in todo:   figure_layer_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_neuron_pct" in todo:     figure_layer_cluster_neuron_pct(conditions, suffix)
     if "group_attribution" in todo:

@@ -25,6 +25,7 @@ echo "[eval_instruct_8b] model_size=$MS"
 # NormAd
 python evaluate/eval_normad.py --condition base --model-size $MS --neutral-fewshot --multi-prompt-word --us-probe
 python scripts/calibrate_normad_batch.py outputs/behavioral/normad_base_${MS}_nfs_mpw_usprobe.json
+python evaluate/eval_normad.py --condition base --model-size $MS --few-shot 2 --yn-only
 
 # BLEnD
 python evaluate/eval_blend.py --condition base --model-size $MS --neutral-fewshot --us-probe
