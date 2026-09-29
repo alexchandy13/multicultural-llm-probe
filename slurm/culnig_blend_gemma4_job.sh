@@ -11,11 +11,10 @@
 #SBATCH --output=slurm/culnig_blend_gemma4.%A_%a.out
 #SBATCH --error=slurm/culnig_blend_gemma4.%A_%a.err
 
-# CULNIG gradient scoring for Gemma4 on BLEnD. No train/test split needed since
-# BLEnD has only a test split and we run no downstream intervention eval.
+# CULNIG gradient scoring for Gemma4 on BLEnD with NFS prefix.
+# blend = NFS + full question; blendcontrol = NFS + options only (no question text).
 # 2×A6000 needed for Gemma4-12B bf16 (~46GB backward pass).
-# PREREQUISITE: culnig/_upstream/data/BLEnD/US_questions.csv must exist on the cluster
-# (the upstream BLEnD loader needs it for control prompt construction).
+# Uses --target-data all since BLEnD has only a test split and no downstream intervention eval.
 # Outputs land in outputs/neurons/{cond}_gemma4/:
 #   blend_max_scores.json / blendcontrol_max_scores.json / all_neurons_blend_max.json
 

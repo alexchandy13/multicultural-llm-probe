@@ -3,6 +3,7 @@
 Adds loaders for:
   - normad_yn / normadcontrol  (yes/no NormAd + null-content baseline)
   - culturalbench / culturalbenchcontrol  (CulturalBench yes/no + null-country baseline)
+  - blend / blendcontrol  (BLEnD MCQ + question-stripped baseline, both with NFS prefix)
 
 We do this by monkey-patching upstream's loader before any caller imports it.
 Import this module first (or set `PYTHONPATH` to include `culnig/`); the patch is
@@ -230,6 +231,134 @@ def _normadcontrol_block(tokenizer, target_countries, target_data):
     return processed
 
 
+# ── BLEnD ────────────────────────────────────────────────────────────────────
+
+BLEND_DATA_PATH = PROJECT_ROOT / "data" / "BLEnD"
+
+_BLEND_INST = (
+    " Without any explanation, choose only one from the given alphabet choices"
+    '(e.g., A, B, C). Provide as JSON format: {"answer_choice":""}'
+)
+_BLEND_SCORING_SUFFIX = '{"answer_choice":"'
+
+# Same shots as eval_blend.py NEUTRAL_SHOTS_BLEND: 4 culturally-agnostic MCQ
+# examples, one per answer letter. Raw text for CULNIG (stripped chat template).
+_NEUTRAL_SHOTS_BLEND = [
+    ("Which planet is farthest from the Sun in our solar system?" + _BLEND_INST +
+     "\n\nA. Neptune\nB. Jupiter\nC. Saturn\nD. Uranus\n\nAnswer:", "A"),
+    ("What is the chemical symbol for water?" + _BLEND_INST +
+     "\n\nA. O2\nB. H2O\nC. CO2\nD. NaCl\n\nAnswer:", "B"),
+    ("How many sides does a hexagon have?" + _BLEND_INST +
+     "\n\nA. Five\nB. Seven\nC. Six\nD. Eight\n\nAnswer:", "C"),
+    ("What is the largest ocean on Earth?" + _BLEND_INST +
+     "\n\nA. Atlantic\nB. Indian\nC. Arctic\nD. Pacific\n\nAnswer:", "D"),
+]
+
+# NFS prefix as raw text: each shot ends with the scoring suffix + answer letter.
+_FEWSHOT_PREFIX_BLEND = "".join(
+    q + _BLEND_SCORING_SUFFIX + lbl + '"}\n\n'
+    for q, lbl in _NEUTRAL_SHOTS_BLEND
+)
+
+# blendcontrol prompt template — question text stripped, only options remain.
+# Mirrors upstream CULNIG's blendcontrol design.
+_BLEND_CONTROL_TMPL = (
+    "Without any explanation, choose only one from the given alphabet choices"
+    '(e.g., A, B, C). Provide as JSON format: {{"answer_choice":""}}'
+    "\n\nA. {option_a}\nB. {option_b}\nC. {option_c}\nD. {option_d}\n\nAnswer:"
+)
+
+
+def _load_blend_dedup():
+    """Load BLEnD test split, deduplicating to max 5 MCQ variants per (country, ID)."""
+    has_data = (BLEND_DATA_PATH.exists()
+                and any(p for p in BLEND_DATA_PATH.iterdir() if p.name != ".gitkeep"))
+    if has_data:
+        from datasets import load_from_disk
+        ds = load_from_disk(str(BLEND_DATA_PATH))
+    else:
+        ds = load_dataset("nayeon212/BLEnD", "multiple-choice-questions", split="test")
+    country_id_mcqids: dict = {}
+    for item in ds:
+        key = (item["country"], item["ID"])
+        if key not in country_id_mcqids:
+            country_id_mcqids[key] = []
+        if len(country_id_mcqids[key]) < 5:
+            country_id_mcqids[key].append(item["MCQID"])
+    valid_mcqids = {m for ids in country_id_mcqids.values() for m in ids}
+    return ds.filter(lambda x: x["MCQID"] in valid_mcqids)
+
+
+def _blend_split(ds, target_data: str):
+    """Split BLEnD into neuron/non_neuron halves by (country, answer_idx) groups."""
+    if target_data == "all":
+        return ds
+    groups: dict = defaultdict(list)
+    for item in ds:
+        groups[(item["country"], item["answer_idx"])].append(item["MCQID"])
+    selected: set = set()
+    for mcqids in groups.values():
+        half = len(mcqids) // 2
+        selected.update(mcqids[:half] if target_data == "neuron" else mcqids[half:])
+    return ds.filter(lambda x: x["MCQID"] in selected)
+
+
+def _blend_block(tokenizer, target_data: str) -> list:
+    """BLEnD MCQ with NFS prefix, label = correct answer letter (A/B/C/D)."""
+    ds = _blend_split(_load_blend_dedup(), target_data)
+
+    def make_example(item):
+        gold = item["answer_idx"]
+        prompt = _FEWSHOT_PREFIX_BLEND + item["prompt"] + _BLEND_SCORING_SUFFIX
+        tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        return {
+            "input_text": prompt,
+            "input_ids": tok["input_ids"][0].tolist(),
+            "attention_mask": tok["attention_mask"][0].tolist(),
+            "label": gold,
+            "country": item["country"],
+            "id": str(item["MCQID"]),
+            "instruction_id": 0,
+            "dataset_name": "blend",
+            "options": [gold],
+        }
+
+    return [HFDataset.from_list([make_example(item) for item in ds])]
+
+
+def _blendcontrol_block(tokenizer, target_data: str) -> list:
+    """BLEnD control: question text stripped, only answer options kept.
+
+    Same NFS prefix and scoring suffix as blend so the only difference is the
+    absence of the cultural question. Mirrors upstream CULNIG's blendcontrol.
+    """
+    import json as _json
+    ds = _blend_split(_load_blend_dedup(), target_data)
+
+    def make_example(item):
+        gold = item["answer_idx"]
+        choices = _json.loads(item["choices"])
+        ctrl_text = _BLEND_CONTROL_TMPL.format(
+            option_a=choices["A"], option_b=choices["B"],
+            option_c=choices["C"], option_d=choices["D"],
+        )
+        prompt = _FEWSHOT_PREFIX_BLEND + ctrl_text + _BLEND_SCORING_SUFFIX
+        tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+        return {
+            "input_text": prompt,
+            "input_ids": tok["input_ids"][0].tolist(),
+            "attention_mask": tok["attention_mask"][0].tolist(),
+            "label": gold,
+            "country": item["country"],
+            "id": str(item["MCQID"]),
+            "instruction_id": 0,
+            "dataset_name": "blendcontrol",
+            "options": [gold],
+        }
+
+    return [HFDataset.from_list([make_example(item) for item in ds])]
+
+
 # ── CulturalBench ────────────────────────────────────────────────────────────
 
 CULTURALBENCH_DATA_PATH = PROJECT_ROOT / "data" / "culturalbench_reformatted.json"
@@ -324,11 +453,14 @@ def _patched_loader(dataset_names, tokenizer, batch_size,
     import torch
     from torch.nn.utils.rnn import pad_sequence
 
-    _local = {"normadcontrol", "normad_yn", "culturalbench", "culturalbenchcontrol"}
+    _local = {"normadcontrol", "normad_yn", "culturalbench", "culturalbenchcontrol",
+               "blend", "blendcontrol"}
     has_ctrl = "normadcontrol" in dataset_names
     has_yn = "normad_yn" in dataset_names
     has_cb = "culturalbench" in dataset_names
     has_cb_ctrl = "culturalbenchcontrol" in dataset_names
+    has_blend = "blend" in dataset_names
+    has_blend_ctrl = "blendcontrol" in dataset_names
     remaining = [d for d in dataset_names if d not in _local]
     extra_processed = []
     if has_ctrl:
@@ -339,6 +471,10 @@ def _patched_loader(dataset_names, tokenizer, batch_size,
         extra_processed += _culturalbench_block(tokenizer, target_data)
     if has_cb_ctrl:
         extra_processed += _culturalbenchcontrol_block(tokenizer, target_data)
+    if has_blend:
+        extra_processed += _blend_block(tokenizer, target_data)
+    if has_blend_ctrl:
+        extra_processed += _blendcontrol_block(tokenizer, target_data)
 
     if remaining:
         # Delegate the rest to the unmodified upstream loader.

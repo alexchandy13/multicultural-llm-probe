@@ -99,10 +99,13 @@ IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
 
 SETUP_CONDITIONS = {
-    "all":   ["base", "sft", "dpo", "sftdpo"],
-    "aya":   ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
-    "sft":   ["base", "sft_aya_cult", "sft_aya_nocult"],
-    "dpo":   ["base", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
+    "all":         ["base", "sft", "dpo", "sftdpo"],
+    "aya":         ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
+    "sft":         ["base", "sft_aya_cult", "sft_aya_nocult"],
+    "dpo":         ["base", "sftdpo_aya_cult", "sftdpo_aya_nocult"],
+    "nocult":      ["base", "sft_aya_nocult", "sftdpo_aya_nocult"],
+    "sft_compare": ["sft_aya_cult", "sft_aya_nocult"],
+    "dpo_compare": ["sftdpo_aya_cult", "sftdpo_aya_nocult"],
 }
 
 COND_LABELS = {
@@ -514,6 +517,88 @@ def figure_layer_cluster_attribution_lines(conditions: list[str], suffix: str):
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         print(f"Wrote {out}")
+
+
+def figure_layer_cluster_attribution_lines_combined(conditions: list[str], suffix: str,
+                                                     log_y: bool = False):
+    """Single PDF: all conditions on one axes. Color = I-W cluster, line style = condition."""
+    iw = load_iw_coords(IW_COORDS)
+    if iw is None:
+        return
+    country_to_cluster, cluster_order = iw
+    n_layers = _N_LAYERS
+    cmap = plt.get_cmap("tab10")
+    cluster_colors = {c: cmap(i) for i, c in enumerate(cluster_order)}
+    line_styles = ["-", "--", ":", "-."]
+
+    all_data = {}
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        scores  = load_per_country_scores(cond)
+        if neurons is None or scores is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+        per_layer_cluster: dict[tuple, list[float]] = defaultdict(list)
+        for n in neurons:
+            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+            for raw_country, score in scores.get(key, {}).items():
+                cluster = (country_to_cluster.get(raw_country)
+                           or country_to_cluster.get(raw_country.lower())
+                           or country_to_cluster.get(raw_country.title()))
+                if cluster:
+                    per_layer_cluster[(n["layer_idx"], cluster)].append(score)
+        all_data[cond] = per_layer_cluster
+
+    valid_conds = list(all_data.keys())
+    if not valid_conds:
+        return
+
+    fig, ax = plt.subplots(figsize=(max(8, 0.3 * n_layers), 5))
+
+    for ci, cond in enumerate(valid_conds):
+        ls = line_styles[ci % len(line_styles)]
+        lw = 1.8 - ci * 0.2
+        per_layer_cluster = all_data[cond]
+        for cluster in cluster_order:
+            ys = [
+                float(np.mean(per_layer_cluster[(layer, cluster)]))
+                if (layer, cluster) in per_layer_cluster else np.nan
+                for layer in range(n_layers)
+            ]
+            label = f"{cluster} ({COND_LABELS.get(cond, cond)})" if len(valid_conds) > 1 else cluster
+            ax.plot(range(n_layers), ys, label=label,
+                    color=cluster_colors[cluster], linestyle=ls, linewidth=lw,
+                    marker="o", markersize=2)
+
+    ax.set_xlabel("Layer")
+    ax.set_ylabel("Mean activation score" + (" (log)" if log_y else ""))
+    cond_str = " / ".join(COND_LABELS.get(c, c) for c in valid_conds)
+    ax.set_title(f"Mean activation by layer × cluster — {cond_str}")
+    ax.set_xticks(range(0, n_layers, 2))
+    ax.grid(True, alpha=0.3)
+    if log_y:
+        ax.set_yscale("log")
+
+    # Two-column legend: cluster colours in col 1, line styles for conditions in col 2
+    cluster_handles = [plt.Line2D([0], [0], color=cluster_colors[c], linewidth=2, label=c)
+                       for c in cluster_order]
+    cond_handles = [plt.Line2D([0], [0], color="black", linestyle=line_styles[i % len(line_styles)],
+                               linewidth=1.5, label=COND_LABELS.get(c, c))
+                   for i, c in enumerate(valid_conds)]
+    leg1 = ax.legend(handles=cluster_handles, loc="upper left", fontsize=7, ncol=1,
+                     title="Cluster", title_fontsize=7)
+    ax.add_artist(leg1)
+    ax.legend(handles=cond_handles, loc="upper right", fontsize=7, ncol=1,
+              title="Condition", title_fontsize=7)
+
+    fig.tight_layout()
+    log_tag = "_logy" if log_y else ""
+    out_dir = FIGURES_DIR / "per_cluster_maps"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"heatmap_layer_cluster_attribution_lines_combined{suffix}{log_tag}.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
 
 
 def figure_layer_cluster_attribution_sum(conditions: list[str], suffix: str):
@@ -1366,7 +1451,9 @@ def main():
         "--figures", nargs="+",
         choices=["layer_count", "layer_attribution", "module_distribution",
                  "cluster_activation", "cluster_neuron_count",
-                 "layer_cluster_attribution", "layer_cluster_attribution_lines", "layer_cluster_attribution_sum",
+                 "layer_cluster_attribution", "layer_cluster_attribution_lines",
+                 "layer_cluster_attribution_lines_combined",
+                 "layer_cluster_attribution_sum",
                  "layer_cluster_neuron_count", "layer_cluster_neuron_pct",
                  "group_attribution",
                  "group_attribution_per_condition",
@@ -1413,6 +1500,10 @@ def main():
              "have many layers (28) and few conditions (~3-4): the figure "
              "becomes a wide banner (layer on X, condition on Y) instead of a "
              "tall narrow column.",
+    )
+    parser.add_argument(
+        "--log-y", action="store_true",
+        help="Use log scale on the y-axis for layer_cluster_attribution_lines_combined.",
     )
     parser.add_argument(
         "--conditions", nargs="+", default=None,
@@ -1478,6 +1569,8 @@ def main():
     if "cluster_neuron_count" in todo:         figure_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_attribution" in todo:        figure_layer_cluster_attribution(conditions, suffix)
     if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
+    if "layer_cluster_attribution_lines_combined" in todo:
+        figure_layer_cluster_attribution_lines_combined(conditions, suffix, log_y=args.log_y)
     if "layer_cluster_attribution_sum" in todo:    figure_layer_cluster_attribution_sum(conditions, suffix)
     if "layer_cluster_neuron_count" in todo:   figure_layer_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_neuron_pct" in todo:     figure_layer_cluster_neuron_pct(conditions, suffix)
