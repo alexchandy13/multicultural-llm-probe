@@ -331,6 +331,19 @@ def load_model_for_culnig(condition_name: str, model_size: str = "3b",
 
     # See _pin_name_or_path docstring for why this is a permanent (not scoped) swap.
     _pin_name_or_path(model)
+
+    # device_map="auto" silently places the whole model on CPU when the allocated
+    # GPUs can't hold it (e.g. landing on 11 GB cards). Gradient scoring then runs
+    # orders of magnitude too slow to ever finish, with no error — so refuse now
+    # rather than burn the walltime.
+    placements = {str(d) for d in getattr(model, "hf_device_map", {}).values()}
+    if str(model.device) == "cpu" or placements & {"cpu", "disk"}:
+        raise RuntimeError(
+            f"Model is not fully on GPU (device={model.device}, "
+            f"placements={sorted(placements) or 'n/a'}). Allocated GPUs are too "
+            f"small for {model_size}. Request a VRAM floor by GPU type, e.g. "
+            "--gres=gpu:rtxa6000:2 for gemma4 or --gres=gpu:rtxa5000:1 for 8b."
+        )
     return model, tokenizer
 
 
@@ -339,9 +352,66 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
+def _shard_dataloader(dataloader, shard_idx: int, shard_n: int, logger):
+    """Return a DataLoader over every shard_n-th sample, offset by shard_idx.
+
+    Stride (not contiguous) slicing: the dataset is built country-major, so a
+    contiguous slice would hand one shard a single country. Striding gives every
+    shard the same country coverage and comparable prompt-length distribution.
+    """
+    ds = dataloader.dataset
+    indices = list(range(shard_idx, len(ds), shard_n))
+    logger.info(f"shard {shard_idx}/{shard_n}: {len(indices)} of {len(ds)} samples")
+    return torch.utils.data.DataLoader(
+        ds.select(indices), batch_size=BATCH_SIZE,
+        collate_fn=dataloader.collate_fn, shuffle=False, pin_memory=True,
+    )
+
+
+def _as_bytes(text: str):
+    import numpy as np
+    return np.frombuffer(text.encode("utf-8"), dtype=np.uint8)
+
+
+def write_shard_partial(raw_scores, total_probs, dataset_ids, out_path: Path, logger):
+    """Dump one shard's accumulator as a dense .npz.
+
+    JSON is not an option here: the full accumulator is 1.2-5.4 GB as JSON and
+    minutes to serialize. Dense float64 keeps the merge exact — float32 would
+    perturb scores at a level that still swamps the reassociation error.
+    """
+    import numpy as np
+
+    keys = sorted(raw_scores.keys())
+    countries = sorted({c for per in raw_scores.values() for c in per})
+    cidx = {c: j for j, c in enumerate(countries)}
+
+    arr = np.zeros((len(keys), len(countries)), dtype=np.float64)
+    for i, k in enumerate(keys):
+        row = arr[i]
+        for country, val in raw_scores[k].items():
+            row[cidx[country]] = val
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(".npz.tmp")
+    with open(tmp, "wb") as fh:
+        np.savez(
+            fh,
+            scores=arr,
+            keys=_as_bytes("\n".join(f"{m}_{l}_{n}" for (m, l, n) in keys)),
+            countries=_as_bytes("\n".join(countries)),
+            probs=np.array([total_probs.get(c, 0.0) for c in countries],
+                           dtype=np.float64),
+            ids_json=_as_bytes(json.dumps({k: list(v) for k, v in dataset_ids.items()})),
+        )
+    tmp.replace(out_path)
+    logger.info(f"Wrote {out_path} ({len(keys)} keys x {len(countries)} countries)")
+
+
 def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         target_data: str = "neuron",
-        model_size: str = "3b", precision: str = "matched_bf16"):
+        model_size: str = "3b", precision: str = "matched_bf16",
+        shard: tuple[int, int] | None = None):
     model, tokenizer = load_model_for_culnig(
         condition_name, model_size=model_size, precision=precision
     )
@@ -350,14 +420,39 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
 
     dataset_names = sorted(dataset_names)
 
+    size_sfx = "" if model_size == "3b" else f"_{model_size}"
+    out_dir = out_root / f"{condition_name}{size_sfx}"
+
     # Main dataset(s)
     dataloader = upstream_score.load_dataset_neuron_scores(
         dataset_names, tokenizer, batch_size=BATCH_SIZE,
         target_countries=None, target_data=target_data,
     )
+
+    if shard is not None:
+        dataloader = _shard_dataloader(dataloader, shard[0], shard[1], logger)
+
     raw_scores, total_probs = calculate_scores_memory_efficient(
         model, tokenizer, dataloader, logger
     )
+
+    if shard is not None:
+        shard_idx, shard_n = shard
+        shard_ids = defaultdict(list)
+        for item in dataloader.dataset:
+            if item["id"] not in shard_ids[item["dataset_name"]]:
+                shard_ids[item["dataset_name"]].append(item["id"])
+        name = "".join(dataset_names)
+        write_shard_partial(
+            raw_scores, total_probs, shard_ids,
+            out_dir / "_shards" / f"{name}_{shard_idx}of{shard_n}.npz", logger,
+        )
+        # CountryRC is a separate, cheap pass — extend_countryrc.py owns it, and
+        # repeating it per shard would waste GPU hours for identical output.
+        logger.info("shard mode: skipping countryrc pass; run merge_shards.py when "
+                    "all shards are done")
+        return
+
     neuron_scores: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for (module_name, layer_idx, neuron_idx), per_country in raw_scores.items():
         key = f"{module_name}_{layer_idx}_{neuron_idx}"
@@ -369,10 +464,8 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         if item["id"] not in dataset_ids[item["dataset_name"]]:
             dataset_ids[item["dataset_name"]].append(item["id"])
 
-    # Suffix the per-condition output dir with the model size so different
-    # base models don't clobber each other on disk (e.g. outputs/neurons/sft_8b/).
-    size_sfx = "" if model_size == "3b" else f"_{model_size}"
-    out_dir = out_root / f"{condition_name}{size_sfx}"
+    # out_dir is suffixed with the model size so different base models don't
+    # clobber each other on disk (e.g. outputs/neurons/sft_8b/).
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"{''.join(dataset_names)}_max_scores.json"
     out_file.write_text(json.dumps({
@@ -441,7 +534,28 @@ def parse_args():
         help="'matched_bf16' (default): all conditions in bf16. 'qlora_4bit': "
              "C1/C2/C3 in 4-bit (legacy regime).",
     )
+    parser.add_argument(
+        "--shard", default=None, metavar="I/N",
+        help="Score only shard I of N (0-indexed, stride-sliced) and write a "
+             "dense .npz partial to {out_dir}/_shards/ instead of the final JSON. "
+             "Skips the countryrc pass. Run scripts/merge_shards.py once all N "
+             "shards finish. Lets a preempted job lose one shard instead of the "
+             "whole run, and lets shards run in parallel.",
+    )
     return parser.parse_args()
+
+
+def _parse_shard(spec: str | None) -> tuple[int, int] | None:
+    if spec is None:
+        return None
+    try:
+        idx_s, n_s = spec.split("/")
+        idx, n = int(idx_s), int(n_s)
+    except ValueError:
+        raise SystemExit(f"--shard must look like I/N, got {spec!r}")
+    if not (n >= 1 and 0 <= idx < n):
+        raise SystemExit(f"--shard needs 0 <= I < N and N >= 1, got {spec!r}")
+    return idx, n
 
 
 def main():
@@ -455,7 +569,7 @@ def main():
     run(
         args.condition, dataset_names, Path(args.out_root), logger,
         model_size=args.model_size, precision=args.precision,
-        target_data=args.target_data,
+        target_data=args.target_data, shard=_parse_shard(args.shard),
     )
 
 

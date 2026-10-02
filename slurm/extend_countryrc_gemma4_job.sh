@@ -8,8 +8,13 @@
 #SBATCH --mem=128G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-4
+#SBATCH --requeue
+#SBATCH --exclude=legacygpu[00,02-07,09-42]
 #SBATCH --output=slurm/extend_countryrc_gemma4.%A_%a.out
 #SBATCH --error=slurm/extend_countryrc_gemma4.%A_%a.err
+
+# legacygpu nodes excluded: their GPUs predate the compute capability our
+# torch build ships kernels for (cudaErrorNoKernelImageForDevice on load).
 
 set -euo pipefail
 source env.sh

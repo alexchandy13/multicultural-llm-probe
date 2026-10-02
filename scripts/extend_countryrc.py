@@ -157,11 +157,15 @@ def main():
     old_crc_ids = merged_ids.get("countryrc", [])
     merged_ids["countryrc"] = sorted(set(old_crc_ids) | set(new_ids))
 
-    crc_path.write_text(json.dumps({
+    # Atomic write: this script overwrites its own input, and on a preemptible
+    # partition a kill mid-write would leave a truncated file and no original.
+    tmp_path = crc_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps({
         "neuron_scores": merged_neuron_scores,
         "total_probabilities_per_country": merged_probs,
         "dataset_ids": merged_ids,
     }, indent=2))
+    tmp_path.replace(crc_path)
     logger.info(f"Updated {crc_path} — now covers "
                 f"{len(merged_probs)} countries: {sorted(merged_probs.keys())}")
 
