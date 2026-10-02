@@ -13,6 +13,10 @@
 #SBATCH --output=slurm/extend_countryrc_gemma4.%A_%a.out
 #SBATCH --error=slurm/extend_countryrc_gemma4.%A_%a.err
 
+# Always name a GPU type, never a bare count: scavenger spans 11 GB (rtx2080ti)
+# to 141 GB cards, and device_map="auto" answers an undersized allocation by
+# placing the model on CPU, which runs ~40x too slow to finish. Gemma4-12B needs
+# ~46 GB for the backward pass, so 2x48 GB rtxa6000.
 # legacygpu nodes excluded: their GPUs predate the compute capability our
 # torch build ships kernels for (cudaErrorNoKernelImageForDevice on load).
 
