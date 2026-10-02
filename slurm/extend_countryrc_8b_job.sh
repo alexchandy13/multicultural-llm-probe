@@ -3,7 +3,7 @@
 #SBATCH --partition=scavenger
 #SBATCH --account=scavenger
 #SBATCH --qos=scavenger
-#SBATCH --gres=gpu:rtxa5000:1
+#SBATCH --gres=gpu:rtxa6000:1
 #SBATCH --time=8:00:00
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
@@ -15,8 +15,12 @@
 
 # Always name a GPU type, never a bare count: scavenger spans 11 GB (rtx2080ti)
 # to 141 GB cards, and device_map="auto" answers an undersized allocation by
-# placing the model on CPU, which runs ~40x too slow to finish. 8b bf16 needs
-# ~16 GB, so a 24 GB rtxa5000 is the cheapest safe floor.
+# placing the model on CPU, which runs ~40x too slow to finish. 8b bf16 weights
+# are ~16 GB, but retained activations and grads across 5 modules x 32 layers
+# push the `base` condition past 24 GB: it OOMs in the backward pass on the same
+# 112 MiB allocation with the same 63 MiB free on every 24 GB card (verified
+# byte-identical on two separate rtxa5000 nodes), while the adapter-merged
+# conditions fit. Deterministic, so 48 GB is required rather than just safer.
 # legacygpu nodes excluded: their GPUs predate the compute capability our
 # torch build ships kernels for (cudaErrorNoKernelImageForDevice on load).
 
