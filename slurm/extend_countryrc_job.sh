@@ -3,9 +3,9 @@
 #SBATCH --partition=clip
 #SBATCH --account=clip
 #SBATCH --qos=medium
-#SBATCH --gres=gpu:rtxa6000:1
+#SBATCH --gres=gpu:rtxa6000:2
 #SBATCH --time=12:00:00
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --cpus-per-task=4
 #SBATCH --array=0-9
 #SBATCH --output=slurm/extend_countryrc.%A_%a.out
