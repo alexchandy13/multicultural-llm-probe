@@ -92,6 +92,7 @@ _SIZE_SUFFIX = ""       # set to "_8b" via --model-size 8b
 _N_LAYERS = 28          # 28 for Llama 3.2 3B, 32 for Llama 3.1 8B
 _YN_ONLY = False        # set via --yn-only; changes normad file names to *_yn variants
 _DATASET = "normad"     # set via --dataset; controls which score files are loaded
+_ALL_NEURONS = False    # set via --all-neurons; plots all neurons instead of selected culture neurons
 IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 
 # Same definition used by the cluster_accuracy_bars / accuracy_deltas_bars
@@ -520,7 +521,8 @@ def figure_layer_cluster_attribution_lines(conditions: list[str], suffix: str):
 
 
 def figure_layer_cluster_attribution_lines_combined(conditions: list[str], suffix: str,
-                                                     log_y: bool = False):
+                                                     log_y: bool = False,
+                                                     subdir: str | None = None):
     """Single PDF: all conditions on one axes. Color = I-W cluster, line style = condition."""
     iw = load_iw_coords(IW_COORDS)
     if iw is None:
@@ -533,20 +535,34 @@ def figure_layer_cluster_attribution_lines_combined(conditions: list[str], suffi
 
     all_data = {}
     for cond in conditions:
-        neurons = load_neurons(cond)
-        scores  = load_per_country_scores(cond)
-        if neurons is None or scores is None:
+        scores = load_per_country_scores(cond)
+        if scores is None:
             print(f"[skip] no data for {cond}", file=sys.stderr)
             continue
+        if not _ALL_NEURONS:
+            neurons = load_neurons(cond)
+            if neurons is None:
+                print(f"[skip] no data for {cond}", file=sys.stderr)
+                continue
+            neuron_keys = {f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}": n["layer_idx"]
+                           for n in neurons}
+        else:
+            neuron_keys = {}
+            for key in scores:
+                parts = key.split("_")
+                try:
+                    layer_idx = int(parts[-2])
+                    neuron_keys[key] = layer_idx
+                except (ValueError, IndexError):
+                    pass
         per_layer_cluster: dict[tuple, list[float]] = defaultdict(list)
-        for n in neurons:
-            key = f"{n['module_name']}_{n['layer_idx']}_{n['neuron_idx']}"
+        for key, layer_idx in neuron_keys.items():
             for raw_country, score in scores.get(key, {}).items():
                 cluster = (country_to_cluster.get(raw_country)
                            or country_to_cluster.get(raw_country.lower())
                            or country_to_cluster.get(raw_country.title()))
                 if cluster:
-                    per_layer_cluster[(n["layer_idx"], cluster)].append(score)
+                    per_layer_cluster[(layer_idx, cluster)].append(score)
         all_data[cond] = per_layer_cluster
 
     valid_conds = list(all_data.keys())
@@ -593,7 +609,9 @@ def figure_layer_cluster_attribution_lines_combined(conditions: list[str], suffi
 
     fig.tight_layout()
     log_tag = "_logy" if log_y else ""
-    out_dir = FIGURES_DIR / "per_cluster_maps"
+    out_dir = FIGURES_DIR / "combined_line_attribution_graphs"
+    if subdir:
+        out_dir = out_dir / subdir
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"heatmap_layer_cluster_attribution_lines_combined{suffix}{log_tag}.pdf"
     fig.savefig(out, bbox_inches="tight")
@@ -1521,16 +1539,21 @@ def main():
     parser.add_argument("--yn-only", action="store_true",
                         help="Read normad_yn_max_scores.json and all_neurons_normad_yn_max.json "
                              "instead of the plain normad variants. Only applies to --dataset normad.")
+    parser.add_argument("--all-neurons", action="store_true",
+                        help="Plot mean attribution across ALL neurons, not just selected culture neurons.")
+    parser.add_argument("--subdir", default=None,
+                        help="Subfolder inside combined_line_attribution_graphs/ for output files.")
     parser.add_argument(
         "--dataset", choices=["normad", "culturalbench", "blend"], default="normad",
         help="Which scoring dataset's neuron files to load. Default: normad.",
     )
     args = parser.parse_args()
 
-    global _SIZE_SUFFIX, _N_LAYERS, _YN_ONLY, _DATASET
+    global _SIZE_SUFFIX, _N_LAYERS, _YN_ONLY, _DATASET, _ALL_NEURONS
     _SIZE_SUFFIX = "" if args.model_size == "3b" else f"_{args.model_size}"
     _YN_ONLY = args.yn_only
     _DATASET = args.dataset
+    _ALL_NEURONS = args.all_neurons
     _N_LAYERS = (48 if args.model_size == "gemma4" else
                  32 if args.model_size in ("8b", "qwen35") else 28)
     fig_size_suffix = f"_{args.model_size}"
@@ -1555,6 +1578,8 @@ def main():
     suffix += fig_size_suffix
     if _DATASET != "normad":
         suffix += f"_{_DATASET}"
+    if _ALL_NEURONS:
+        suffix += "_allneurons"
 
     todo = ({"layer_count", "layer_attribution", "module_distribution",
              "cluster_activation", "cluster_neuron_count"}
@@ -1570,7 +1595,7 @@ def main():
     if "layer_cluster_attribution" in todo:        figure_layer_cluster_attribution(conditions, suffix)
     if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
     if "layer_cluster_attribution_lines_combined" in todo:
-        figure_layer_cluster_attribution_lines_combined(conditions, suffix, log_y=args.log_y)
+        figure_layer_cluster_attribution_lines_combined(conditions, suffix, log_y=args.log_y, subdir=args.subdir)
     if "layer_cluster_attribution_sum" in todo:    figure_layer_cluster_attribution_sum(conditions, suffix)
     if "layer_cluster_neuron_count" in todo:   figure_layer_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_neuron_pct" in todo:     figure_layer_cluster_neuron_pct(conditions, suffix)
