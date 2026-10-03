@@ -411,7 +411,8 @@ def write_shard_partial(raw_scores, total_probs, dataset_ids, out_path: Path, lo
 def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         target_data: str = "neuron",
         model_size: str = "3b", precision: str = "matched_bf16",
-        shard: tuple[int, int] | None = None):
+        shard: tuple[int, int] | None = None,
+        force_countryrc: bool = False):
     model, tokenizer = load_model_for_culnig(
         condition_name, model_size=model_size, precision=precision
     )
@@ -476,6 +477,31 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
     logger.info(f"Wrote {out_file}")
 
     # CountryRC second pass — same scoring loop, target countries restricted.
+    #
+    # Skip when the file on disk already covers more countries than this pass
+    # would write. scripts/extend_countryrc.py grows this file to 81 countries,
+    # and rewriting it with the 8 upstream TARGET_COUNTRIES silently destroys
+    # that work — which is exactly what happened to sftdpo_aya_nocult_gemma4
+    # when a blend scoring run finished after its extension.
+    crc_file = out_dir / "countryrc_max_scores.json"
+    if crc_file.exists() and not force_countryrc:
+        try:
+            with open(crc_file, "rb") as fh:
+                fh.seek(max(0, crc_file.stat().st_size - 200_000))
+                tail = fh.read().decode("utf-8", "ignore")
+            import re
+            m = re.search(r'"total_probabilities_per_country":\s*\{(.*?)\}', tail, re.S)
+            existing_n = len(re.findall(r'"[^"]+":', m.group(1))) if m else 0
+        except OSError:
+            existing_n = 0
+        if existing_n > len(upstream_score.TARGET_COUNTRIES):
+            logger.info(
+                f"Skipping countryrc pass: {crc_file} already covers {existing_n} "
+                f"countries (> {len(upstream_score.TARGET_COUNTRIES)} this pass would "
+                "write). Pass --force-countryrc to overwrite anyway."
+            )
+            return
+
     crc_dataloader = upstream_score.load_dataset_neuron_scores(
         dataset_names=["countryrc"], tokenizer=tokenizer, batch_size=BATCH_SIZE,
         target_countries=upstream_score.TARGET_COUNTRIES, target_data="neuron",
@@ -542,6 +568,13 @@ def parse_args():
              "shards finish. Lets a preempted job lose one shard instead of the "
              "whole run, and lets shards run in parallel.",
     )
+    parser.add_argument(
+        "--force-countryrc", action="store_true",
+        help="Rewrite countryrc_max_scores.json even when it already covers more "
+             "countries than the 8 upstream TARGET_COUNTRIES. Without this, the "
+             "countryrc pass is skipped so a rescore cannot clobber the country "
+             "set added by scripts/extend_countryrc.py.",
+    )
     return parser.parse_args()
 
 
@@ -570,6 +603,7 @@ def main():
         args.condition, dataset_names, Path(args.out_root), logger,
         model_size=args.model_size, precision=args.precision,
         target_data=args.target_data, shard=_parse_shard(args.shard),
+        force_countryrc=args.force_countryrc,
     )
 
 
