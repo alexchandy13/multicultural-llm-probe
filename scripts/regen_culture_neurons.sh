@@ -6,10 +6,18 @@
 set -euo pipefail
 NEURONS="outputs/neurons"
 
-for cond_dir in "$NEURONS"/*_gemma4/; do
+# Both model sizes: the countryrc extension (8 -> 81 countries) invalidated every
+# existing selection, not just gemma4's. Pass a glob as $1 to narrow, e.g.
+#   bash scripts/regen_culture_neurons.sh '*_8b'
+PATTERN="${1:-*}"
+
+for cond_dir in "$NEURONS"/$PATTERN/; do
     dir_name=$(basename "$cond_dir")
-    model_size="gemma4"
-    cond="${dir_name%_gemma4}"
+    case "$dir_name" in
+        *_gemma4) model_size="gemma4"; cond="${dir_name%_gemma4}" ;;
+        *_8b)     model_size="8b";     cond="${dir_name%_8b}" ;;
+        *) echo "  [skip] $dir_name: unrecognized model-size suffix"; continue ;;
+    esac
 
     echo "=== $cond ($model_size) ==="
 
