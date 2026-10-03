@@ -32,6 +32,10 @@ MODEL_REGISTRY = {
     "gemma4": "google/gemma-4-12B",
     "gemma4_instruct": "google/gemma-4-12b-it",
     "qwen35": "Qwen/Qwen3.5-9B-Base",
+    # Sparse MoE: 64 experts, top-8, 16 layers (~7B total / ~1B active).
+    # Behavioral eval only — see note in culnig/calc_neuron_score.py about why
+    # CULNIG neuron scoring does not transfer to routed FFNs.
+    "olmoe_instruct": "allenai/OLMoE-1B-7B-0924-Instruct",
 }
 DEFAULT_MODEL_SIZE = "3b"
 
