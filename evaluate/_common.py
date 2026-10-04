@@ -41,6 +41,11 @@ MODEL_REGISTRY = {
     "olmoe": "allenai/OLMoE-1B-7B-0924",
     "olmoe_sft": "allenai/OLMoE-1B-7B-0924-SFT",
     "olmoe_instruct": "allenai/OLMoE-1B-7B-0924-Instruct",
+    # Gemma 4 MoE (26B total / 4B active). Same family and tokenizer as the
+    # gemma4 12B dense entries above, so dense-vs-sparse is not confounded by
+    # training data or tokenization. Behavioral eval only (routed FFNs).
+    "gemma4_moe": "google/gemma-4-26B-A4B",
+    "gemma4_moe_instruct": "google/gemma-4-26B-A4B-it",
 }
 DEFAULT_MODEL_SIZE = "3b"
 
@@ -282,6 +287,7 @@ CHAT_TEMPLATED_SIZES = {
     "gemma4_instruct",
     "olmoe_sft",
     "olmoe_instruct",
+    "gemma4_moe_instruct",
 }
 
 

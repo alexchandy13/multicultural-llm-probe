@@ -159,7 +159,8 @@ def main():
     parser.add_argument("--condition", required=True, choices=ALL_CONDITIONS)
     parser.add_argument("--model-size", default="8b",
                         choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct",
-                                 "olmoe", "olmoe_sft", "olmoe_instruct"])
+                                 "olmoe", "olmoe_sft", "olmoe_instruct",
+                 "gemma4_moe", "gemma4_moe_instruct"])
     parser.add_argument("--precision", default="matched_bf16")
     parser.add_argument("--us-probe", action="store_true")
     parser.add_argument("--probe-country", default=None)
