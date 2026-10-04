@@ -42,6 +42,41 @@ from CULNIG import calc_neuron_score as upstream_score  # noqa: E402
 from evaluate._common import resolve_condition  # noqa: E402
 
 
+def _label_first_token(tokenizer, prompt: str, label: str) -> int:
+    """First token id the model must emit for `label`, given `prompt`.
+
+    Upstream used `convert_tokens_to_ids(label)`, which looks up the bare string.
+    On a SentencePiece vocab that is a *different* token from the space-prefixed
+    form the model actually predicts after e.g. "Answer:" — Gemma 4 has 'yes'=4443
+    and '_yes'=11262. Both are real vocab entries, so the lookup silently returns a
+    token the model essentially never emits: measured P(4443)=6.6e-08 against
+    P(11262)=0.75 on the same prompt, a 1e7 error that made every normad and
+    culturalbench score noise.
+
+    The dataset labels are bare ("yes", "A"), so the space has to be reconstructed
+    from the prompt, the same way eval_normad.py does it with its `leading_space`
+    flag. A prompt ending in whitespace or an open quote is continued directly
+    (blend: `{"answer_choice":"` -> `A`); anything else gets a space
+    (normad/culturalbench: `Answer:` -> ` yes`). The token is then read as the first
+    position where tokenizing prompt+label diverges from tokenizing prompt alone,
+    which is robust to the tokenizer merging across the boundary.
+    """
+    direct = prompt.endswith((" ", "\t", "\n", '"', "'"))
+    text = label if direct else " " + label
+
+    with_label = tokenizer(prompt + text, add_special_tokens=False).input_ids
+    without = tokenizer(prompt, add_special_tokens=False).input_ids
+    i = 0
+    while i < len(without) and i < len(with_label) and with_label[i] == without[i]:
+        i += 1
+    if i >= len(with_label):
+        raise ValueError(
+            f"label {label!r} produced no new tokens after prompt ending "
+            f"{prompt[-20:]!r} — cannot determine which token to score"
+        )
+    return with_label[i]
+
+
 def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
     """Memory-efficient drop-in replacement for upstream_score.calculate_scores.
 
@@ -115,7 +150,8 @@ def calculate_scores_memory_efficient(model, tokenizer, dataloader, logger):
 
             labels = [str(label) for label in batch["labels"]]
             labels_ids = torch.tensor(
-                [tokenizer.convert_tokens_to_ids(l) for l in labels],
+                [_label_first_token(tokenizer, txt, l)
+                 for txt, l in zip(batch["input_texts"], labels)],
                 device=logits.device,  # logits live on the last layer's device
             )
             correct_probs = probabilities[
@@ -284,7 +320,17 @@ def load_model_for_culnig(condition_name: str, model_size: str = "3b",
     # conditions. Forcing a pass-through template makes upstream's
     # `try: apply_chat_template ... except: pass` blocks fall back to raw text
     # uniformly for every dataset (normad, normadcontrol, blend, etc.).
-    tokenizer.chat_template = "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+    #
+    # The template must still emit BOS. Upstream's loader sets
+    # add_special_tokens=False whenever apply_chat_template succeeds, on the
+    # assumption that the template inserted the special tokens itself — true of a
+    # real chat template, false of a bare pass-through. Without this, no BOS is
+    # ever prepended, which measurably degrades the next-token distribution
+    # (Gemma 4: top prediction flips from ' yes' at 0.51 to ' No' at 0.39).
+    _bos = "{{ bos_token }}" if tokenizer.bos_token else ""
+    tokenizer.chat_template = (
+        _bos + "{% for message in messages %}{{ message['content'] }}{% endfor %}"
+    )
 
     use_4bit = (
         precision == "qlora_4bit"
