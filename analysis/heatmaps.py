@@ -619,6 +619,60 @@ def figure_layer_cluster_attribution_lines_combined(conditions: list[str], suffi
     print(f"Wrote {out}")
 
 
+def figure_layer_count_lines(conditions: list[str], suffix: str,
+                             log_y: bool = False, subdir: str | None = None):
+    """Line plot of culture-general neuron count per layer, one line per condition.
+
+    Line form of figure_layer_count's heatmap. Reads only the all_neurons_* files,
+    so it needs no per-country score files and runs in seconds.
+    """
+    n_layers = _N_LAYERS
+    cmap = plt.get_cmap("tab10")
+    line_styles = ["-", "--", ":", "-."]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = []
+    for i, cond in enumerate(conditions):
+        neurons = load_neurons(cond)
+        if neurons is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+        counts = defaultdict(int)
+        for n in neurons:
+            counts[n["layer_idx"]] += 1
+        ys = [counts.get(l, 0) for l in range(n_layers)]
+        ax.plot(range(n_layers), ys, color=cmap(i), linewidth=1.8,
+                linestyle=line_styles[i % len(line_styles)],
+                marker="o", markersize=3,
+                label=f"{COND_LABELS.get(cond, cond)} (n={sum(ys):,})")
+        plotted.append(cond)
+
+    if not plotted:
+        plt.close(fig)
+        print("[skip] layer_count_lines: no conditions had data", file=sys.stderr)
+        return
+
+    ax.set_xlabel("Layer")
+    ax.set_ylabel("# culture-general neurons")
+    ax.set_title("Culture-general neuron count per layer")
+    ax.set_xlim(-0.5, n_layers - 0.5)
+    ax.grid(alpha=0.3, linewidth=0.5)
+    if log_y:
+        ax.set_yscale("log")
+    ax.legend(fontsize=8, title="Condition", title_fontsize=8)
+
+    fig.tight_layout()
+    log_tag = "_logy" if log_y else ""
+    out_dir = FIGURES_DIR / "combined_line_attribution_graphs"
+    if subdir:
+        out_dir = out_dir / subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"line_layer_neuron_count{suffix}{log_tag}.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
+
+
 def figure_layer_cluster_attribution_sum(conditions: list[str], suffix: str):
     """One PDF per condition: rows=layers, cols=8 I-W clusters.
     Cell = sum of activation scores across all culture neurons at that layer
@@ -1471,6 +1525,7 @@ def main():
                  "cluster_activation", "cluster_neuron_count",
                  "layer_cluster_attribution", "layer_cluster_attribution_lines",
                  "layer_cluster_attribution_lines_combined",
+                 "layer_count_lines",
                  "layer_cluster_attribution_sum",
                  "layer_cluster_neuron_count", "layer_cluster_neuron_pct",
                  "group_attribution",
@@ -1594,6 +1649,8 @@ def main():
     if "cluster_neuron_count" in todo:         figure_cluster_neuron_count(conditions, suffix)
     if "layer_cluster_attribution" in todo:        figure_layer_cluster_attribution(conditions, suffix)
     if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
+    if "layer_count_lines" in todo:
+        figure_layer_count_lines(conditions, suffix, log_y=args.log_y, subdir=args.subdir)
     if "layer_cluster_attribution_lines_combined" in todo:
         figure_layer_cluster_attribution_lines_combined(conditions, suffix, log_y=args.log_y, subdir=args.subdir)
     if "layer_cluster_attribution_sum" in todo:    figure_layer_cluster_attribution_sum(conditions, suffix)

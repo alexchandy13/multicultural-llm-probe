@@ -238,8 +238,19 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
         result set. Kept for backward compatibility / robustness checks
         ("does the headline finding survive both precision regimes?").
     """
+    # AutoProcessor where it works (it carries the chat template for multimodal
+    # checkpoints), AutoTokenizer otherwise. Gemma 4's processor needs optional
+    # audio/vision deps that aren't installed, and these are text-only evals, so a
+    # failure here is not a reason to stop — the tokenizer carries the chat
+    # template too. Keep this separate from is_instruct(), which decides whether
+    # prompts get templated at all, not which class loads them.
     if is_instruct(cond.model_size):
-        tokenizer = AutoProcessor.from_pretrained(cond.base)
+        try:
+            tokenizer = AutoProcessor.from_pretrained(cond.base)
+        except Exception as e:
+            print(f"[_common] AutoProcessor unavailable for {cond.base} "
+                  f"({type(e).__name__}); falling back to AutoTokenizer")
+            tokenizer = AutoTokenizer.from_pretrained(cond.base)
     else:
         tokenizer = AutoTokenizer.from_pretrained(cond.base)
     if tokenizer.pad_token is None:
