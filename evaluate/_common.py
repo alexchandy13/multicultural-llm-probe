@@ -33,8 +33,13 @@ MODEL_REGISTRY = {
     "gemma4_instruct": "google/gemma-4-12b-it",
     "qwen35": "Qwen/Qwen3.5-9B-Base",
     # Sparse MoE: 64 experts, top-8, 16 layers (~7B total / ~1B active).
-    # Behavioral eval only — see note in culnig/calc_neuron_score.py about why
-    # CULNIG neuron scoring does not transfer to routed FFNs.
+    # Published base -> SFT -> DPO chain on one architecture, so these three give
+    # the alignment pipeline without training adapters (cf. the tulu3_* conditions).
+    # Behavioral eval only: CULNIG's TARGET_MODULES look for mlp.gate_proj on the
+    # block, which in an MoE is the router, not a projection — attribution would
+    # silently skip every expert.
+    "olmoe": "allenai/OLMoE-1B-7B-0924",
+    "olmoe_sft": "allenai/OLMoE-1B-7B-0924-SFT",
     "olmoe_instruct": "allenai/OLMoE-1B-7B-0924-Instruct",
 }
 DEFAULT_MODEL_SIZE = "3b"
@@ -268,8 +273,20 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
     return tokenizer, model
 
 
+# Model labels whose weights are instruction-tuned, so prompts go through the
+# chat template. Explicit rather than a substring test on "instruct": OLMoE's
+# SFT checkpoint is instruction-tuned but isn't named *_instruct, and a substring
+# test would silently hand it raw-text prompts.
+CHAT_TEMPLATED_SIZES = {
+    "8b_instruct",
+    "gemma4_instruct",
+    "olmoe_sft",
+    "olmoe_instruct",
+}
+
+
 def is_instruct(model_size: str) -> bool:
-    return "instruct" in model_size
+    return model_size in CHAT_TEMPLATED_SIZES
 
 
 def build_chat_prompt(processor, user_content: str,

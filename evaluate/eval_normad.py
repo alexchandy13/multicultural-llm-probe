@@ -644,7 +644,7 @@ def main():
         "--model-size",
         default="3b",
         choices=["3b", "8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35",
-                 "olmoe_instruct"],
+                 "olmoe", "olmoe_sft", "olmoe_instruct"],
         help="Which base model to load. '3b' = Llama-3.2-3B (default), "
              "'8b' = Llama-3.1-8B, 'gemma4' = Gemma 4 12B. Outputs for "
              "non-3B sizes are written with a size suffix (e.g. "
