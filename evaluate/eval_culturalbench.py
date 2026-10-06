@@ -71,14 +71,16 @@ def build_prompt(prefix: str, reformatted: str, instruct: bool,
 @torch.no_grad()
 def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b", precision: str = "matched_bf16",
-                 us_probe: bool = False, probe_country: str | None = None):
+                 us_probe: bool = False, probe_country: str | None = None,
+                 neutral_fewshot: bool = True):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     instruct = is_instruct(model_size)
 
     rows = json.loads(DATA_PATH.read_text())
-    prefix = build_neutral_fewshot_prefix()
-    fewshot_turns = NEUTRAL_SHOTS if instruct else None
+    # NFS is the historical default here; --no-fewshot gives the bare 0-shot task.
+    prefix = build_neutral_fewshot_prefix() if neutral_fewshot else ""
+    fewshot_turns = (NEUTRAL_SHOTS if instruct else None) if neutral_fewshot else None
 
     _probe = probe_country or ("United States" if us_probe else None)
     leading_space = not instruct
@@ -161,6 +163,8 @@ def main():
                         choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct",
                                  "olmoe", "olmoe_sft", "olmoe_instruct",
                  "gemma4_moe", "gemma4_moe_instruct"])
+    parser.add_argument("--no-fewshot", action="store_true",
+                        help="Drop the 2 neutral few-shot examples (the hardcoded default) and evaluate 0-shot. Output loses the _nfs suffix.")
     parser.add_argument("--precision", default="matched_bf16")
     parser.add_argument("--us-probe", action="store_true")
     parser.add_argument("--probe-country", default=None)
@@ -177,7 +181,7 @@ def main():
         probe_sfx = ""
 
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}_nfs{probe_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{'' if args.no_fewshot else '_nfs'}{probe_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -185,6 +189,7 @@ def main():
         precision=args.precision,
         us_probe=args.us_probe,
         probe_country=args.probe_country,
+        neutral_fewshot=not args.no_fewshot,
     )
 
 

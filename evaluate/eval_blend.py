@@ -14,8 +14,10 @@ Outputs JSON to outputs/behavioral/blend_{condition}{suffixes}.json
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import random as _random
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -96,6 +98,37 @@ def load_blend(data_path: Path):
             country_id_mcqids[key].append(item["MCQID"])
     valid_mcqids = {m for ids in country_id_mcqids.values() for m in ids}
     return ds.filter(lambda x: x["MCQID"] in valid_mcqids)
+
+
+_OPT_RE = re.compile(r"^([A-D])\.[ \t]*(.*)$", re.M)
+
+
+def permute_options(prompt: str, gold: str, mcqid: str) -> tuple[str, str]:
+    """Shuffle the A-D option texts within a BLEnD prompt, remapping the gold letter.
+
+    BLEnD ships each question with its options in a fixed order, so a model with a
+    positional preference always collects exactly the questions whose answer sits in
+    its preferred slot. Permuting breaks that coupling, so accuracy reflects the
+    option text rather than its position.
+
+    The seed is derived from MCQID rather than a shared RNG, so the permutation is
+    reproducible and independent of iteration order (and of which examples are
+    excluded as few-shot shots).
+    """
+    found = _OPT_RE.findall(prompt)
+    if len(found) != 4:
+        return prompt, gold  # unparseable prompt: leave it untouched
+    letters = [f for f, _ in found]
+    texts = [t for _, t in found]
+
+    rng = _random.Random(int(hashlib.md5(mcqid.encode()).hexdigest()[:8], 16))
+    order = list(range(4))
+    rng.shuffle(order)
+
+    new_texts = iter(texts[i] for i in order)
+    new_prompt = _OPT_RE.sub(lambda m: f"{m.group(1)}. {next(new_texts)}", prompt)
+    new_gold = CHOICES[order.index(letters.index(gold))]
+    return new_prompt, new_gold
 
 
 @torch.no_grad()
@@ -204,7 +237,8 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False,
-                 neutral_fewshot: bool = False, probe_country: str | None = None):
+                 neutral_fewshot: bool = False, probe_country: str | None = None,
+                 shuffle_options: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
@@ -240,6 +274,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         c = ex["country"]
         gold = ex["answer_idx"]
         prompt = ex["prompt"]
+        if shuffle_options:
+            prompt, gold = permute_options(prompt, gold, ex["MCQID"])
         group = culture_group(c)
 
         if multi_prompt:
@@ -359,6 +395,10 @@ def main():
              "Output gains a _mp suffix.",
     )
     parser.add_argument(
+        "--shuffle-options", action="store_true",
+        help="Randomly permute the four option texts per question (seeded by MCQID) and remap the gold letter. BLEnD ships options in a fixed order, so a model with a positional preference always collects the questions whose answer sits in its preferred slot. Output gains a _shuf suffix.",
+    )
+    parser.add_argument(
         "--us-probe", action="store_true",
         help="For each non-US example, also score with country name replaced by 'US'. "
              "Records us_pred in each prediction entry. Output gains a _usprobe suffix.",
@@ -384,6 +424,7 @@ def main():
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
+    shuf_sfx = "_shuf" if args.shuffle_options else ""
     mp_sfx = "_mp" if args.multi_prompt else ""
     if args.probe_country:
         slug = args.probe_country.lower().replace(" ", "_")
@@ -395,7 +436,7 @@ def main():
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{mp_sfx}{usprobe_sfx}.json"
+        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{usprobe_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -408,6 +449,7 @@ def main():
         multi_prompt=args.multi_prompt,
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
+        shuffle_options=args.shuffle_options,
     )
 
 
