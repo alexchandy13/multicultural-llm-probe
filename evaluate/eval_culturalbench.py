@@ -153,7 +153,9 @@ def evaluate_one(condition_name: str, out_path: Path,
     print(f"Wrote {out_path}: overall={result['accuracy_overall']:.3f}")
 
 
-ALL_CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult", "sftdpo_aya_nocult"]
+ALL_CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult",
+                  "sftdpo_aya_cult", "sftdpo_aya_nocult",
+                  "tulu3_sft", "tulu3_dpo"]
 
 
 def main():
