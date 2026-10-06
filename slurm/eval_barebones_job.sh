@@ -45,3 +45,10 @@ echo "[eval_bare] condition=$COND model=$MODEL"
 python evaluate/eval_normad.py        --condition "$COND" --model-size "$MODEL" --yn-only
 python evaluate/eval_blend.py         --condition "$COND" --model-size "$MODEL"
 python evaluate/eval_culturalbench.py --condition "$COND" --model-size "$MODEL" --no-fewshot
+
+# General NLU, as a capability control: if a condition loses cultural accuracy
+# but holds here, the loss is cultural rather than general degradation.
+# eval_nlu defaults to 0-shot (--neutral-fewshot is opt-in), so no flag needed.
+for DS in boolq csqa qnli mrpc; do
+    python evaluate/eval_nlu.py --condition "$COND" --model-size "$MODEL" --dataset "$DS"
+done
