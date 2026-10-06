@@ -40,6 +40,16 @@ PROMPT = (
     "Answer:"
 )
 
+# BLEnD's shape: the label follows a bare quote, so convert_tokens_to_ids('A')
+# is already correct there. What's untested is whether the missing BOS alone
+# degrades it — if not, blend needs no rescoring (which would cost ~124 GPU-hours).
+BLEND_PROMPT = (
+    "Which dish is eaten at New Year in South Korea? Without any explanation, choose "
+    "only one from the given alphabet choices(e.g., A, B, C). Provide as JSON format: "
+    '{"answer_choice":""}\n\nA. tteokguk\nB. pizza\nC. tacos\nD. sushi\n\nAnswer:'
+    '{"answer_choice":"'
+)
+
 for cond in ["sft_aya_cult", "sftdpo_aya_cult"]:
     print(f"\n{'='*70}\n{cond} (gemma4)\n{'='*70}", flush=True)
     model, tok = load_model_for_culnig(cond, model_size="gemma4")
@@ -67,6 +77,18 @@ for cond in ["sft_aya_cult", "sftdpo_aya_cult"]:
               f"culnig(yes+no)={culnig_yes + culnig_no:.3e}  "
               f"spaced(yes+no)={ev_yes + ev_no:.3e}", flush=True)
         print(f"            top5={[(tok.decode([i]), round(v.item(), 4)) for i, v in zip(top.indices, top.values)]}",
+              flush=True)
+
+    # BLEnD shape: does missing BOS alone hurt the A/B/C/D distribution?
+    for label, asp in [("no BOS", False), ("with BOS", True)]:
+        ids = tok(BLEND_PROMPT, add_special_tokens=asp).input_ids
+        with torch.no_grad():
+            logits = model(input_ids=torch.tensor([ids]).to(model.device)).logits
+        pr = F.softmax(logits[0, -1, :].float(), dim=-1)
+        tot = sum(pr[tok.convert_tokens_to_ids(c)].item() for c in "ABCD")
+        top = torch.topk(pr, 5)
+        print(f"  BLEnD {label:<9} P(A..D)={tot:.4f}  "
+              f"top5={[(tok.decode([i]), round(v.item(), 3)) for i, v in zip(top.indices, top.values)]}",
               flush=True)
 
     del model
