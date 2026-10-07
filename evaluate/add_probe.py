@@ -221,20 +221,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True,
                         help="Existing _usprobe.json to read pred/scores from.")
-    parser.add_argument("--probe-country", required=True,
-                        help="Country name to substitute as probe (e.g. 'iran').")
+    parser.add_argument("--probe-country", required=True, nargs="+", metavar="COUNTRY",
+                        help="One or more country names to substitute as probe (e.g. 'iran'). "
+                             "Several share a single model load, which is most of the cost "
+                             "for a one-pass job like this.")
     parser.add_argument("--condition", required=True)
     parser.add_argument("--model-size", default="8b")
     parser.add_argument("--data-path", default=None,
                         help="Dataset path. Default: data/normad or data/BLEnD based on base filename.")
     parser.add_argument("--out", default=None)
     parser.add_argument("--precision", default="matched_bf16")
+    parser.add_argument("--skip-existing", action="store_true",
+                        help="Skip countries whose output file is already present, so a "
+                             "preempted and requeued job resumes instead of redoing work.")
     args = parser.parse_args()
+
+    if args.out and len(args.probe_country) > 1:
+        parser.error("--out names a single file; pass one --probe-country with it")
 
     base_path = Path(args.base)
     base_data = json.loads(base_path.read_text())
-    probe = args.probe_country
-    slug = probe.lower().replace(" ", "_")
 
     if base_path.name.startswith("blend_"):
         benchmark = "blend"
@@ -245,9 +251,11 @@ def main():
     else:
         benchmark = "normad"
 
-    out_path = Path(args.out) if args.out else (
-        BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json", base_path.name)
-    )
+    def out_for(probe: str) -> Path:
+        if args.out:
+            return Path(args.out)
+        slug = probe.lower().replace(" ", "_")
+        return BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json", base_path.name)
 
     if args.data_path:
         data_path = Path(args.data_path)
@@ -256,31 +264,44 @@ def main():
     else:
         data_path = PROJECT_ROOT / "data" / "normad"
 
+    todo = []
+    for probe in args.probe_country:
+        out_path = out_for(probe)
+        if args.skip_existing and out_path.exists():
+            print(f"Skipping  : {probe} — {out_path.name} already present")
+            continue
+        todo.append((probe, out_path))
+
     print(f"Benchmark : {benchmark}")
     print(f"Base file : {base_path.name}  ({len(base_data['predictions'])} predictions)")
-    print(f"Probe     : {probe}")
-    print(f"Output    : {out_path.name}")
+    print(f"Probes    : {', '.join(p for p, _ in todo) or '(none)'}")
+    if not todo:
+        print("Nothing to do.")
+        return
 
+    # One model load for every probe country, not one per country.
     cond = resolve_condition(args.condition, model_size=args.model_size)
     tokenizer, model = load_model_for_eval(cond, precision=args.precision)
     instruct = is_instruct(args.model_size)
 
-    if benchmark == "blend":
-        new_predictions = run_blend_probe(base_data, probe, model, tokenizer, instruct, data_path)
-    elif benchmark == "culturalbench_normy":
-        new_predictions = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
-    elif benchmark == "culturalbench":
-        new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
-    else:
-        new_predictions = run_normad_probe(base_data, probe, model, tokenizer, instruct, data_path)
+    for probe, out_path in todo:
+        print(f"--- probe={probe} -> {out_path.name}", flush=True)
+        if benchmark == "blend":
+            new_predictions = run_blend_probe(base_data, probe, model, tokenizer, instruct, data_path)
+        elif benchmark == "culturalbench_normy":
+            new_predictions = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
+        elif benchmark == "culturalbench":
+            new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
+        else:
+            new_predictions = run_normad_probe(base_data, probe, model, tokenizer, instruct, data_path)
 
-    out_data = dict(base_data)
-    out_data["predictions"] = new_predictions
-    out_data["probe_country"] = probe
+        out_data = dict(base_data)
+        out_data["predictions"] = new_predictions
+        out_data["probe_country"] = probe
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(out_data, indent=2))
-    print(f"Wrote {out_path}  ({len(new_predictions)} predictions)")
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(out_data, indent=2))
+        print(f"Wrote {out_path}  ({len(new_predictions)} predictions)", flush=True)
 
 
 if __name__ == "__main__":
