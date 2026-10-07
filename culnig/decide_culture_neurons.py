@@ -13,14 +13,16 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from collections import defaultdict
 from pathlib import Path
 
-from culnig.score_io import read_scores
-
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_ROOT = PROJECT_ROOT / "outputs" / "neurons"
+sys.path.insert(0, str(PROJECT_ROOT))   # run as a path, not a module
+
+from culnig.score_io import dataset_ids as dataset_ids_of  # noqa: E402
+from culnig.score_io import neuron_sums  # noqa: E402
 
 # Upstream hyperparameters — copied verbatim.
 MLP_CULTURE_NEURON_PROPORTION = 0.05
@@ -72,20 +74,23 @@ def main():
         score_name = f"{dataset_name}_yn" if (args.yn_only and dataset_name == "normad") else dataset_name
         score_path = cond_dir / f"{score_name}_max_scores.json"
         ctrl_path = cond_dir / f"{dataset_name}control_max_scores.json"
-        scores_dict = read_scores(score_path)    # .json or .json.gz
-        control_dict = read_scores(ctrl_path)
+        # Streamed: only the per-neuron totals are needed, and holding the full
+        # nested per-country structure peaks near 34 GB on a gemma4 normad pass.
+        score_sums = neuron_sums(score_path)     # .json or .json.gz
+        ctrl_sums = neuron_sums(ctrl_path)
+        score_ids = dataset_ids_of(score_path)
+        ctrl_ids = dataset_ids_of(ctrl_path)
 
-        for dname, ids in scores_dict["dataset_ids"].items():
+        for dname, ids in score_ids.items():
             dataset_ids[dname].extend(ids)
-        n_samples = len(scores_dict["dataset_ids"][score_name])
-        n_ctrl = len(control_dict["dataset_ids"][f"{dataset_name}control"])
+        n_samples = len(score_ids[score_name])
+        n_ctrl = len(ctrl_ids[f"{dataset_name}control"])
 
-        for key, score in scores_dict["neuron_scores"].items():
+        for key, total in score_sums.items():
             parts = key.split("_")
             module_name = "_".join(parts[:-2])
-            ctrl_score = control_dict["neuron_scores"].get(key, {})
-            ds_mean = sum(score.values()) / n_samples
-            ctrl_mean = sum(ctrl_score.values()) / n_ctrl if ctrl_score else 0.0
+            ds_mean = total / n_samples
+            ctrl_mean = ctrl_sums.get(key, 0.0) / n_ctrl
             delta = ds_mean - ctrl_mean
             if module_name in MLP_TARGET_MODULES:
                 mlp_scores[key] += delta
@@ -102,19 +107,19 @@ def main():
 
     # CountryRC — exclude top-r% as language/country surface-form neurons
     crc_path = cond_dir / "countryrc_max_scores.json"
-    crc_dict = read_scores(crc_path)   # accepts countryrc_max_scores.json.gz too
-    for dname, ids in crc_dict["dataset_ids"].items():
+    crc_sums = neuron_sums(crc_path)   # accepts countryrc_max_scores.json.gz too
+    for dname, ids in dataset_ids_of(crc_path).items():
         dataset_ids[dname].extend(ids)
 
     mlp_crc = defaultdict(float)
     attn_crc = defaultdict(float)
-    for key, score in crc_dict["neuron_scores"].items():
+    for key, total in crc_sums.items():
         parts = key.split("_")
         module_name = "_".join(parts[:-2])
         if module_name in MLP_TARGET_MODULES:
-            mlp_crc[key] = sum(score.values())
+            mlp_crc[key] = total
         elif module_name in ATTENTION_TARGET_MODULES:
-            attn_crc[key] = sum(score.values())
+            attn_crc[key] = total
 
     mlp_crc_sorted = sorted(mlp_crc.items(), key=lambda x: x[1], reverse=True)
     attn_crc_sorted = sorted(attn_crc.items(), key=lambda x: x[1], reverse=True)
