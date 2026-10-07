@@ -44,6 +44,24 @@ NEUTRAL_SHOTS = [
     ("Is fire cold?\nAnswer:", "no"),
 ]
 
+# Extra neutral shots, for --neutral-shots > 2. Same requirements as the pair
+# above: no country is named, so nothing cultural leaks and no example has to be
+# held out of eval (n stays 4905, unlike --few-shot's 4861).
+NEUTRAL_YES_POOL = [
+    ("Is the Earth round?\nAnswer:", "yes"),
+    ("Is water a liquid at room temperature?\nAnswer:", "yes"),
+    ("Does the sun rise in the east?\nAnswer:", "yes"),
+    ("Do birds have feathers?\nAnswer:", "yes"),
+]
+NEUTRAL_NO_POOL = [
+    ("Is fire cold?\nAnswer:", "no"),
+    ("Do fish breathe through lungs?\nAnswer:", "no"),
+    ("Is the moon larger than the sun?\nAnswer:", "no"),
+    ("Does ice sink in water?\nAnswer:", "no"),
+    ("Are triangles four-sided?\nAnswer:", "no"),
+    ("Is snow hot to the touch?\nAnswer:", "no"),
+]
+
 PROMPT_SUFFIX = "\nAnswer with yes or no.\nAnswer:"
 
 
@@ -57,8 +75,34 @@ def make_probe_prompt(reformatted: str, country: str, probe: str) -> str:
     return reformatted.replace(src, dst, 1)
 
 
-def build_neutral_fewshot_prefix() -> str:
-    return "".join(f"{q} {a}\n\n" for q, a in NEUTRAL_SHOTS)
+def build_neutral_shots(n_shots: int, gold_yes_rate: float, seed: int = 7):
+    """Pick n_shots country-free shots whose labels match the dataset's yes-rate.
+
+    The hardcoded 2-shot prefix is 1 yes / 1 no, which signals a 50% yes-rate to
+    a model whose gold rate is 27% — pushing predictions toward yes, the direction
+    every condition already over-predicts. At n_shots=4 the gold-matched split is
+    1 yes / 3 no. Same reasoning as build_fewshot_prefix, minus the leakage, since
+    no neutral shot names a country.
+
+    n_shots=2 returns NEUTRAL_SHOTS verbatim so existing _nfs results stay comparable.
+    """
+    if n_shots == 2:
+        return list(NEUTRAL_SHOTS)
+
+    n_yes = min(max(round(n_shots * gold_yes_rate), 1), n_shots - 1)
+    n_no = n_shots - n_yes
+    if n_yes > len(NEUTRAL_YES_POOL) or n_no > len(NEUTRAL_NO_POOL):
+        raise ValueError(
+            f"n_shots={n_shots} needs {n_yes} yes / {n_no} no neutral shots, pools "
+            f"hold {len(NEUTRAL_YES_POOL)} / {len(NEUTRAL_NO_POOL)}"
+        )
+    picked = NEUTRAL_YES_POOL[:n_yes] + NEUTRAL_NO_POOL[:n_no]
+    random.Random(seed).shuffle(picked)   # don't let the lone yes sit at a fixed position
+    return picked
+
+
+def build_neutral_fewshot_prefix(shots=None) -> str:
+    return "".join(f"{q} {a}\n\n" for q, a in (shots or NEUTRAL_SHOTS))
 
 
 # Shots are drawn only from these countries, and every example from them is
@@ -128,7 +172,8 @@ def build_prompt(prefix: str, reformatted: str, instruct: bool,
 def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b", precision: str = "matched_bf16",
                  us_probe: bool = False, probe_country: str | None = None,
-                 neutral_fewshot: bool = True, few_shot: int = 0):
+                 neutral_fewshot: bool = True, few_shot: int = 0,
+                 neutral_shots: int = 2):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     instruct = is_instruct(model_size)
@@ -141,8 +186,14 @@ def evaluate_one(condition_name: str, out_path: Path,
         fewshot_turns = turns if instruct else None
         print(f"Few-shot: {few_shot} real shots, {len(excluded_keys)} excluded from eval")
     elif neutral_fewshot:
-        prefix = build_neutral_fewshot_prefix()
-        fewshot_turns = NEUTRAL_SHOTS if instruct else None
+        usable = [r for r in rows if r.get("reformatted_prompt")]
+        gold_yes_rate = sum(bool(r["answer"]) for r in usable) / len(usable)
+        shots = build_neutral_shots(neutral_shots, gold_yes_rate)
+        prefix = build_neutral_fewshot_prefix(shots)
+        fewshot_turns = shots if instruct else None
+        n_yes = sum(a == "yes" for _, a in shots)
+        print(f"Neutral few-shot: {len(shots)} shots, {n_yes} yes / "
+              f"{len(shots) - n_yes} no (gold yes-rate {gold_yes_rate:.3f})")
     else:
         prefix = ""
         fewshot_turns = None
@@ -236,6 +287,11 @@ def main():
                         help="Use N real demonstrations drawn from the data (alternating "
                              "yes/no) instead of the neutral shots. The shots are excluded "
                              "from eval. Output gains a _fsN suffix.")
+    parser.add_argument("--neutral-shots", type=int, default=2, metavar="N",
+                        help="Number of country-free neutral shots (default 2). Labels are "
+                             "gold-matched, so N=4 gives 1 yes / 3 no rather than 2/2. No "
+                             "example is excluded from eval. Output suffix becomes _nfsN "
+                             "for N != 2.")
     parser.add_argument("--no-fewshot", action="store_true",
                         help="Drop the 2 neutral few-shot examples (the hardcoded default) and evaluate 0-shot. Output loses the _nfs suffix.")
     parser.add_argument("--precision", default="matched_bf16")
@@ -253,8 +309,16 @@ def main():
     else:
         probe_sfx = ""
 
+    if args.few_shot > 0:
+        shot_sfx = f"_fs{args.few_shot}"
+    elif args.no_fewshot:
+        shot_sfx = ""
+    else:
+        # _nfs stays bare at the historical 2 shots so old filenames keep matching
+        shot_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
+
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{f'_fs{args.few_shot}' if args.few_shot > 0 else ('' if args.no_fewshot else '_nfs')}{probe_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{probe_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -264,6 +328,7 @@ def main():
         probe_country=args.probe_country,
         neutral_fewshot=not args.no_fewshot,
         few_shot=args.few_shot,
+        neutral_shots=args.neutral_shots,
     )
 
 
