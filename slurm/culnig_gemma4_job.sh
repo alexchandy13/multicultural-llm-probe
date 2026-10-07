@@ -24,10 +24,13 @@
 #   CONDS="sftdpo_aya_cult sftdpo_aya_nocult" sbatch --array=0-1 slurm/culnig_gemma4_job.sh
 #   CONDS="base sft_aya_cult" STAGE=culturalbench sbatch --array=0-1 slurm/culnig_gemma4_job.sh
 #
-# The decide_culture_neurons steps read countryrc_max_scores.json(.gz) from the
-# condition dir. If it is not on the cluster they fail at the end, after the
-# expensive scoring — the scores are still written, and the selection can be run
-# locally afterwards (it streams now, ~750 MB peak).
+# The decide_culture_neurons steps need countryrc_max_scores.json(.gz) in the
+# condition dir. It is not kept on the cluster (47 GB across conditions), so when
+# it is absent this job scores only and skips the selection, which you then run
+# locally — it streams the files now and peaks around 750 MB:
+#
+#   python culnig/decide_culture_neurons.py --condition <c> --model-size gemma4 \
+#       --dataset-names culturalbench
 
 set -euo pipefail
 source env.sh
@@ -40,14 +43,28 @@ STAGE="${STAGE:-all}"
 case "$STAGE" in all|normad|culturalbench) ;; *) echo "bad STAGE '$STAGE'" >&2; exit 1 ;; esac
 echo "[culnig_gemma4] condition=$COND stage=$STAGE"
 
+# Selection needs countryrc; score-only is a valid outcome when it is not here.
+# Checked at point of use, not at job start, so a file still being uploaded while
+# the hours of scoring run is picked up by the time selection is reached.
+CRC_DIR="outputs/neurons/${COND}_gemma4"
+
+decide() {
+    if [[ -f "$CRC_DIR/countryrc_max_scores.json" || -f "$CRC_DIR/countryrc_max_scores.json.gz" ]]; then
+        python culnig/decide_culture_neurons.py --condition "$COND" --model-size gemma4 "$@"
+    else
+        echo "[culnig_gemma4] no countryrc in $CRC_DIR — skipping selection for $*;" \
+             "run it locally: python culnig/decide_culture_neurons.py --condition $COND --model-size gemma4 $*"
+    fi
+}
+
 if [[ "$STAGE" == all || "$STAGE" == normad ]]; then
     python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normad --yn-only
     python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names normadcontrol
-    python culnig/decide_culture_neurons.py --condition "$COND" --model-size gemma4 --dataset-names normad --yn-only
+    decide --dataset-names normad --yn-only
 fi
 
 if [[ "$STAGE" == all || "$STAGE" == culturalbench ]]; then
     python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names culturalbench
     python culnig/calc_neuron_score.py --condition "$COND" --model-size gemma4 --precision matched_bf16 --dataset-names culturalbenchcontrol
-    python culnig/decide_culture_neurons.py --condition "$COND" --model-size gemma4 --dataset-names culturalbench
+    decide --dataset-names culturalbench
 fi
