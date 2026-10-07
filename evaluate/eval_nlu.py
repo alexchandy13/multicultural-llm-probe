@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from pathlib import Path
 
 import torch
@@ -120,6 +121,57 @@ MRPC_NEUTRAL_SHOTS = [
 ]
 
 # ---------------------------------------------------------------------------
+# Extra pools for --neutral-shots N, which matches the prefix's label ratio to
+# the dataset's gold ratio instead of using 1 yes / 1 no.
+#
+# A balanced prefix tells the model to expect 50% yes. qnli's gold really is
+# ~49.5% yes, so its 1:1 prefix is already matched and nfs lifts it from chance
+# to ~72%. mrpc's gold is 68.4% yes, so 1:1 under-signals yes by 18 points —
+# which is what drove tulu3_dpo from +3.4 skew at 0-shot to -30.6 with nfs,
+# costing it 12 accuracy points. boolq (-12.2 mismatch) and csqa (uniform shots
+# against uniform gold, no skew at all) are left alone deliberately.
+NEUTRAL_POOLS = {
+    "qnli": {
+        "yes": [
+            {"question": "What is the capital of France?",
+             "sentence": "Paris is the capital and most populous city of France."},
+            {"question": "How many sides does a triangle have?",
+             "sentence": "A triangle is a polygon with three edges and three vertices."},
+            {"question": "What gas do plants absorb during photosynthesis?",
+             "sentence": "During photosynthesis, plants absorb carbon dioxide from the air."},
+        ],
+        "no": [
+            {"question": "What is the population of the Moon?",
+             "sentence": "The Moon orbits the Earth at an average distance of 384,400 km."},
+            {"question": "Who composed the Fifth Symphony?",
+             "sentence": "The violin is a wooden string instrument played with a bow."},
+            {"question": "When was the telephone invented?",
+             "sentence": "Copper is a soft metal with high thermal conductivity."},
+        ],
+    },
+    "mrpc": {
+        "yes": [
+            {"sentence1": "The dog ran quickly through the park.",
+             "sentence2": "The canine sprinted rapidly across the park."},
+            {"sentence1": "The meeting was postponed until next Tuesday.",
+             "sentence2": "The meeting has been delayed to Tuesday of next week."},
+            {"sentence1": "Sales increased by nearly a third last quarter.",
+             "sentence2": "Last quarter saw sales rise by almost 30 percent."},
+            {"sentence1": "The bridge was closed for repairs on Monday.",
+             "sentence2": "On Monday, the bridge shut down so repairs could be made."},
+        ],
+        "no": [
+            {"sentence1": "She enjoys reading books in the evening.",
+             "sentence2": "He prefers watching movies at night."},
+            {"sentence1": "The company opened a new office in Berlin.",
+             "sentence2": "The company reported lower profits this year."},
+            {"sentence1": "Heavy rain delayed the start of the match.",
+             "sentence2": "The stadium holds just over forty thousand people."},
+        ],
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Dataset configs
 # ---------------------------------------------------------------------------
 
@@ -204,13 +256,46 @@ def gold_label(dataset: str, ex: dict) -> str:
     raise ValueError(f"unknown dataset: {dataset}")
 
 
-def build_neutral_prefix(dataset: str) -> str:
-    shots = DATASET_CONFIGS[dataset]["neutral_shots"]
+def build_neutral_prefix(dataset: str, shots=None) -> str:
+    if shots is None:
+        shots = DATASET_CONFIGS[dataset]["neutral_shots"]
     parts = []
     for shot in shots:
         prompt = format_neutral_prompt(dataset, shot)
         parts.append(prompt + f" {shot['gold']}\n\n")
     return "".join(parts)
+
+
+def build_matched_neutral_shots(dataset: str, n_shots: int, gold_yes_rate: float,
+                                seed: int = 7):
+    """Pick n_shots neutral shots whose label ratio matches the dataset's gold ratio.
+
+    Only qnli and mrpc have pools for this; see NEUTRAL_POOLS for why the other
+    two are excluded. n_shots=2 falls back to the hardcoded pair so existing _nfs
+    results stay comparable.
+    """
+    if n_shots == 2:
+        return list(DATASET_CONFIGS[dataset]["neutral_shots"])
+    if dataset not in NEUTRAL_POOLS:
+        raise ValueError(
+            f"--neutral-shots {n_shots} is only supported for "
+            f"{sorted(NEUTRAL_POOLS)}; {dataset} has no pool "
+            f"(its 1:1 prefix is already close enough to gold)"
+        )
+
+    pool = NEUTRAL_POOLS[dataset]
+    n_yes = min(max(round(n_shots * gold_yes_rate), 1), n_shots - 1)
+    n_no = n_shots - n_yes
+    if n_yes > len(pool["yes"]) or n_no > len(pool["no"]):
+        raise ValueError(
+            f"{dataset} n_shots={n_shots} needs {n_yes} yes / {n_no} no, pool holds "
+            f"{len(pool['yes'])} / {len(pool['no'])}"
+        )
+
+    picked = ([dict(s, gold="yes") for s in pool["yes"][:n_yes]]
+              + [dict(s, gold="no") for s in pool["no"][:n_no]])
+    random.Random(seed).shuffle(picked)   # don't park the minority label at a fixed slot
+    return picked
 
 
 @torch.no_grad()
@@ -232,7 +317,7 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 def evaluate_one(condition_name: str, dataset: str, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 neutral_fewshot: bool = False):
+                 neutral_fewshot: bool = False, neutral_shots: int = 2):
     cfg = DATASET_CONFIGS[dataset]
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
@@ -244,14 +329,27 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
 
     instruct = is_instruct(model_size)
     choices = cfg["choices"]
-    prefix = build_neutral_prefix(dataset) if neutral_fewshot else ""
+
+    prefix = ""
     fewshot_turns: list[tuple[str, str]] | None = None
     if neutral_fewshot:
-        print(f"Neutral few-shot: {len(cfg['neutral_shots'])} examples")
+        binary = set(choices) == {"yes", "no"}
+        gold_yes_rate = 0.0
+        if binary:
+            golds = [g for g in (gold_label(dataset, ex) for ex in ds) if g in choices]
+            gold_yes_rate = sum(g == "yes" for g in golds) / len(golds)
+        shots = build_matched_neutral_shots(dataset, neutral_shots, gold_yes_rate)
+        prefix = build_neutral_prefix(dataset, shots)
+        if binary:
+            n_yes = sum(s["gold"] == "yes" for s in shots)
+            print(f"Neutral few-shot: {len(shots)} examples, {n_yes} yes / "
+                  f"{len(shots) - n_yes} no (gold yes-rate {gold_yes_rate:.3f})")
+        else:
+            print(f"Neutral few-shot: {len(shots)} examples, one per label")
         if instruct:
             fewshot_turns = [
                 (format_neutral_prompt(dataset, shot), shot["gold"])
-                for shot in cfg["neutral_shots"]
+                for shot in shots
             ]
 
     correct = 0
@@ -314,10 +412,24 @@ def main():
         help="Prepend culturally-agnostic few-shot examples that teach task "
              "format without domain knowledge. Output gains a _nfs suffix.",
     )
+    parser.add_argument(
+        "--neutral-shots", type=int, default=2, metavar="N",
+        help="Number of neutral shots (default 2, the historical hardcoded set). "
+             "N != 2 matches the prefix's label ratio to the dataset's gold ratio "
+             "and is only supported for qnli and mrpc. Implies --neutral-fewshot. "
+             "Output suffix becomes _nfsN.",
+    )
     args = parser.parse_args()
 
+    if args.neutral_shots != 2:
+        args.neutral_fewshot = True
+
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
-    nfs_sfx = "_nfs" if args.neutral_fewshot else ""
+    if not args.neutral_fewshot:
+        nfs_sfx = ""
+    else:
+        # _nfs stays bare at the historical 2 shots so old filenames keep matching
+        nfs_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
@@ -330,6 +442,7 @@ def main():
         model_size=args.model_size,
         precision=args.precision,
         neutral_fewshot=args.neutral_fewshot,
+        neutral_shots=args.neutral_shots,
     )
 
 
