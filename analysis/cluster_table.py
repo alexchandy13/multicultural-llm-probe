@@ -22,12 +22,16 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from culnig.score_io import read_scores, scores_exist  # noqa: E402  (needs PROJECT_ROOT)
 NEURONS_DIR   = PROJECT_ROOT / "outputs" / "neurons"
 FIGURES_DIR   = PROJECT_ROOT / "outputs" / "figures"
 IW_COORDS     = PROJECT_ROOT / "data" / "iw_coordinates.csv"
@@ -65,9 +69,9 @@ def load_neurons(cond_dir: Path, yn_only: bool) -> list[dict]:
 def load_scores(cond_dir: Path, yn_only: bool) -> dict:
     name = "normad_yn_max_scores.json" if yn_only else "normad_max_scores.json"
     p = cond_dir / name
-    if not p.exists():
+    if not scores_exist(p):
         return {}
-    return json.loads(p.read_text()).get("neuron_scores", {})
+    return read_scores(p).get("neuron_scores", {})
 
 
 def compute(cond_dir: Path, yn_only: bool, country_to_cluster: dict, cluster_order: list):

@@ -84,6 +84,9 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from culnig.score_io import read_scores, scores_exist  # noqa: E402  (needs PROJECT_ROOT)
 NEURONS_DIR = PROJECT_ROOT / "outputs" / "neurons"
 BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
@@ -198,9 +201,9 @@ def load_per_country_scores(cond: str) -> dict | None:
     else:
         name = f"{_DATASET}_max_scores.json"
     path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / name
-    if not path.exists():
+    if not scores_exist(path):
         return None
-    return json.loads(path.read_text()).get("neuron_scores", {})
+    return read_scores(path).get("neuron_scores", {})
 
 
 def load_per_country_control_scores(cond: str) -> dict | None:
@@ -215,9 +218,9 @@ def load_per_country_control_scores(cond: str) -> dict | None:
     else:
         return None  # blend has no control condition
     path = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / ctrl_name
-    if not path.exists():
+    if not scores_exist(path):
         return None
-    return json.loads(path.read_text()).get("neuron_scores", {})
+    return read_scores(path).get("neuron_scores", {})
 
 
 def per_country_item_counts() -> dict[str, int]:

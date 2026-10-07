@@ -16,6 +16,8 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
+from culnig.score_io import read_scores
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 NEURONS_ROOT = PROJECT_ROOT / "outputs" / "neurons"
@@ -70,12 +72,8 @@ def main():
         score_name = f"{dataset_name}_yn" if (args.yn_only and dataset_name == "normad") else dataset_name
         score_path = cond_dir / f"{score_name}_max_scores.json"
         ctrl_path = cond_dir / f"{dataset_name}control_max_scores.json"
-        if not score_path.exists():
-            raise FileNotFoundError(score_path)
-        if not ctrl_path.exists():
-            raise FileNotFoundError(ctrl_path)
-        scores_dict = json.loads(score_path.read_text())
-        control_dict = json.loads(ctrl_path.read_text())
+        scores_dict = read_scores(score_path)    # .json or .json.gz
+        control_dict = read_scores(ctrl_path)
 
         for dname, ids in scores_dict["dataset_ids"].items():
             dataset_ids[dname].extend(ids)
@@ -104,9 +102,7 @@ def main():
 
     # CountryRC — exclude top-r% as language/country surface-form neurons
     crc_path = cond_dir / "countryrc_max_scores.json"
-    if not crc_path.exists():
-        raise FileNotFoundError(crc_path)
-    crc_dict = json.loads(crc_path.read_text())
+    crc_dict = read_scores(crc_path)   # accepts countryrc_max_scores.json.gz too
     for dname, ids in crc_dict["dataset_ids"].items():
         dataset_ids[dname].extend(ids)
 
