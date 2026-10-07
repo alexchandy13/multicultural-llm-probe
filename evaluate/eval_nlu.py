@@ -298,6 +298,63 @@ def build_matched_neutral_shots(dataset: str, n_shots: int, gold_yes_rate: float
     return picked
 
 
+def build_real_fewshot_prefix(dataset: str, n_shots: int, seed: int = 7):
+    """Build an n_shots prefix from the dataset's own train split.
+
+    The hand-written neutral shots teach a decision boundary the benchmark may not
+    share — MRPC's are near word-identical paraphrases, far cleaner than its real
+    positives, and adding them moves tulu3_dpo from -3.4 skew to -31 regardless of
+    their label ratio. Real demonstrations carry the dataset's own boundary.
+
+    Train and validation are disjoint GLUE splits, so nothing is held out and no
+    evaluated example is leaked. Labels are sampled to match the train split's
+    natural rate, which already tracks validation's (qnli 50.0 vs 49.5% yes,
+    mrpc 67.4 vs 68.4%).
+
+    Returns (prefix, turns) where turns is the chat-format list for instruct models.
+    """
+    cfg = DATASET_CONFIGS[dataset]
+    if cfg["hf_name"]:
+        train = load_dataset(cfg["hf_path"], cfg["hf_name"], split="train")
+    else:
+        train = load_dataset(cfg["hf_path"], split="train")
+
+    choices = cfg["choices"]
+    rng = random.Random(seed)
+    # sample a window rather than scanning 100k rows
+    idx = rng.sample(range(len(train)), min(len(train), 2000))
+    by_label: dict[str, list[dict]] = {c: [] for c in choices}
+    for i in idx:
+        ex = train[i]
+        g = gold_label(dataset, ex)
+        if g in by_label:
+            by_label[g].append(ex)
+
+    if set(choices) == {"yes", "no"}:
+        n_tr = sum(len(v) for v in by_label.values())
+        yes_rate = len(by_label["yes"]) / n_tr
+        n_yes = min(max(round(n_shots * yes_rate), 1), n_shots - 1)
+        want = {"yes": n_yes, "no": n_shots - n_yes}
+    else:
+        # round-robin the labels so every option is demonstrated
+        want = {c: 0 for c in choices}
+        for k in range(n_shots):
+            want[choices[k % len(choices)]] += 1
+
+    picked = []
+    for lab, k in want.items():
+        if len(by_label[lab]) < k:
+            raise ValueError(
+                f"{dataset} train sample has {len(by_label[lab])} '{lab}' rows, need {k}"
+            )
+        picked.extend((by_label[lab][j], lab) for j in range(k))
+    rng.shuffle(picked)
+
+    turns = [(format_prompt(dataset, ex), lab) for ex, lab in picked]
+    prefix = "".join(f"{q} {a}\n\n" for q, a in turns)
+    return prefix, turns
+
+
 @torch.no_grad()
 def score_choices(model, tokenizer, prompt: str, choices: list[str],
                   leading_space: bool = True) -> list[float]:
@@ -317,7 +374,8 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 def evaluate_one(condition_name: str, dataset: str, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
-                 neutral_fewshot: bool = False, neutral_shots: int = 2):
+                 neutral_fewshot: bool = False, neutral_shots: int = 2,
+                 few_shot: int = 0):
     cfg = DATASET_CONFIGS[dataset]
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
@@ -332,7 +390,16 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
 
     prefix = ""
     fewshot_turns: list[tuple[str, str]] | None = None
-    if neutral_fewshot:
+    # Precedence: --few-shot N (real train-split shots) > --neutral-fewshot > 0-shot.
+    if few_shot > 0:
+        prefix, turns = build_real_fewshot_prefix(dataset, few_shot)
+        n_yes = sum(a == "yes" for _, a in turns)
+        print(f"Few-shot: {few_shot} real shots from train split"
+              + (f", {n_yes} yes / {len(turns) - n_yes} no" if set(choices) == {"yes", "no"}
+                 else ", round-robin over labels"))
+        if instruct:
+            fewshot_turns = turns
+    elif neutral_fewshot:
         binary = set(choices) == {"yes", "no"}
         gold_yes_rate = 0.0
         if binary:
@@ -419,13 +486,23 @@ def main():
              "and is only supported for qnli and mrpc. Implies --neutral-fewshot. "
              "Output suffix becomes _nfsN.",
     )
+    parser.add_argument(
+        "--few-shot", type=int, default=0, metavar="N",
+        help="Use N real demonstrations sampled from the dataset's own train split "
+             "instead of the hand-written neutral shots. Train and validation are "
+             "disjoint so nothing is held out. Output gains a _fsN suffix.",
+    )
     args = parser.parse_args()
 
     if args.neutral_shots != 2:
         args.neutral_fewshot = True
+    if args.few_shot > 0 and args.neutral_fewshot:
+        parser.error("--few-shot and --neutral-fewshot/--neutral-shots are mutually exclusive")
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
-    if not args.neutral_fewshot:
+    if args.few_shot > 0:
+        nfs_sfx = f"_fs{args.few_shot}"
+    elif not args.neutral_fewshot:
         nfs_sfx = ""
     else:
         # _nfs stays bare at the historical 2 shots so old filenames keep matching
@@ -443,6 +520,7 @@ def main():
         precision=args.precision,
         neutral_fewshot=args.neutral_fewshot,
         neutral_shots=args.neutral_shots,
+        few_shot=args.few_shot,
     )
 
 
