@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
 
@@ -60,6 +61,61 @@ def build_neutral_fewshot_prefix() -> str:
     return "".join(f"{q} {a}\n\n" for q, a in NEUTRAL_SHOTS)
 
 
+# Shots are drawn only from these countries, and every example from them is
+# dropped from evaluation — the same no-leakage design as NormAd's HOLDOUT_COUNTRIES.
+# New Zealand: 44 of 4905 examples (0.9%), and Western retains 9 other countries
+# (Canada, France, Australia, Netherlands, Germany, Italy, Spain, US, UK) so the
+# group stays well represented.
+HOLDOUT_COUNTRIES = {"New Zealand"}
+
+
+def build_fewshot_prefix(rows: list[dict], n_shots: int, seed: int = 42):
+    """Build an n_shots prefix from HOLDOUT_COUNTRIES, with labels matching gold.
+
+    Returns (prefix, excluded_keys, turns). excluded_keys covers *every* example
+    from the holdout countries, not just the sampled shots, so no evaluated item
+    concerns a country the model saw demonstrated.
+
+    Shot labels approximate the dataset's yes-rate rather than being balanced.
+    CulturalBench gold is ~27% yes, so a 1:1 prefix would tell the model to expect
+    ~50% and push predictions toward yes — the direction every condition already
+    over-predicts. At n_shots=4 the gold-matched split is 1 yes / 3 no.
+    """
+    rng = random.Random(seed)
+
+    usable = [r for r in rows if r.get("reformatted_prompt")]
+    gold_yes_rate = sum(bool(r["answer"]) for r in usable) / len(usable)
+
+    pool: dict[bool, list[dict]] = {True: [], False: []}
+    excluded = set()
+    for r in usable:
+        if r["country"] not in HOLDOUT_COUNTRIES:
+            continue
+        excluded.add((r["data_idx"], r["question_idx"]))
+        pool[bool(r["answer"])].append(r)
+
+    # at least one of each label, otherwise the prefix teaches only one answer
+    n_yes = min(max(round(n_shots * gold_yes_rate), 1), n_shots - 1)
+    want = {True: n_yes, False: n_shots - n_yes}
+    for lab, k in want.items():
+        if len(pool[lab]) < k:
+            raise ValueError(
+                f"holdout {sorted(HOLDOUT_COUNTRIES)} has {len(pool[lab])} "
+                f"{'yes' if lab else 'no'} examples, need {k}"
+            )
+
+    picked = []
+    for lab, k in want.items():
+        rng.shuffle(pool[lab])
+        picked.extend(pool[lab][:k])
+    rng.shuffle(picked)
+
+    turns = [(r["reformatted_prompt"] + PROMPT_SUFFIX,
+              "yes" if r["answer"] else "no") for r in picked]
+    prefix = "".join(f"{q} {a}\n\n" for q, a in turns)
+    return prefix, excluded, turns
+
+
 def build_prompt(prefix: str, reformatted: str, instruct: bool,
                  tokenizer, fewshot_turns) -> str:
     full_q = reformatted + PROMPT_SUFFIX
@@ -72,15 +128,24 @@ def build_prompt(prefix: str, reformatted: str, instruct: bool,
 def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b", precision: str = "matched_bf16",
                  us_probe: bool = False, probe_country: str | None = None,
-                 neutral_fewshot: bool = True):
+                 neutral_fewshot: bool = True, few_shot: int = 0):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     instruct = is_instruct(model_size)
 
     rows = json.loads(DATA_PATH.read_text())
-    # NFS is the historical default here; --no-fewshot gives the bare 0-shot task.
-    prefix = build_neutral_fewshot_prefix() if neutral_fewshot else ""
-    fewshot_turns = (NEUTRAL_SHOTS if instruct else None) if neutral_fewshot else None
+    # Precedence: --few-shot N (real shots) > NFS (default) > --no-fewshot (bare).
+    excluded_keys: set = set()
+    if few_shot > 0:
+        prefix, excluded_keys, turns = build_fewshot_prefix(rows, few_shot)
+        fewshot_turns = turns if instruct else None
+        print(f"Few-shot: {few_shot} real shots, {len(excluded_keys)} excluded from eval")
+    elif neutral_fewshot:
+        prefix = build_neutral_fewshot_prefix()
+        fewshot_turns = NEUTRAL_SHOTS if instruct else None
+    else:
+        prefix = ""
+        fewshot_turns = None
 
     _probe = probe_country or ("United States" if us_probe else None)
     leading_space = not instruct
@@ -92,6 +157,8 @@ def evaluate_one(condition_name: str, out_path: Path,
     for row in tqdm(rows, desc=f"culturalbench/{condition_name}"):
         reformatted = row.get("reformatted_prompt")
         if not reformatted:
+            continue
+        if (row["data_idx"], row["question_idx"]) in excluded_keys:
             continue
 
         country  = row["country"]
@@ -165,6 +232,10 @@ def main():
                         choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct",
                                  "olmoe", "olmoe_sft", "olmoe_instruct",
                  "gemma4_moe", "gemma4_moe_instruct"])
+    parser.add_argument("--few-shot", type=int, default=0, metavar="N",
+                        help="Use N real demonstrations drawn from the data (alternating "
+                             "yes/no) instead of the neutral shots. The shots are excluded "
+                             "from eval. Output gains a _fsN suffix.")
     parser.add_argument("--no-fewshot", action="store_true",
                         help="Drop the 2 neutral few-shot examples (the hardcoded default) and evaluate 0-shot. Output loses the _nfs suffix.")
     parser.add_argument("--precision", default="matched_bf16")
@@ -183,7 +254,7 @@ def main():
         probe_sfx = ""
 
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{'' if args.no_fewshot else '_nfs'}{probe_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{f'_fs{args.few_shot}' if args.few_shot > 0 else ('' if args.no_fewshot else '_nfs')}{probe_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -192,6 +263,7 @@ def main():
         us_probe=args.us_probe,
         probe_country=args.probe_country,
         neutral_fewshot=not args.no_fewshot,
+        few_shot=args.few_shot,
     )
 
 

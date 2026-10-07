@@ -32,7 +32,9 @@ source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
 MODEL="${MODEL:-8b}"
-CONDS=(base sft_aya_nocult sftdpo_aya_nocult tulu3_sft tulu3_dpo)
+# CONDS override lets you run a different condition set without editing this file:
+#   CONDS="sft_aya_cult sftdpo_aya_cult" sbatch --array=0-1 slurm/eval_barebones_job.sh
+read -ra CONDS <<< "${CONDS:-base sft_aya_nocult sftdpo_aya_nocult tulu3_sft tulu3_dpo}"
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 
 if [[ "$MODEL" != "8b" && "$COND" == tulu3_* ]]; then

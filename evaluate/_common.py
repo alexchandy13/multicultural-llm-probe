@@ -333,10 +333,40 @@ def build_chat_prompt(processor, user_content: str,
     return text + generation_suffix
 
 
+# Country strings arrive in three shapes depending on the benchmark: NormAd uses
+# 'united_states_of_america', BLEnD uses 'US'/'South_Korea', CulturalBench uses
+# 'United States'/'South Korea'. The WESTERN/NON_WESTERN sets mix underscored and
+# abbreviated forms, so a bare membership test silently sent CulturalBench's
+# 'United States', 'United Kingdom', 'New Zealand', 'Hong Kong', 'Saudi Arabia'
+# and 'South Africa' to "Other" — dropping the US and UK out of the Western group
+# entirely. Normalizing first makes the grouping identical across benchmarks.
+# Alias targets are already in canonical form (lowercased, spaces) so they compare
+# equal to _canonical_country() applied to the set entries.
+_COUNTRY_ALIASES = {
+    "united states": "us",
+    "united states of america": "us",
+    "usa": "us",
+    "united kingdom": "uk",
+    "great britain": "uk",
+    "turkiye": "türkiye",
+}
+
+
+def _canonical_country(country: str) -> str:
+    """Fold a benchmark's country spelling onto the form used in WESTERN/NON_WESTERN."""
+    key = country.replace("_", " ").strip().lower()
+    return _COUNTRY_ALIASES.get(key, key)
+
+
+_WESTERN_CANON = {_canonical_country(c) for c in WESTERN}
+_NON_WESTERN_CANON = {_canonical_country(c) for c in NON_WESTERN}
+
+
 def culture_group(country: str) -> str:
-    if country in WESTERN:
+    c = _canonical_country(country)
+    if c in _WESTERN_CANON:
         return "Western"
-    if country in NON_WESTERN:
+    if c in _NON_WESTERN_CANON:
         return "Non-Western"
     return "Other"
 
