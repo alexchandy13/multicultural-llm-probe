@@ -630,12 +630,16 @@ def figure_layer_count_lines(conditions: list[str], suffix: str,
     so it needs no per-country score files and runs in seconds.
     """
     n_layers = _N_LAYERS
-    cmap = plt.get_cmap("tab10")
-    line_styles = ["-", "--", ":", "-."]
+
+    # Same encoding as figure_layer_attribution_lines so the count and attribution
+    # plots for one comparison can be read side by side.
+    variants = {_stage_variant(c)[1] for c in conditions} - {None}
+    by_variant = len(variants) > 1
+    fallback = ["-", "--", ":", "-."]
 
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = []
-    for i, cond in enumerate(conditions):
+    for cond in conditions:
         neurons = load_neurons(cond)
         if neurons is None:
             print(f"[skip] no data for {cond}", file=sys.stderr)
@@ -643,11 +647,17 @@ def figure_layer_count_lines(conditions: list[str], suffix: str,
         counts = defaultdict(int)
         for n in neurons:
             counts[n["layer_idx"]] += 1
+        # A layer with nothing selected is a true zero here, unlike a mean, so it
+        # is plotted rather than skipped.
         ys = [counts.get(l, 0) for l in range(n_layers)]
-        ax.plot(range(n_layers), ys, color=cmap(i), linewidth=1.8,
-                linestyle=line_styles[i % len(line_styles)],
-                marker="o", markersize=3,
-                label=f"{COND_LABELS.get(cond, cond)} (n={sum(ys):,})")
+        stage, variant = _stage_variant(cond)
+        style = (_VARIANT_STYLES.get(variant, "-") if by_variant
+                 else fallback[len(plotted) % len(fallback)])
+        ax.plot(range(n_layers), ys,
+                color=_STAGE_COLORS.get(stage, "#555555"),
+                linestyle=style, linewidth=1.8, marker="o", markersize=3,
+                label=f"{COND_LABELS.get(cond, cond)} "
+                      f"[{_STYLE_NAMES.get(style, style)}] (n={sum(ys):,})")
         plotted.append(cond)
 
     if not plotted:
@@ -662,7 +672,7 @@ def figure_layer_count_lines(conditions: list[str], suffix: str,
     ax.grid(alpha=0.3, linewidth=0.5)
     if log_y:
         ax.set_yscale("log")
-    ax.legend(fontsize=8, title="Condition", title_fontsize=8)
+    ax.legend(fontsize=9, title="Stage / variant", title_fontsize=9, handlelength=4.0)
 
     fig.tight_layout()
     log_tag = "_logy" if log_y else ""
@@ -671,6 +681,199 @@ def figure_layer_count_lines(conditions: list[str], suffix: str,
         out_dir = out_dir / subdir
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / f"line_layer_neuron_count{suffix}{log_tag}.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
+
+
+#: Alignment stage -> colour, and cultural-data variant -> line style, so a plot
+#: with all five conditions reads as three stages rather than five arbitrary lines.
+_STAGE_COLORS = {"base": "#1b1b1b", "sft": "#1f77b4", "sftdpo": "#d62728"}
+_VARIANT_STYLES = {"cult": "-", "nocult": "--", None: ":"}
+#: Named in the legend text as well as drawn, because a cult/no-cult plot has both
+#: lines in one stage colour and the dash pattern is the only thing telling them apart.
+_STYLE_NAMES = {"-": "solid", "--": "dashed", ":": "dotted", "-.": "dash-dot"}
+
+
+def _stage_variant(cond: str) -> tuple[str, str | None]:
+    """Split a condition name into (stage, cultural-data variant)."""
+    if cond.startswith("sftdpo"):
+        stage = "sftdpo"
+    elif cond.startswith("sft"):
+        stage = "sft"
+    elif cond.startswith("dpo"):
+        stage = "dpo"
+    else:
+        stage = "base"
+    variant = "nocult" if cond.endswith("nocult") else ("cult" if cond.endswith("cult") else None)
+    return stage, variant
+
+
+def figure_layer_attribution_lines(conditions: list[str], suffix: str,
+                                   log_y: bool = False, subdir: str | None = None,
+                                   normalize: bool = False, agg: str = "mean"):
+    """Line plot of culture-neuron attribution per layer, one line per condition.
+
+    agg="mean" gives per-neuron intensity; agg="sum" gives the total attribution
+    mass at each layer, which is mean x count. The two can disagree — a layer with
+    few strong neurons and one with many weak ones look alike by sum and opposite
+    by mean — so the sum is the one to read for "where does the signal sit".
+
+    Line form of figure_layer_attribution's heatmap, which is hard to read across
+    conditions because each column has its own place on a shared colour scale.
+    Colour encodes alignment stage and line style the cult/no-cult variant, so the
+    stage ordering (base -> sft -> sftdpo) is visible rather than inferred from a
+    legend.
+
+    Reads only the all_neurons_* files, so no per-country score files are needed.
+
+    normalize divides each condition by its own across-layer mean, which answers
+    "where in depth does attribution concentrate" independently of the fact that
+    gemma4's absolute scores run an order of magnitude above 8b's.
+    """
+    n_layers = _N_LAYERS
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    # Style normally encodes the cult/no-cult variant. When every condition shares
+    # one variant — a base -> sft -> sftdpo progression, all no-cult — that would
+    # draw them identically, so fall back to one style per line.
+    # base has no variant, so only count the cult/no-cult ones: a base -> sft ->
+    # sftdpo progression is all no-cult and must not draw two identical dashes.
+    variants = {_stage_variant(c)[1] for c in conditions} - {None}
+    by_variant = len(variants) > 1
+    fallback = ["-", "--", ":", "-."]
+
+    plotted = []
+    for cond in conditions:
+        neurons = load_neurons(cond)
+        if neurons is None:
+            print(f"[skip] no data for {cond}", file=sys.stderr)
+            continue
+        per_layer = defaultdict(list)
+        for n in neurons:
+            per_layer[n["layer_idx"]].append(n["attribute_score"])
+        _agg = np.sum if agg == "sum" else np.mean
+        ys = [float(_agg(per_layer[l])) if per_layer.get(l) else np.nan
+              for l in range(n_layers)]
+        counts = [len(per_layer.get(l, ())) for l in range(n_layers)]
+        if normalize:
+            m = np.nanmean(ys)
+            if m:
+                ys = [y / m for y in ys]
+        # A layer with no selected neurons has no mean, which would break the line.
+        # Plot only the layers that have one and let the line span the gap, rather
+        # than imputing 0 — "nothing selected here" is not "attribution is zero".
+        xs_v = [l for l in range(n_layers) if counts[l]]
+        ys_v = [ys[l] for l in xs_v]
+        stage, variant = _stage_variant(cond)
+        style = (_VARIANT_STYLES.get(variant, "-") if by_variant
+                 else fallback[len(plotted) % len(fallback)])
+        color = _STAGE_COLORS.get(stage, "#555555")
+        n_gap = n_layers - len(xs_v)
+        gap_note = f", {n_gap} empty layer{'s' if n_gap != 1 else ''}" if n_gap else ""
+        ax.plot(xs_v, ys_v, color=color, linestyle=style,
+                linewidth=1.8, marker="o", markersize=3,
+                label=f"{COND_LABELS.get(cond, cond)} "
+                      f"[{_STYLE_NAMES.get(style, style)}] (n={len(neurons):,}{gap_note})")
+        plotted.append(cond)
+
+    if not plotted:
+        plt.close(fig)
+        print("[skip] layer_attribution_lines: no conditions had data", file=sys.stderr)
+        return
+
+    ax.set_xlabel("Layer")
+    _what = "Total" if agg == "sum" else "Mean"
+    ax.set_ylabel(f"{_what} attribution / condition mean" if normalize
+                  else f"{_what} culture-neuron attribution")
+    ax.set_title(f"{_what} culture-neuron attribution per layer"
+                 + (" (normalized per condition)" if normalize else ""))
+    ax.set_xlim(-0.5, n_layers - 0.5)
+    ax.grid(alpha=0.3, linewidth=0.5)
+    if log_y:
+        ax.set_yscale("log")
+    if normalize:
+        ax.axhline(1.0, color="#999999", linewidth=0.8, linestyle=":", zorder=0)
+    # handlelength: the default is too short to tell "--" from ":" in the swatch
+    ax.legend(fontsize=9, title="Stage / variant", title_fontsize=9, handlelength=4.0)
+
+    fig.tight_layout()
+    tag = ("_norm" if normalize else "") + ("_logy" if log_y else "")
+    out_dir = FIGURES_DIR / "combined_line_attribution_graphs"
+    if subdir:
+        out_dir = out_dir / subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    stem = "line_layer_attribution_total" if agg == "sum" else "line_layer_attribution"
+    out = out_dir / f"{stem}{suffix}{tag}.pdf"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out}")
+
+
+
+def figure_layer_all_neuron_attribution_lines(conditions: list[str], suffix: str,
+                                              log_y: bool = False,
+                                              subdir: str | None = None):
+    """Mean attribution per layer over ALL scored neurons, not just the selected ones.
+
+    The other line figures describe the selection; this is the baseline it stands
+    out from. Reads the small layer_stats_{dataset}.json caches written by
+    scripts/layer_stats_all_neurons.py, since computing it needs the multi-GB raw
+    score files.
+
+    Only the mean is plotted: every layer holds the same number of eligible neurons,
+    so the per-layer sum is the mean times a constant and has an identical shape.
+    """
+    n_layers = _N_LAYERS
+    ds_key = "normad" if _DATASET == "normad" else _DATASET
+
+    variants = {_stage_variant(c)[1] for c in conditions} - {None}
+    by_variant = len(variants) > 1
+    fallback = ["-", "--", ":", "-."]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = []
+    for cond in conditions:
+        cache = NEURONS_DIR / f"{cond}{_SIZE_SUFFIX}" / f"layer_stats_{ds_key}.json"
+        if not cache.exists():
+            print(f"[skip] no layer_stats cache for {cond} "
+                  f"(run scripts/layer_stats_all_neurons.py)", file=sys.stderr)
+            continue
+        data = json.loads(cache.read_text())
+        per = data["per_layer"]
+        ys = [per[str(l)]["mean"] if str(l) in per else np.nan for l in range(n_layers)]
+        xs_v = [l for l in range(n_layers) if str(l) in per]
+        ys_v = [per[str(l)]["mean"] for l in xs_v]
+        stage, variant = _stage_variant(cond)
+        style = (_VARIANT_STYLES.get(variant, "-") if by_variant
+                 else fallback[len(plotted) % len(fallback)])
+        ax.plot(xs_v, ys_v, color=_STAGE_COLORS.get(stage, "#555555"),
+                linestyle=style, linewidth=1.8, marker="o", markersize=3,
+                label=f"{COND_LABELS.get(cond, cond)} "
+                      f"[{_STYLE_NAMES.get(style, style)}] (n={data['n_neurons']:,})")
+        plotted.append(cond)
+
+    if not plotted:
+        plt.close(fig)
+        print("[skip] layer_all_neuron_attribution_lines: no cached stats",
+              file=sys.stderr)
+        return
+
+    ax.set_xlabel("Layer")
+    ax.set_ylabel("Mean attribution, all neurons")
+    ax.set_title("Mean attribution per layer across all scored neurons")
+    ax.set_xlim(-0.5, n_layers - 0.5)
+    ax.grid(alpha=0.3, linewidth=0.5)
+    if log_y:
+        ax.set_yscale("log")
+    ax.legend(fontsize=9, title="Stage / variant", title_fontsize=9, handlelength=4.0)
+
+    fig.tight_layout()
+    out_dir = FIGURES_DIR / "combined_line_attribution_graphs"
+    if subdir:
+        out_dir = out_dir / subdir
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"line_layer_all_neuron_attribution{suffix}{'_logy' if log_y else ''}.pdf"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {out}")
@@ -1528,7 +1731,9 @@ def main():
                  "cluster_activation", "cluster_neuron_count",
                  "layer_cluster_attribution", "layer_cluster_attribution_lines",
                  "layer_cluster_attribution_lines_combined",
-                 "layer_count_lines",
+                 "layer_count_lines", "layer_attribution_lines",
+                 "layer_attribution_total_lines",
+                 "layer_all_neuron_attribution_lines",
                  "layer_cluster_attribution_sum",
                  "layer_cluster_neuron_count", "layer_cluster_neuron_pct",
                  "group_attribution",
@@ -1654,6 +1859,15 @@ def main():
     if "layer_cluster_attribution_lines" in todo:  figure_layer_cluster_attribution_lines(conditions, suffix)
     if "layer_count_lines" in todo:
         figure_layer_count_lines(conditions, suffix, log_y=args.log_y, subdir=args.subdir)
+    if "layer_attribution_lines" in todo:
+        figure_layer_attribution_lines(conditions, suffix, log_y=args.log_y,
+                                       subdir=args.subdir)
+    if "layer_attribution_total_lines" in todo:
+        figure_layer_attribution_lines(conditions, suffix, log_y=args.log_y,
+                                       subdir=args.subdir, agg="sum")
+    if "layer_all_neuron_attribution_lines" in todo:
+        figure_layer_all_neuron_attribution_lines(conditions, suffix,
+                                                  log_y=args.log_y, subdir=args.subdir)
     if "layer_cluster_attribution_lines_combined" in todo:
         figure_layer_cluster_attribution_lines_combined(conditions, suffix, log_y=args.log_y, subdir=args.subdir)
     if "layer_cluster_attribution_sum" in todo:    figure_layer_cluster_attribution_sum(conditions, suffix)
