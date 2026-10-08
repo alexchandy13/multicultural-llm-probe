@@ -41,8 +41,47 @@ BENCHMARKS = {
 }
 
 
+LOCK = PROJECT_ROOT / "outputs" / ".auto_merge_select.lock"
+
+
 def log(msg: str) -> None:
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S}  {msg}", flush=True)
+
+
+def claim_lock() -> None:
+    """Refuse to start if another watcher is live.
+
+    Two watchers, or a watcher alongside a hand-run selection, will both see a
+    missing all_neurons file and both start one. decide_culture_neurons.py writes
+    with write_text(), which is not atomic, so concurrent writers can interleave
+    and leave invalid JSON.
+    """
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    if LOCK.exists():
+        try:
+            pid = int(LOCK.read_text().strip())
+        except (ValueError, OSError):
+            pid = None
+        if pid is not None:
+            try:
+                import os
+                os.kill(pid, 0)          # signal 0 only tests for existence
+            except ProcessLookupError:
+                log(f"clearing stale lock from pid {pid}")
+            except PermissionError:
+                sys.exit(f"lock held by pid {pid} (another user?); remove {LOCK} if wrong")
+            else:
+                sys.exit(f"another watcher is running (pid {pid}); "
+                         f"stop it first or remove {LOCK} if stale")
+    import os
+    LOCK.write_text(str(os.getpid()))
+
+
+def release_lock() -> None:
+    try:
+        LOCK.unlink()
+    except FileNotFoundError:
+        pass
 
 
 def scores_path(cond_dir: Path, dataset: str) -> Path | None:
