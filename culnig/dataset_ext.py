@@ -427,21 +427,21 @@ def _culturalbenchcontrol_block(tokenizer, target_data: str) -> list:
 
     def make_example(r):
         gold = "yes" if r["answer"] else "no"
-        # Drop the whole locative clause, not just the country name. Blanking the
-        # name alone left "In , is it customary..." — ungrammatical, and attribution
-        # is gradient-based so the model's extra uncertainty on a malformed prompt
-        # inflates the control. That showed up as the control out-scoring the real
-        # prompt at every layer for both sftdpo conditions (negative deltas), which
-        # neither NormAd's control ("country: \nStory: ", blank fields but intact
-        # structure) nor BLEnD's (question deleted, instruction intact) produce.
-        src = f"In {_country_with_article(r['country'])}, "
-        if src not in r["reformatted_prompt"]:
-            raise ValueError(
-                f"culturalbenchcontrol: prompt does not start with {src!r}; "
-                f"got {r['reformatted_prompt'][:60]!r}"
-            )
-        rest = r["reformatted_prompt"].replace(src, "", 1)
-        controlled = rest[0].upper() + rest[1:] if rest else rest
+        # Drop the question entirely, leaving the fewshot prefix and the answer cue.
+        # This mirrors normadcontrol, which empties both country and story rather
+        # than blanking the country alone, so the two benchmarks' controls now
+        # measure the same thing: the model's response with no question content.
+        #
+        # The previous version blanked only the country name, leaving
+        # "In , is it customary..." — ungrammatical. Attribution is gradient-based
+        # and gradients grow with uncertainty, so a malformed prompt inflated the
+        # control; both sftdpo conditions had the control out-scoring the real
+        # prompt at every layer (negative deltas at 32/32), which normadcontrol
+        # never produced.
+        #
+        # Every control prompt is now identical, so the per-item variation comes
+        # only from which label's gradient is taken (yes vs no).
+        controlled = ""
         prompt = _FEWSHOT_PREFIX + controlled + _CB_PROMPT_SUFFIX
         tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
         return {
