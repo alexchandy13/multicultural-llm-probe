@@ -427,8 +427,21 @@ def _culturalbenchcontrol_block(tokenizer, target_data: str) -> list:
 
     def make_example(r):
         gold = "yes" if r["answer"] else "no"
-        src = f"In {_country_with_article(r['country'])},"
-        controlled = r["reformatted_prompt"].replace(src, "In ,", 1)
+        # Drop the whole locative clause, not just the country name. Blanking the
+        # name alone left "In , is it customary..." — ungrammatical, and attribution
+        # is gradient-based so the model's extra uncertainty on a malformed prompt
+        # inflates the control. That showed up as the control out-scoring the real
+        # prompt at every layer for both sftdpo conditions (negative deltas), which
+        # neither NormAd's control ("country: \nStory: ", blank fields but intact
+        # structure) nor BLEnD's (question deleted, instruction intact) produce.
+        src = f"In {_country_with_article(r['country'])}, "
+        if src not in r["reformatted_prompt"]:
+            raise ValueError(
+                f"culturalbenchcontrol: prompt does not start with {src!r}; "
+                f"got {r['reformatted_prompt'][:60]!r}"
+            )
+        rest = r["reformatted_prompt"].replace(src, "", 1)
+        controlled = rest[0].upper() + rest[1:] if rest else rest
         prompt = _FEWSHOT_PREFIX + controlled + _CB_PROMPT_SUFFIX
         tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
         return {
