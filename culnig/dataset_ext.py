@@ -372,6 +372,19 @@ _CB_THE_COUNTRIES = {
 
 _CB_PROMPT_SUFFIX = "\nAnswer with yes or no.\nAnswer:"
 
+# CulturalBench gets its own prefix: gold is 27% yes, so the 1 yes / 1 no pair in
+# _FEWSHOT_PREFIX signals 50% and pushes predictions toward yes — the direction
+# every condition already over-predicts. These are the 4 shots eval_culturalbench.py
+# builds with --neutral-shots 4 (1 yes / 3 no, seed 7), so CULNIG and the behavioral
+# eval see the same context. NormAd keeps _FEWSHOT_PREFIX: its gold is 51.9% yes,
+# which the 1:1 pair already matches.
+_CB_FEWSHOT_PREFIX = (
+    "Is the moon larger than the sun?\nAnswer: no\n\n"
+    "Is fire cold?\nAnswer: no\n\n"
+    "Is the Earth round?\nAnswer: yes\n\n"
+    "Do fish breathe through lungs?\nAnswer: no\n\n"
+)
+
 
 def _country_with_article(country: str) -> str:
     return f"the {country}" if country in _CB_THE_COUNTRIES else country
@@ -400,7 +413,7 @@ def _culturalbench_block(tokenizer, target_data: str) -> list:
 
     def make_example(r):
         gold = "yes" if r["answer"] else "no"
-        prompt = _FEWSHOT_PREFIX + r["reformatted_prompt"] + _CB_PROMPT_SUFFIX
+        prompt = _CB_FEWSHOT_PREFIX + r["reformatted_prompt"] + _CB_PROMPT_SUFFIX
         tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
         return {
             "input_text": prompt,
@@ -418,10 +431,11 @@ def _culturalbench_block(tokenizer, target_data: str) -> list:
 
 
 def _culturalbenchcontrol_block(tokenizer, target_data: str) -> list:
-    """CulturalBench control: same prompts but country name stripped.
+    """CulturalBench control: the question removed, prefix and answer cue kept.
 
-    Replaces 'In {country with article},' with 'In ,' so the only difference
-    from culturalbench is the presence of a named country.
+    Mirrors normadcontrol, which empties both country and story. Every control
+    prompt is therefore identical; the per-item variation is only which label's
+    gradient is taken.
     """
     rows = _cb_rows(target_data)
 
@@ -441,8 +455,10 @@ def _culturalbenchcontrol_block(tokenizer, target_data: str) -> list:
         #
         # Every control prompt is now identical, so the per-item variation comes
         # only from which label's gradient is taken (yes vs no).
-        controlled = ""
-        prompt = _FEWSHOT_PREFIX + controlled + _CB_PROMPT_SUFFIX
+        # lstrip("\n"): the prefix ends in a blank line and the suffix opens with a
+        # newline, which the question normally sits between. With no question those
+        # collide into an extra empty line that no other prompt in the set has.
+        prompt = _CB_FEWSHOT_PREFIX + _CB_PROMPT_SUFFIX.lstrip("\n")
         tok = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
         return {
             "input_text": prompt,
