@@ -167,19 +167,25 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="report actions without running them")
     args = ap.parse_args()
 
+    if not args.dry_run:
+        claim_lock()
     log(f"watching {args.model_size}: {', '.join(args.conditions)}")
     log(f"benchmarks: {', '.join(args.benchmarks)}; interval {args.interval}s")
 
-    idle = 0
-    while True:
-        acted = pass_once(args.conditions, args.model_size, args.benchmarks, args.dry_run)
-        if args.once:
-            log(f"single pass done, {acted} action(s)")
-            return
-        idle = 0 if acted else idle + 1
-        if idle == 1:
-            log("nothing to do; will keep polling quietly")
-        time.sleep(args.interval)
+    try:
+        idle = 0
+        while True:
+            acted = pass_once(args.conditions, args.model_size, args.benchmarks, args.dry_run)
+            if args.once:
+                log(f"single pass done, {acted} action(s)")
+                return
+            idle = 0 if acted else idle + 1
+            if idle == 1:
+                log("nothing to do; will keep polling quietly")
+            time.sleep(args.interval)
+    finally:
+        if not args.dry_run:
+            release_lock()
 
 
 if __name__ == "__main__":
