@@ -51,10 +51,12 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 
 # NormAd is scored with --multi-prompt-word, BLEnD and CulturalBench plain 0-shot
 # neutral-fewshot; the base filename has to match how each was actually produced.
+# MIDDLE overrides this for a different prefix strategy, e.g. MIDDLE=_fs2_yn for
+# NormAd's 2-shot yes/no runs, whose skew is far smaller than nfs's.
 case "$BENCH" in
-    normad)        MIDDLE="_nfs_mpw" ;;
-    blend)         MIDDLE="_nfs" ;;
-    culturalbench) MIDDLE="_nfs" ;;
+    normad)        MIDDLE="${MIDDLE:-_nfs_mpw}" ;;
+    blend)         MIDDLE="${MIDDLE:-_nfs}" ;;
+    culturalbench) MIDDLE="${MIDDLE:-_nfs}" ;;
     *) echo "BENCH must be normad, blend or culturalbench, got '$BENCH'" >&2; exit 1 ;;
 esac
 
