@@ -44,6 +44,15 @@ MODEL_REGISTRY = {
     # Gemma 4 MoE (26B total / 4B active). Same family and tokenizer as the
     # gemma4 12B dense entries above, so dense-vs-sparse is not confounded by
     # training data or tokenization. Behavioral eval only (routed FFNs).
+    # OLMo 3 7B: a published base -> SFT -> DPO ladder on an architecture and
+    # pretraining corpus independent of Llama, so an alignment effect seen here and
+    # in tulu3_* is not an artifact of one model family or of our own LoRA training.
+    # Instruct rather than Think: Think emits a reasoning chain before answering, so
+    # the token right after "Answer:" is a thought opener, not yes/no, and log-prob
+    # scoring of the answer tokens would be measuring the wrong position.
+    "olmo3": "allenai/Olmo-3-1025-7B",
+    "olmo3_sft": "allenai/Olmo-3-7B-Instruct-SFT",
+    "olmo3_dpo": "allenai/Olmo-3-7B-Instruct-DPO",
     "gemma4_moe": "google/gemma-4-26B-A4B",
     "gemma4_moe_instruct": "google/gemma-4-26B-A4B-it",
 }
@@ -299,6 +308,8 @@ CHAT_TEMPLATED_SIZES = {
     "olmoe_sft",
     "olmoe_instruct",
     "gemma4_moe_instruct",
+    "olmo3_sft",
+    "olmo3_dpo",
 }
 
 

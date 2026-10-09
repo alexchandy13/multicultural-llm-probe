@@ -373,7 +373,8 @@ def main():
         "--model-size", default="3b",
         choices=["3b", "8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35",
                  "olmoe", "olmoe_sft", "olmoe_instruct",
-                 "gemma4_moe", "gemma4_moe_instruct"],
+                 "gemma4_moe", "gemma4_moe_instruct",
+                 "olmo3", "olmo3_sft", "olmo3_dpo"],
     )
     parser.add_argument(
         "--precision", default="matched_bf16",

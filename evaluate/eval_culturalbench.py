@@ -282,7 +282,8 @@ def main():
     parser.add_argument("--model-size", default="8b",
                         choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct",
                                  "olmoe", "olmoe_sft", "olmoe_instruct",
-                 "gemma4_moe", "gemma4_moe_instruct"])
+                 "gemma4_moe", "gemma4_moe_instruct",
+                 "olmo3", "olmo3_sft", "olmo3_dpo"])
     parser.add_argument("--few-shot", type=int, default=0, metavar="N",
                         help="Use N real demonstrations drawn from the data (alternating "
                              "yes/no) instead of the neutral shots. The shots are excluded "
