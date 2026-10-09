@@ -177,12 +177,19 @@ def build_neutral_fewshot_prefix(multi_prompt: bool = False) -> str | list[str]:
 
 
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
-                         multi_prompt: bool = False) -> tuple[str | list[str], set]:
+                         multi_prompt: bool = False
+                         ) -> tuple[str | list[str], set, list[tuple[str, str]]]:
     """Build few-shot prefix from holdout countries.
 
     Picks n_shots examples from HOLDOUT_COUNTRIES, favouring one per country.
-    Returns (prefix, excluded_mcqids) where excluded_mcqids is the full set of
-    MCQIDs from all holdout examples (not just the sampled shots).
+    Returns (prefix, excluded_mcqids, chat_turns) where excluded_mcqids is the
+    full set of MCQIDs from all holdout examples (not just the sampled shots).
+
+    chat_turns carries the same shots as (user_text, assistant_text) pairs for
+    instruct models, which take the chat path and never see the prefix string.
+    Without it, --few-shot N is silently a 0-shot run on every chat-templated
+    checkpoint. The user text stops before SCORING_SUFFIX because
+    build_chat_prompt appends that itself via generation_suffix.
     """
     rng = _random.Random(seed)
     excluded_mcqids: set = set()
@@ -226,12 +233,16 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
             for ex in picks:
                 parts.append(pfx + ex["prompt"] + SCORING_SUFFIX + ex["answer_idx"] + '"\n\n')
             prefixes.append("".join(parts))
-        return prefixes, excluded_mcqids
+        return prefixes, excluded_mcqids, _fewshot_turns(picks)
 
     parts = []
     for ex in picks:
         parts.append(ex["prompt"] + SCORING_SUFFIX + ex["answer_idx"] + '"\n\n')
-    return "".join(parts), excluded_mcqids
+    return "".join(parts), excluded_mcqids, _fewshot_turns(picks)
+
+
+def _fewshot_turns(picks) -> list[tuple[str, str]]:
+    return [(ex["prompt"], ex["answer_idx"]) for ex in picks]
 
 
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
@@ -256,7 +267,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             fewshot_turns = [(q, lbl) for q, lbl in NEUTRAL_SHOTS_BLEND]
         print("Neutral few-shot: 4 culturally-agnostic examples (A/B/C/D each once), full eval set")
     elif few_shot > 0:
-        prefix, excluded_mcqids = build_fewshot_prefix(ds, few_shot, multi_prompt=multi_prompt)
+        prefix, excluded_mcqids, turns = build_fewshot_prefix(
+            ds, few_shot, multi_prompt=multi_prompt)
+        if instruct:
+            fewshot_turns = turns
         excluded_mcqids |= holdout_excluded
         print(f"Few-shot: {few_shot} examples from holdout pool, {len(excluded_mcqids)} total excluded")
     else:

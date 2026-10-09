@@ -239,7 +239,9 @@ def build_neutral_fewshot_prefix(multi_prompt_word: bool = False) -> str | list[
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False,
-                         multi_prompt_word: bool = False) -> tuple[str | list[str], set[int]]:
+                         multi_prompt_word: bool = False
+                         ) -> tuple[str | list[str], set[int],
+                                    list[tuple[str, str]]]:
     """Build a 1-yes + 1-no few-shot prefix from held-out countries.
 
     Examples are drawn exclusively from HOLDOUT_COUNTRIES — one country per IW
@@ -247,9 +249,14 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
     leakage: no held-out country appears in the eval set, and no eval country
     appears in the few-shot context.
 
-    Returns (prefix_string, excluded_indices). excluded_indices contains ALL
-    examples from holdout countries (not just the 2 sampled shots), so they
-    are never evaluated on.
+    Returns (prefix_string, excluded_indices, chat_turns). excluded_indices
+    contains ALL examples from holdout countries (not just the 2 sampled shots),
+    so they are never evaluated on.
+
+    chat_turns carries the same shots as (user_text, assistant_text) pairs for
+    instruct models, which take the chat path and never see prefix_string. It is
+    not optional: returning only the string silently dropped the exemplars on
+    every chat-templated checkpoint, making --few-shot N identical to 0-shot.
     """
     import random
     rng = random.Random(seed)
@@ -291,7 +298,13 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                 parts.append(tmpl.format(country=country(ex), scenario=scenario_text(ex))
                              + f" {lbl}\n\n")
             prefixes.append("".join(parts))
-        return prefixes, excluded
+        turns = [
+            (YN_WORD_PROMPTS[0].format(country=country(ds[idx]),
+                                       scenario=scenario_text(ds[idx])),
+             gold_label(ds[idx]))
+            for idx in picks
+        ]
+        return prefixes, excluded, turns
 
     if yn_only:
         template = YN_PROMPT_TEMPLATE
@@ -307,7 +320,12 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
         answer = MC_LABEL_MAP[lbl] if mc_format else lbl
         parts.append(template.format(country=country(ex), scenario=scenario_text(ex)) + f" {answer}\n\n")
 
-    return "".join(parts), excluded
+    turns = [
+        (template.format(country=country(ds[idx]), scenario=scenario_text(ds[idx])),
+         MC_LABEL_MAP[gold_label(ds[idx])] if mc_format else gold_label(ds[idx]))
+        for idx in picks
+    ]
+    return "".join(parts), excluded, turns
 
 
 NULL_PROMPT = (
@@ -490,10 +508,12 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         excluded = set()  # no dataset examples used; evaluate all countries
         print("Neutral few-shot: 2 culturally-agnostic examples (1 yes + 1 no), full eval set")
     elif few_shot > 0:
-        prefix, excluded = build_fewshot_prefix(
+        prefix, excluded, turns = build_fewshot_prefix(
             ds, few_shot, mc_format=mc_format, yn_only=yn_only,
             multi_prompt_word=multi_prompt_word,
         )
+        if instruct:
+            fewshot_turns = turns
         excluded |= holdout_excluded
         print(f"Few-shot: 1 yes + 1 no from holdout pool, {len(excluded)} total excluded from eval")
     else:
