@@ -42,6 +42,11 @@ EXTRA=()
 [[ -n "${MLP_PROP:-}" ]] && EXTRA+=(--mlp-proportion "$MLP_PROP")
 [[ -n "${ATTN_PROP:-}" ]] && EXTRA+=(--attn-proportion "$ATTN_PROP")
 [[ -n "${CRC_PROP:-}" ]] && EXTRA+=(--countryrc-proportion "$CRC_PROP")
+# BY_COUNTRY=1 groups by individual country rather than IW cluster, so the
+# grouping is measured rather than assumed. NormAd has 68 countries against 8
+# clusters, so the per-neuron group vector is 8.5x wider: budget ~12G at 8b and
+# ~32G at gemma4, well above the 24G default here.
+[[ "${BY_COUNTRY:-0}" == "1" ]] && EXTRA+=(--by-country)
 
 echo "[clust_sel] condition=$COND model=$MODEL dataset=$DS"
 python culnig/decide_cluster_neurons.py \

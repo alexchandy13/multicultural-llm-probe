@@ -79,6 +79,13 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
+def _slug(group: str) -> str:
+    """Filename-safe group token. Country keys carry spaces ("South Korea") and the
+    NormAd ones carry underscores and non-ASCII ("türkiye"), so normalise rather
+    than writing a path with a space in it."""
+    return group.replace(" ", "_")
+
+
 def _module_of(key: str) -> str:
     return "_".join(key.split("_")[:-2])
 
@@ -104,8 +111,21 @@ def main():
     parser.add_argument("--yn-only", action="store_true",
                         help="Read normad_yn_max_scores.json instead of "
                              "normad_max_scores.json. Output gains a _yn suffix.")
-    parser.add_argument("--clusters", nargs="+", default=CLUSTERS, choices=CLUSTERS,
-                        help="Clusters to write selections for. Default: all 8.")
+    parser.add_argument("--clusters", nargs="+", default=None,
+                        help="Groups to write selections for. Default: all. With "
+                             "--by-country these are country keys, otherwise IW "
+                             "cluster names.")
+    parser.add_argument(
+        "--by-country", action="store_true",
+        help="Group by individual country instead of IW cluster, so no taxonomy is "
+             "imposed. The overlap matrix then has one row per country and the "
+             "grouping can be read off it rather than assumed — which is the only "
+             "way to ask whether the model's neuron sharing recovers the "
+             "Inglehart-Welzel map or some other structure (language, script, "
+             "training-data volume). With the z filter this is exactly upstream's "
+             "decide_culture_specific_neuron.py. Output files are named "
+             "country_* instead of cluster_*.",
+    )
     parser.add_argument("--min-countries", type=int, default=2,
                         help="Skip a cluster represented by fewer than this many "
                              "countries in the data. A 1-country cluster is a "
@@ -158,10 +178,38 @@ def main():
     dataset_names = sorted(args.dataset_names)
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     cond_dir = NEURONS_ROOT / f"{args.condition}{size_sfx}"
-    gi = cluster_index()
-    ng = len(CLUSTERS)
+    # Grouping is decided once here; everything downstream works off `groups`,
+    # `gi` and `group_of`, so the two modes share one code path.
+    first = (f"{dataset_names[0]}_yn"
+             if (args.yn_only and dataset_names[0] == "normad") else dataset_names[0])
+    seen_countries = _peek_countries(cond_dir / f"{first}_max_scores.json")
 
-    logger.info(f"Cluster-specific selection: condition={args.condition} "
+    if args.by_country:
+        groups = sorted(seen_countries)
+        gi = {g: i for i, g in enumerate(groups)}
+        group_of = lambda c: c if c in gi else None
+        members_of = lambda g: [g]
+        if args.min_countries > 1:
+            logger.info("--by-country: forcing --min-countries 1 "
+                        "(each group is one country by definition)")
+            args.min_countries = 1
+    else:
+        groups = list(CLUSTERS)
+        gi = cluster_index()
+        group_of = cluster_of
+        _bc, _ = report_coverage(seen_countries)
+        members_of = lambda g: _bc.get(g, [])
+
+    ng = len(groups)
+    if args.clusters is None:
+        args.clusters = list(groups)
+    unknown = [g for g in args.clusters if g not in gi]
+    if unknown:
+        raise SystemExit(f"--clusters: not in this grouping: {unknown}")
+
+    label = "Country" if args.by_country else "Cluster"
+    logger.info(f"{label} grouping: {ng} groups")
+    logger.info(f"{label}-specific selection: condition={args.condition} "
                 f"size={args.model_size} datasets={dataset_names}")
     logger.info(f"mlp={args.mlp_proportion} attn={args.attn_proportion} "
                 f"countryrc={args.countryrc_proportion} "
@@ -179,20 +227,28 @@ def main():
         score_path = cond_dir / f"{score_name}_max_scores.json"
         ctrl_path = cond_dir / f"{dataset_name}control_max_scores.json"
 
-        # The country->cluster map has to be built from the countries actually in
-        # the file, so stream the dataset file first with an empty map purely to
-        # collect them? No — group_index is keyed by country name and unknown
-        # countries are skipped, so a map over every known name works directly.
+        # group_index is keyed by the country names as the file spells them;
+        # anything group_of cannot place is skipped, and reported rather than
+        # silently shrinking a group's mean.
+        file_countries = _peek_countries(score_path)
         group_index = {}
-        for c, cl in ((c, cluster_of(c)) for c in _peek_countries(score_path)):
-            if cl is not None:
-                group_index[c] = gi[cl]
-
-        by_cluster, unresolved = report_coverage(_peek_countries(score_path))
+        unresolved = []
+        for c in file_countries:
+            g = group_of(c)
+            if g is None:
+                unresolved.append(c)
+            else:
+                group_index[c] = gi[g]
         if unresolved:
             logger.warning(f"  {score_name}: unresolved countries dropped: {unresolved}")
-        for cl, cs in by_cluster.items():
-            n_countries[gi[cl]] = max(n_countries[gi[cl]], len(cs))
+
+        by_cluster = {g: [] for g in groups}
+        for c in file_countries:
+            g = group_of(c)
+            if g is not None:
+                by_cluster[g].append(c)
+        for g, cs in by_cluster.items():
+            n_countries[gi[g]] = max(n_countries[gi[g]], len(cs))
 
         logger.info(f"Reading {score_name}")
         k_ds, m_ds, _ = _load_matrix(score_path, group_index, ng, logger)
@@ -223,19 +279,30 @@ def main():
 
     # countryrc, restricted per cluster, same normalization
     crc_path = cond_dir / "countryrc_max_scores.json"
+    crc_countries = _peek_countries(crc_path)
     crc_group = {}
-    for c in _peek_countries(crc_path):
-        cl = cluster_of(c)
-        if cl is not None:
-            crc_group[c] = gi[cl]
-    crc_by_cluster, crc_unresolved = report_coverage(_peek_countries(crc_path))
+    crc_by_cluster = {g: [] for g in groups}
+    crc_unresolved = []
+    for c in crc_countries:
+        g = group_of(c)
+        if g is None:
+            crc_unresolved.append(c)
+        else:
+            crc_group[c] = gi[g]
+            crc_by_cluster[g].append(c)
     if crc_unresolved:
-        logger.warning(f"  countryrc: unresolved countries dropped: {crc_unresolved}")
+        logger.info(f"  countryrc: {len(crc_unresolved)} countries not in this "
+                    f"grouping, ignored for the exclusion")
+    missing = [g for g in groups if not crc_by_cluster[g]]
+    if missing:
+        logger.warning(f"  countryrc has no countries for {len(missing)} group(s): "
+                       f"{missing[:8]}{' ...' if len(missing) > 8 else ''} — their "
+                       f"surface-form exclusion will be empty")
     logger.info("Reading countryrc")
     k_rc, m_rc, _ = _load_matrix(crc_path, crc_group, ng, logger)
     for dname, ids in dataset_ids_of(crc_path).items():
         dataset_ids[dname].extend(ids)
-    crc_n = np.array([max(len(crc_by_cluster[c]), 1) for c in CLUSTERS], dtype=float)
+    crc_n = np.array([max(len(crc_by_cluster[c]), 1) for c in groups], dtype=float)
     crc = _align(m_rc, k_rc, keys, kidx, np) / crc_n
 
     # Restrict to scored modules once; upstream ranks them in a single pool.
@@ -254,7 +321,7 @@ def main():
     # it does have data for. BLEnD has no ProtestantEurope countries at all.
     populated = n_countries > 0
     logger.info(f"Populated clusters ({int(populated.sum())}/{ng}): "
-                f"{[c for c in CLUSTERS if populated[gi[c]]]}")
+                f"{[c for c in groups if populated[gi[c]]][:12]}")
     sub = delta[:, populated]
     mu = sub.mean(axis=1, keepdims=True)
     sd = sub.std(axis=1, keepdims=True)
@@ -324,13 +391,14 @@ def main():
                 "neuron_idx": int(parts[-1]),
                 "attribute_score": float(delta[i, g]),
                 "zscore": float(z[i, g]),
-                "scores": {c: float(delta[i, gi[c]]) for c in CLUSTERS},
+                "scores": {c: float(delta[i, gi[c]]) for c in eligible},
             })
             module_count["_".join(parts[:-2])] += 1
 
-        out_path = cond_dir / f"{cl}_neurons_{out_suffix}_max.json"
+        out_path = cond_dir / f"{_slug(cl)}_neurons_{out_suffix}_max.json"
         out_path.write_text(json.dumps({
             "condition": args.condition,
+            "grouping": "country" if args.by_country else "cluster",
             "cluster": cl,
             "countries": sorted(by_cluster.get(cl, [])),
             "dataset_ids": {k: v for k, v in dataset_ids.items()},
@@ -435,9 +503,11 @@ def _write_membership(cond_dir, out_suffix, args, eligible, candidates, keys,
             "zscores": {cl: float(z[i, gi[cl]]) for cl in eligible},
         })
 
-    out = cond_dir / f"cluster_membership_{out_suffix}_max.json"
+    kind = "country" if args.by_country else "cluster"
+    out = cond_dir / f"{kind}_membership_{out_suffix}_max.json"
     out.write_text(json.dumps({
         "condition": args.condition,
+        "grouping": kind,
         "clusters": eligible,
         "countries": {cl: sorted(by_cluster.get(cl, [])) for cl in eligible},
         "params": {
@@ -445,7 +515,7 @@ def _write_membership(cond_dir, out_suffix, args, eligible, candidates, keys,
             "pool_size": int(len(idx_pool)),
             "mlp_proportion": args.mlp_proportion,
             "attn_proportion": args.attn_proportion,
-            "note": "membership is pre-z-score; the per-cluster *_neurons_*.json "
+            "note": "membership is pre-z-score; the per-group *_neurons_*.json "
                     "files are post-z and so are near-disjoint by construction",
         },
         "n_selected": {cl: len(candidates[cl]) for cl in eligible},
