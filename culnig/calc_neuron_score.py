@@ -456,6 +456,7 @@ def write_shard_partial(raw_scores, total_probs, dataset_ids, out_path: Path, lo
 
 def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
         target_data: str = "neuron",
+        target_countries: list[str] | None = None,
         model_size: str = "3b", precision: str = "matched_bf16",
         shard: tuple[int, int] | None = None,
         force_countryrc: bool = False):
@@ -470,10 +471,28 @@ def run(condition_name: str, dataset_names: list[str], out_root: Path, logger,
     size_sfx = "" if model_size == "3b" else f"_{model_size}"
     out_dir = out_root / f"{condition_name}{size_sfx}"
 
-    # Main dataset(s)
+    # Main dataset(s).
+    #
+    # countryrc is the one dataset upstream's loader refuses without an explicit
+    # country list (it renders one item per country, so there is no default), and
+    # passing None here is why it could only ever run through the separate
+    # second pass below — which --shard skips. Supplying the list routes it
+    # through this path instead, so it shards like any other dataset.
+    #
+    # The list is the full 81 (upstream's 8 TARGET_COUNTRIES plus
+    # ALL_EXTRA_COUNTRIES), not upstream's 8, because a selection run reads one
+    # countryrc file and needs every country the benchmark uses. Writing the 8
+    # here would leave extend_countryrc.py to add the other 73 serially, which is
+    # the ~3h step sharding is meant to avoid.
+    tc = target_countries
+    if tc is None and "countryrc" in dataset_names:
+        from culnig.countryrc_countries import ALL_EXTRA_COUNTRIES
+        tc = list(upstream_score.TARGET_COUNTRIES) + list(ALL_EXTRA_COUNTRIES)
+        logger.info(f"countryrc on the main pass: {len(tc)} target countries")
+
     dataloader = upstream_score.load_dataset_neuron_scores(
         dataset_names, tokenizer, batch_size=BATCH_SIZE,
-        target_countries=None, target_data=target_data,
+        target_countries=tc, target_data=target_data,
     )
 
     if shard is not None:
@@ -579,9 +598,17 @@ def parse_args():
     parser.add_argument("--condition", required=True,
                         choices=["base", "dpo", "sft", "sftdpo",
                                  "sft_aya_cult", "sft_aya_nocult",
-                                 "sftdpo_aya_cult", "sftdpo_aya_nocult"])
+                                 "sftdpo_aya_cult", "sftdpo_aya_nocult",
+                                 "tulu3_sft", "tulu3_dpo"])
     parser.add_argument("--dataset-names", nargs="+", required=True,
-                        help="e.g. `normad` or `normadcontrol` (single name per run).")
+                        help="e.g. `normad` or `normadcontrol` (single name per run). "
+                             "`countryrc` is accepted here too, which runs it on the "
+                             "shardable main path instead of the unshardable second "
+                             "pass; it then writes countryrc_max_scores.json via "
+                             "merge_shards.py --dataset countryrc.")
+    parser.add_argument("--target-countries", nargs="+", default=None,
+                        help="Explicit country list. Only countryrc needs one, and it "
+                             "defaults to all 81 when omitted.")
     parser.add_argument("--yn-only", action="store_true",
                         help="Replace 'normad' with 'normad_yn': filters neutral-gold "
                              "examples and holdout countries, uses a binary yes/no prompt. "
@@ -649,6 +676,7 @@ def main():
         args.condition, dataset_names, Path(args.out_root), logger,
         model_size=args.model_size, precision=args.precision,
         target_data=args.target_data, shard=_parse_shard(args.shard),
+        target_countries=args.target_countries,
         force_countryrc=args.force_countryrc,
     )
 

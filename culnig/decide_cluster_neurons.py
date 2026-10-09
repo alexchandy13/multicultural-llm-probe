@@ -109,7 +109,8 @@ def main():
     parser.add_argument("--condition", required=True,
                         choices=["base", "dpo", "sft", "sftdpo",
                                  "sft_aya_cult", "sft_aya_nocult",
-                                 "sftdpo_aya_cult", "sftdpo_aya_nocult"])
+                                 "sftdpo_aya_cult", "sftdpo_aya_nocult",
+                                 "tulu3_sft", "tulu3_dpo"])
     parser.add_argument("--dataset-names", nargs="+", default=["normad"])
     parser.add_argument("--model-size", default="3b",
                         choices=["3b", "8b", "gemma4", "qwen35"])

@@ -36,26 +36,7 @@ from culnig.calc_neuron_score import (
 
 NEURONS_ROOT = PROJECT_ROOT / "outputs" / "neurons"
 
-# All countries from normad (75 countries) and blend not in the original 8
-# TARGET_COUNTRIES (China, Indonesia, Iran, Mexico, South Korea, Spain, UK, USA).
-# Display names are inserted directly into CountryRC travel templates.
-ALL_EXTRA_COUNTRIES = [
-    # normad countries not in original 8
-    "Afghanistan", "Argentina", "Australia", "Austria", "Bangladesh",
-    "Bosnia and Herzegovina", "Brazil", "Cambodia", "Canada", "Chile",
-    "Colombia", "Croatia", "Cyprus", "Egypt", "Ethiopia", "Fiji", "France",
-    "Germany", "Greece", "Hong Kong", "Hungary", "India", "Iraq", "Ireland",
-    "Israel", "Italy", "Japan", "Kenya", "Laos", "Lebanon", "Malaysia",
-    "Malta", "Mauritius", "Myanmar", "Nepal", "Netherlands", "New Zealand",
-    "North Macedonia", "Pakistan", "Palestinian Territories",
-    "Papua New Guinea", "Peru", "Philippines", "Poland", "Portugal",
-    "Romania", "Russia", "Samoa", "Saudi Arabia", "Serbia", "Singapore",
-    "Somalia", "South Africa", "South Sudan", "Sri Lanka", "Sudan", "Sweden",
-    "Syria", "Taiwan", "Thailand", "Timor-Leste", "Tonga", "Türkiye",
-    "Ukraine", "Venezuela", "Vietnam", "Zimbabwe",
-    # blend-only (not in normad)
-    "Algeria", "Assam", "Nigeria", "North Korea", "West Java", "Azerbaijan",
-]
+from culnig.countryrc_countries import ALL_EXTRA_COUNTRIES  # noqa: F401
 
 
 def setup_logging():
