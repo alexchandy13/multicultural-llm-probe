@@ -128,6 +128,81 @@ def neuron_sums(path: str | Path) -> dict[str, float]:
     return sums
 
 
+def neuron_group_sums(path: str | Path, group_index: dict[str, int],
+                      n_groups: int) -> tuple[list[str], "array", set[str]]:
+    """Stream a score file into per-group sums instead of one total per neuron.
+
+    group_index maps a country key to a group slot (e.g. an IW cluster index);
+    countries absent from it are skipped. Returns (keys, flat, seen) where flat is
+    a stdlib array('d') of len(keys) * n_groups laid out row-major, so
+    flat[i * n_groups + g] is neuron keys[i] summed over group g.
+
+    neuron_sums collapses all countries into one float, which is all the
+    culture-general selection needs. Cluster selection needs the country
+    dimension, but keeping the full nested dict live is the 34 GB path this module
+    exists to avoid. A flat array of doubles holds gemma4's 2.95M neurons x 8
+    clusters in ~189 MB, and array() keeps this module import-cheap.
+
+    `seen` carries every country key encountered, mapped or not, so a caller can
+    report what it dropped rather than silently shrinking a cluster.
+    """
+    from array import array
+
+    resolved = resolve_scores_path(path)
+    if resolved is None:
+        raise FileNotFoundError(path)
+
+    keys: list[str] = []
+    flat = array("d")
+    seen: set[str] = set()
+    row = [0.0] * n_groups
+    cur: str | None = None
+    carry = ""
+    started = False
+    done = False
+
+    with _open_text(resolved) as fh:
+        while not done:
+            chunk = fh.read(_CHUNK)
+            at_eof = not chunk
+            buf = carry + chunk
+            last = 0
+            for m in _TOKEN.finditer(buf):
+                if m.end() >= len(buf) and not at_eof:
+                    break
+                if not at_eof and buf[m.end()] not in _AFTER:
+                    break
+                key, val = m.group(1), m.group(2)
+                last = m.end()
+                if val == "{":
+                    if key == "neuron_scores":
+                        started = True
+                        continue
+                    if not started:
+                        continue
+                    if not _NEURON_KEY.match(key):
+                        done = True
+                        break
+                    if cur is not None:
+                        keys.append(cur)
+                        flat.extend(row)
+                    cur = key
+                    row = [0.0] * n_groups
+                elif cur is not None:
+                    seen.add(key)
+                    g = group_index.get(key)
+                    if g is not None:
+                        row[g] += float(val)
+            if at_eof:
+                break
+            carry = buf[last:]
+
+    if cur is not None:
+        keys.append(cur)
+        flat.extend(row)
+    return keys, flat, seen
+
+
 def dataset_ids(path: str | Path) -> dict[str, list]:
     """Return just the dataset_ids mapping, by brace-matching that one object."""
     resolved = resolve_scores_path(path)
