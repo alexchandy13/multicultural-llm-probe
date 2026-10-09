@@ -39,11 +39,26 @@ read -ra SIZES <<< "${SIZES:-olmo3 olmo3_sft olmo3_dpo}"
 SIZE=${SIZES[$SLURM_ARRAY_TASK_ID]}
 echo "[olmo3_zs] model_size=$SIZE"
 
-echo "--- normad (0-shot, yn) ---"
-python evaluate/eval_normad.py --condition base --model-size "$SIZE" --yn-only --us-probe
+# Each step is guarded so a scavenger preemption + requeue resumes rather than
+# redoing the finished benchmarks. blend is the long one (23k examples), so
+# without this a late preemption throws away normad and culturalbench too.
+B=outputs/behavioral
 
-echo "--- culturalbench (0-shot) ---"
-python evaluate/eval_culturalbench.py --condition base --model-size "$SIZE" --no-fewshot --us-probe
+run_step () {  # run_step <label> <out-file> <script> [args...]
+    local label=$1 out=$2; shift 2
+    if [[ -f "$out" ]]; then
+        echo "--- $label: $out exists, skipping ---"
+        return 0
+    fi
+    echo "--- $label ---"
+    python "$@"
+}
 
-echo "--- blend (0-shot) ---"
-python evaluate/eval_blend.py --condition base --model-size "$SIZE" --us-probe
+run_step "normad (0-shot, yn)" "$B/normad_base_${SIZE}_yn_usprobe.json" \
+    evaluate/eval_normad.py --condition base --model-size "$SIZE" --yn-only --us-probe
+
+run_step "culturalbench (0-shot)" "$B/culturalbench_base_${SIZE}_usprobe.json" \
+    evaluate/eval_culturalbench.py --condition base --model-size "$SIZE" --no-fewshot --us-probe
+
+run_step "blend (0-shot)" "$B/blend_base_${SIZE}_usprobe.json" \
+    evaluate/eval_blend.py --condition base --model-size "$SIZE" --us-probe
