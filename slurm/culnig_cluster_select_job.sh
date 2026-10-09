@@ -37,6 +37,11 @@ COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 EXTRA=()
 [[ "${YN:-0}" == "1" ]] && EXTRA+=(--yn-only)
 [[ -n "${MIN_SPREAD:-}" ]] && EXTRA+=(--min-spread "$MIN_SPREAD")
+# Defaults match the culture-general selection: 5% of MLP, 1% of attention, 1%
+# countryrc from each pool. Override only to test sensitivity.
+[[ -n "${MLP_PROP:-}" ]] && EXTRA+=(--mlp-proportion "$MLP_PROP")
+[[ -n "${ATTN_PROP:-}" ]] && EXTRA+=(--attn-proportion "$ATTN_PROP")
+[[ -n "${CRC_PROP:-}" ]] && EXTRA+=(--countryrc-proportion "$CRC_PROP")
 
 echo "[clust_sel] condition=$COND model=$MODEL dataset=$DS"
 python culnig/decide_cluster_neurons.py \
