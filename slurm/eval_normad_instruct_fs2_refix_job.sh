@@ -68,6 +68,10 @@ if [[ -f "$OUT" && ! -f "$OUT.prefixbug.bak" ]]; then
 fi
 
 echo "[nm_ifix] size=$SIZE shots=$SHOTS -> $OUT"
+# ${EXTRA[@]+...} guards the expansion: under `set -u`, bash before 4.4 treats
+# "${EXTRA[@]}" on an empty array as an unbound variable and aborts. Only the
+# 8b_instruct task has an empty EXTRA, which is why it died in 29s while the
+# others got far enough to load weights.
 python evaluate/eval_normad.py \
     --condition base --model-size "$SIZE" \
-    --few-shot "$SHOTS" "${EXTRA[@]}"
+    --few-shot "$SHOTS" ${EXTRA[@]+"${EXTRA[@]}"}

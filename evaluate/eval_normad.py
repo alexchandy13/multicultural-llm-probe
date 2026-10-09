@@ -473,7 +473,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
                  multi_prompt_word: bool = False, neutral_fewshot: bool = False,
-                 probe_country: str | None = None):
+                 probe_country: str | None = None, raw_prompt: bool = False):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -496,7 +496,15 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     holdout_excluded = {i for i, ex in enumerate(ds) if country(ex) in HOLDOUT_COUNTRIES}
     print(f"Holdout countries excluded from eval: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
-    instruct = is_instruct(model_size)
+    # raw_prompt forces an instruct checkpoint down the plain-text path, so its
+    # prompt is byte-identical to a base model's. Without it, base-vs-instruct
+    # comparisons confound two changes at once: the weights differ AND the prompt
+    # goes from one flat string to a sequence of chat turns. It also flips
+    # leading_space back to True, since the flat prompt ends in "Answer:" where
+    # the next token is space-prefixed.
+    instruct = is_instruct(model_size) and not raw_prompt
+    if raw_prompt and is_instruct(model_size):
+        print("Raw prompt: chat template bypassed, scoring as a base model")
     # For instruct models, few-shot examples are passed as chat turns rather than
     # prepended as raw strings. fewshot_turns is only used when instruct=True.
     fewshot_turns: list[tuple[str, str]] | None = None
@@ -745,6 +753,14 @@ def main():
              "exclusion — all countries are evaluated. Mutually exclusive with "
              "--few-shot. Output gains a _nfs suffix.",
     )
+    parser.add_argument(
+        "--raw-prompt", action="store_true",
+        help="Bypass the chat template on an instruct checkpoint and score it as a "
+             "base model, so its prompt is byte-identical to a base model's. Use it "
+             "to separate the two things a base-vs-instruct gap confounds: changed "
+             "weights vs changed prompt format. No effect on non-instruct sizes. "
+             "Output gains a _raw suffix.",
+    )
     args = parser.parse_args()
 
     if args.generate and (args.calibrate or args.mc_format):
@@ -769,9 +785,10 @@ def main():
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
+    raw_sfx = "_raw" if args.raw_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -788,6 +805,7 @@ def main():
         multi_prompt_word=args.multi_prompt_word,
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
+        raw_prompt=args.raw_prompt,
     )
 
 
