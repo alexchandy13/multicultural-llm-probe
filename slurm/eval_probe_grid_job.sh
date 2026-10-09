@@ -31,6 +31,7 @@
 #   BENCH=normad        MODEL=8b     sbatch --array=0-4 slurm/eval_probe_grid_job.sh
 #   BENCH=blend         MODEL=gemma4 sbatch --array=0-4 --gres=gpu:rtxa6000:1 slurm/eval_probe_grid_job.sh
 #   BENCH=culturalbench MODEL=8b CONDS="tulu3_sft tulu3_dpo" sbatch --array=0-1 slurm/eval_probe_grid_job.sh
+#   BENCH=blend SAMPLE_FRAC=0.13 MODEL=8b sbatch --array=0-6 slurm/eval_probe_grid_job.sh
 
 set -euo pipefail
 source ./env.sh
@@ -67,10 +68,24 @@ if [[ ! -f "$BASE" ]]; then
     exit 1
 fi
 
-echo "[probe_grid] bench=$BENCH model=$MODEL condition=$COND countries=${COUNTRIES[*]}"
+# SAMPLE_FRAC scores only a deterministic fraction of examples. Worth setting for
+# BLEnD and nothing else: it has 23,032 examples per country against NormAd's
+# 1,697, so at the observed ~8-10 it/s a full country takes ~37 min and a
+# 5-country task ~3h. SAMPLE_FRAC=0.13 is ~2,860 examples, which carries ~0.9
+# points of standard error on the agreement rate — well under the 5-10 point
+# differences being compared — and cuts a country to ~5 min.
+#
+# The subset comes from hashing the example id, so it is the same across
+# countries, conditions and model sizes. Unsampled examples keep us_pred=None,
+# which consumers already skip, and the fraction is recorded in the output as
+# probe_sample_frac so a sampled file is never mistaken for a full one.
+EXTRA=()
+[[ -n "${SAMPLE_FRAC:-}" ]] && EXTRA+=(--sample-frac "$SAMPLE_FRAC")
+
+echo "[probe_grid] bench=$BENCH model=$MODEL condition=$COND countries=${COUNTRIES[*]} sample_frac=${SAMPLE_FRAC:-1.0}"
 python evaluate/add_probe.py \
     --base "$BASE" \
     --probe-country "${COUNTRIES[@]}" \
     --condition "$COND" \
     --model-size "$MODEL" \
-    --skip-existing
+    --skip-existing ${EXTRA[@]+"${EXTRA[@]}"}

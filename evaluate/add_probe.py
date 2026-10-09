@@ -26,6 +26,30 @@ from pathlib import Path
 
 from tqdm import tqdm
 
+
+def _in_sample(key, frac: float) -> bool:
+    """Deterministic per-example membership in a subsample of size `frac`.
+
+    Hashing the example id rather than slicing a shuffled list keeps the subset
+    identical across probe countries, conditions and model sizes, which is what
+    makes the agreement rates comparable. It needs no global state, so a resumed
+    task picks the same examples.
+
+    BLEnD is 23,032 examples per country against NormAd's 1,697, so a full probe
+    runs ~37 min per country at the observed ~10 it/s and a 7-country grid is
+    ~4h per condition. The probe metric is an agreement rate; at n=3000 its
+    standard error is ~0.9 points, well below the 5-10 point differences being
+    compared, so sampling is ~8x faster at negligible cost to precision.
+
+    Unsampled examples keep us_pred=None, which every consumer already skips —
+    the same path taken when the probe country is the example's own country.
+    """
+    import hashlib
+    if frac >= 1.0:
+        return True
+    h = hashlib.md5(str(key).encode()).hexdigest()[:8]
+    return int(h, 16) / 0x100000000 < frac
+
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -85,7 +109,8 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
 
 
 def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
-                    instruct: bool, data_path: Path) -> list[dict]:
+                    instruct: bool, data_path: Path,
+                    sample_frac: float = 1.0) -> list[dict]:
     from evaluate.eval_blend import (
         NEUTRAL_SHOTS_BLEND, build_neutral_fewshot_prefix, load_blend,
         score_choices, us_probe_prompt, SCORING_SUFFIX,
@@ -102,7 +127,7 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
         c = ex["country"]
 
         us_pred = None
-        if c != probe:
+        if c != probe and _in_sample(ex.get("MCQID", ex.get("mcqid")), sample_frac):
             prompt = ex["prompt"]
             probe_prompt = us_probe_prompt(prompt, c, probe=probe)
             if instruct:
@@ -231,6 +256,17 @@ def main():
                         help="Dataset path. Default: data/normad or data/BLEnD based on base filename.")
     parser.add_argument("--out", default=None)
     parser.add_argument("--precision", default="matched_bf16")
+    parser.add_argument(
+        "--sample-frac", type=float, default=1.0, metavar="F",
+        help="Score only a deterministic fraction F of examples (BLEnD only). "
+             "1.0 scores everything. BLEnD's 23k examples per country make a full "
+             "7-country grid ~4h per condition; F=0.13 (~3000 examples) cuts that "
+             "to ~30min with ~0.9 points of standard error on the agreement rate. "
+             "The subset is chosen by hashing the example id, so it is identical "
+             "across countries and conditions. Unsampled examples keep "
+             "us_pred=None and are skipped by consumers. The chosen fraction is "
+             "recorded as probe_sample_frac in the output.",
+    )
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip countries whose output file is already present, so a "
                              "preempted and requeued job resumes instead of redoing work.")
@@ -287,7 +323,9 @@ def main():
     for probe, out_path in todo:
         print(f"--- probe={probe} -> {out_path.name}", flush=True)
         if benchmark == "blend":
-            new_predictions = run_blend_probe(base_data, probe, model, tokenizer, instruct, data_path)
+            new_predictions = run_blend_probe(base_data, probe, model, tokenizer,
+                                              instruct, data_path,
+                                              sample_frac=args.sample_frac)
         elif benchmark == "culturalbench_normy":
             new_predictions = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
         elif benchmark == "culturalbench":
@@ -298,6 +336,12 @@ def main():
         out_data = dict(base_data)
         out_data["predictions"] = new_predictions
         out_data["probe_country"] = probe
+        # Recorded so a sampled file is never mistaken for a full one: with
+        # --sample-frac < 1 most us_pred are None by design, and a consumer that
+        # did not skip them would read that as disagreement.
+        out_data["probe_sample_frac"] = args.sample_frac
+        out_data["probe_n_scored"] = sum(
+            1 for x in new_predictions if x.get("us_pred") is not None)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(out_data, indent=2))
