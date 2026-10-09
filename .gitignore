@@ -18,6 +18,12 @@ slurm/*.out
 slurm/*.err
 *.log
 
+# Cluster job logs pulled down wholesale before the Oct 2026 maintenance window.
+# 2,410 files / 334 MB of stdout+stderr, kept locally as the only record of what
+# ran (countries resolved, countryrc drop rates, rank-1 percentages, timings)
+# since the cluster copies are not guaranteed to survive. Never committed.
+slurm_cluster_logs/
+
 # Python
 __pycache__/
 *.pyc
