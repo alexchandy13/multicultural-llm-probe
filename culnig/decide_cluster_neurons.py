@@ -139,6 +139,22 @@ def main():
                              "z-score is driven by that one country. Default 2.")
     parser.add_argument("--zscore-threshold", type=float, default=ZSCORE_THRESHOLD)
     parser.add_argument(
+        "--residualize", action="store_true",
+        help="Project out the leading rank-1 component before ranking. The "
+             "attribution takes a MAX over token positions and multiplies by the "
+             "gold-label probability, so for most neurons the score is driven by a "
+             "shared template token scaled by a per-example confidence factor. The "
+             "result is that the per-group score vectors are near-multiples of one "
+             "shared pattern: on base_8b normad a rank-1 model explains 98.8% of the "
+             "variance, which forces mean pairwise Jaccard to 0.92 and Spearman to "
+             "0.84 no matter what the groups are. It also makes upstream's z-score "
+             "degenerate, since under score[n][g] = k_g * v[n] the z-score reduces to "
+             "(k_g - mean k)/std k with no dependence on the neuron at all. "
+             "Removing that component leaves the ~1.2% that carries group identity; "
+             "on base_8b it drops Jaccard to 0.10 and Spearman to -0.07. "
+             "Output files gain a _resid suffix so they never overwrite the raw run.",
+    )
+    parser.add_argument(
         "--skip-membership", action="store_true",
         help="Do not write cluster_membership_*.json. That file is the pre-z-score "
              "view — which clusters each neuron is a culture neuron for, plus "
@@ -311,6 +327,29 @@ def main():
     crc_n = np.array([max(len(crc_by_cluster[c]), 1) for c in groups], dtype=float)
     crc = _align(m_rc, k_rc, keys, kidx, np) / crc_n
 
+    if args.residualize:
+        # Rank-1 via the small Gram matrix rather than an SVD of the full matrix:
+        # delta is (n_neurons x n_groups) and n_neurons reaches 2.95M on gemma4, so
+        # an economy SVD would allocate another U of that size. G is n_groups square.
+        def strip_rank1(X, label):
+            G = X.T @ X
+            w, V = np.linalg.eigh(G)
+            v1 = V[:, -1]                       # leading right singular vector
+            coef = X @ v1                       # per-neuron loading
+            before = float((X ** 2).sum())
+            X = X - np.outer(coef, v1)
+            after = float((X ** 2).sum())
+            logger.info(f"  {label}: removed rank-1 component "
+                        f"({100 * (1 - after / before):.2f}% of squared magnitude); "
+                        f"group weights {np.round(v1, 3).tolist()[:8]}")
+            return X
+
+        logger.info("Residualizing (--residualize)")
+        delta = strip_rank1(delta, "delta")
+        # countryrc gets the same treatment, so the exclusion ranks surface-form
+        # neurons by their group-specific component too rather than by overall scale.
+        crc = strip_rank1(crc, "countryrc")
+
     # Restrict to scored modules once; upstream ranks them in a single pool.
     # Two pools, quotaed separately, exactly as the culture-general selection does.
     mods = [_module_of(k) for k in keys]
@@ -334,7 +373,8 @@ def main():
     with np.errstate(divide="ignore", invalid="ignore"):
         z = np.where(sd > 0, (delta - mu) / sd, 0.0)
 
-    out_suffix = "".join(dataset_names) + ("_yn" if args.yn_only else "")
+    out_suffix = ("".join(dataset_names) + ("_yn" if args.yn_only else "")
+                  + ("_resid" if args.residualize else ""))
     n_mlp = int(len(mlp_pool) * args.mlp_proportion)
     n_attn = int(len(attn_pool) * args.attn_proportion)
     n_crc_mlp = int(len(mlp_pool) * args.countryrc_proportion)

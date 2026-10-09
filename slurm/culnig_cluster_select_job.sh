@@ -47,6 +47,10 @@ EXTRA=()
 # clusters, so the per-neuron group vector is 8.5x wider: budget ~12G at 8b and
 # ~32G at gemma4, well above the 24G default here.
 [[ "${BY_COUNTRY:-0}" == "1" ]] && EXTRA+=(--by-country)
+# RESID=1 projects out the shared rank-1 component, which otherwise accounts for
+# 98.8% of the variance and makes every group look like every other. Writes
+# *_resid_* files, so it never overwrites a raw run.
+[[ "${RESID:-0}" == "1" ]] && EXTRA+=(--residualize)
 
 echo "[clust_sel] condition=$COND model=$MODEL dataset=$DS"
 python culnig/decide_cluster_neurons.py \
