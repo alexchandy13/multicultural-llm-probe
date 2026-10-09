@@ -83,7 +83,12 @@ def _slug(group: str) -> str:
     """Filename-safe group token. Country keys carry spaces ("South Korea") and the
     NormAd ones carry underscores and non-ASCII ("türkiye"), so normalise rather
     than writing a path with a space in it."""
-    return group.replace(" ", "_")
+    safe = group.replace(" ", "_")
+    # Belt and braces: a country name that still carries something path-hostile
+    # must not reach the filesystem. Türkiye already round-trips via
+    # unescape_key, but a stray separator would otherwise raise OSError 22
+    # only after the whole run has finished computing.
+    return "".join(ch if (ch.isalnum() or ch in "_-.") else "_" for ch in safe)
 
 
 def _module_of(key: str) -> str:
@@ -559,7 +564,7 @@ def _align(mat, mat_keys, keys, kidx, np):
 def _peek_countries(path) -> list[str]:
     """Country keys of the first neuron, which every neuron shares."""
     import re
-    from culnig.score_io import _open_text, resolve_scores_path
+    from culnig.score_io import _open_text, resolve_scores_path, unescape_key
     resolved = resolve_scores_path(path)
     if resolved is None:
         raise FileNotFoundError(path)
@@ -575,7 +580,8 @@ def _peek_countries(path) -> list[str]:
                 continue
             m = re.search(r'"[A-Za-z_.]+_\d+_\d+"\s*:\s*\{([^{}]*)\}', buf[i:], re.S)
             if m:
-                return re.findall(r'"([^"]+)"\s*:', m.group(1))
+                return [unescape_key(c)
+                        for c in re.findall(r'"((?:[^"\\]|\\.)*)"\s*:', m.group(1))]
     raise ValueError(f"{path}: could not read per-country keys")
 
 

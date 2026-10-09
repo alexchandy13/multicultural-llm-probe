@@ -51,6 +51,26 @@ def read_scores(path: str | Path) -> dict:
     return json.loads(resolved.read_text())
 
 
+def unescape_key(key: str) -> str:
+    """Decode a JSON string escape sequence captured by the regex readers.
+
+    calc_neuron_score.py writes with json.dumps(..., indent=2), whose default
+    ensure_ascii=True stores non-ASCII country names escaped: NormAd's "türkiye"
+    lands in the file as the 12 literal characters t\\u00fcrkiye. The regex
+    readers below match raw text, so without this they hand callers that escaped
+    form — which then fails to match any country map and, if used in a path,
+    produces a filename containing a backslash (OSError 22).
+
+    Neuron keys never contain escapes, so the fast path is a plain substring test.
+    """
+    if "\\" not in key:
+        return key
+    try:
+        return json.loads(f'"{key}"')
+    except json.JSONDecodeError:
+        return key
+
+
 def _open_text(path: Path):
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8")
@@ -189,6 +209,7 @@ def neuron_group_sums(path: str | Path, group_index: dict[str, int],
                     cur = key
                     row = [0.0] * n_groups
                 elif cur is not None:
+                    key = unescape_key(key)
                     seen.add(key)
                     g = group_index.get(key)
                     if g is not None:
