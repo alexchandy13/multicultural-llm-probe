@@ -19,6 +19,7 @@ from tqdm import tqdm
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    NEUTRAL_CHAT_SYSTEM,
     is_instruct,
     load_model_for_eval,
     resolve_condition,
@@ -375,7 +376,8 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 def evaluate_one(condition_name: str, dataset: str, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  neutral_fewshot: bool = False, neutral_shots: int = 2,
-                 few_shot: int = 0):
+                 few_shot: int = 0,
+                 system_prompt: str | None = None):
     cfg = DATASET_CONFIGS[dataset]
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
@@ -429,7 +431,7 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
             continue  # skip examples with missing labels (e.g. GLUE test set)
 
         if instruct:
-            prompt = build_chat_prompt(tokenizer, format_prompt(dataset, ex), fewshot=fewshot_turns)
+            prompt = build_chat_prompt(tokenizer, format_prompt(dataset, ex), fewshot=fewshot_turns, system=system_prompt)
         else:
             prompt = prefix + format_prompt(dataset, ex)
         raw_scores = score_choices(model, tokenizer, prompt, choices, leading_space=not instruct)
@@ -493,7 +495,13 @@ def main():
              "instead of the hand-written neutral shots. Train and validation are "
              "disjoint so nothing is held out. Output gains a _fsN suffix.",
     )
+    parser.add_argument(
+        "--system-prompt", default=None, metavar="TEXT",
+        help="Explicit system message for chat-templated checkpoints. Without it\n             the template's own default is used, and Olmo-3-7B-Instruct-* defaults\n             to a function-calling system prompt the base model never sees, which\n             makes the comparison depend on an invisible variable. Pass 'neutral'\n             for 'You are a helpful assistant.'. No effect on non-instruct sizes.\n             Output gains a _sys suffix.",
+    )
     args = parser.parse_args()
+    if args.system_prompt == "neutral":
+        args.system_prompt = NEUTRAL_CHAT_SYSTEM
 
     if args.neutral_shots != 2:
         args.neutral_fewshot = True
@@ -508,10 +516,11 @@ def main():
     else:
         # _nfs stays bare at the historical 2 shots so old filenames keep matching
         nfs_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
+    sys_sfx = "_sys" if args.system_prompt else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"nlu_{args.dataset}_{args.condition}{size_sfx}{nfs_sfx}.json"
+        / f"nlu_{args.dataset}_{args.condition}{size_sfx}{nfs_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -522,6 +531,7 @@ def main():
         neutral_fewshot=args.neutral_fewshot,
         neutral_shots=args.neutral_shots,
         few_shot=args.few_shot,
+        system_prompt=args.system_prompt,
     )
 
 

@@ -317,17 +317,37 @@ def is_instruct(model_size: str) -> bool:
     return model_size in CHAT_TEMPLATED_SIZES
 
 
+# Passing no system message does not mean "no system prompt" — a chat template is
+# free to inject its own, and Olmo-3-7B-Instruct-* injects "You are a helpful
+# function-calling AI assistant. You do not currently have access to any
+# functions." That text then sits in front of every cultural-norms question for
+# the instruct checkpoints while the base model, which has no chat template, sees
+# nothing. Any base-vs-instruct gap measured that way is partly a gap between
+# "answer this question" and "you are a function-calling assistant with no
+# functions, answer this question".
+#
+# Passing an explicit system message suppresses the template's default. This is the
+# neutral stand-in: it occupies the system slot without adding task framing.
+NEUTRAL_CHAT_SYSTEM = "You are a helpful assistant."
+
+
 def build_chat_prompt(processor, user_content: str,
                       fewshot: list[tuple[str, str]] | None = None,
-                      generation_suffix: str = "") -> str:
+                      generation_suffix: str = "",
+                      system: str | None = None) -> str:
     """Wrap user_content in the processor's chat template.
 
     fewshot: list of (user_text, assistant_text) pairs prepended as prior turns.
     generation_suffix: appended after the model-turn opener (e.g. BLEnD scoring suffix).
+    system: explicit system message. None leaves the slot empty, which lets the
+        template insert whatever default it carries — see NEUTRAL_CHAT_SYSTEM above
+        for why that is rarely what you want on this model family.
     enable_thinking=False is always passed to suppress reasoning traces that would
     interpose tokens before the answer and break log-prob scoring.
     """
     messages = []
+    if system is not None:
+        messages.append({"role": "system", "content": system})
     for u, a in (fewshot or []):
         messages.append({"role": "user", "content": u})
         messages.append({"role": "assistant", "content": a})

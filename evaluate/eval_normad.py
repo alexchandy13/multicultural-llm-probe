@@ -22,6 +22,7 @@ from tqdm import tqdm
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    NEUTRAL_CHAT_SYSTEM,
     culture_group,
     is_instruct,
     load_model_for_eval,
@@ -375,6 +376,7 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
 @torch.no_grad()
 def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
+                   system_prompt: str | None = None,
                    mc_format: bool = False, yn_only: bool = False,
                    multi_prompt_word: bool = False,
                    instruct: bool = False,
@@ -385,7 +387,7 @@ def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
         priors_list = []
         for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
             if instruct:
-                null = build_chat_prompt(tokenizer, tmpl.format(country="N/A", scenario="N/A"), fewshot=fewshot_turns)
+                null = build_chat_prompt(tokenizer, tmpl.format(country="N/A", scenario="N/A"), fewshot=fewshot_turns, system=system_prompt)
             else:
                 null = pfx + tmpl.format(country="N/A", scenario="N/A")
             priors_list.append(score_choices(model, tokenizer, null, choices, priors=None, leading_space=leading_space))
@@ -397,7 +399,7 @@ def compute_priors(model, tokenizer, choices: list[str], prefix: str = "",
     else:
         null_tmpl = NULL_PROMPT
     if instruct:
-        null = build_chat_prompt(tokenizer, null_tmpl, fewshot=fewshot_turns)
+        null = build_chat_prompt(tokenizer, null_tmpl, fewshot=fewshot_turns, system=system_prompt)
     else:
         null = prefix + null_tmpl
     return score_choices(model, tokenizer, null, choices, priors=None, leading_space=leading_space)
@@ -473,7 +475,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
                  multi_prompt_word: bool = False, neutral_fewshot: bool = False,
-                 probe_country: str | None = None, raw_prompt: bool = False):
+                 probe_country: str | None = None, raw_prompt: bool = False,
+                 system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -529,6 +532,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         excluded = holdout_excluded
 
     priors = compute_priors(model, tokenizer, choices, prefix=prefix,
+                            system_prompt=system_prompt,
                             mc_format=mc_format, yn_only=yn_only,
                             multi_prompt_word=multi_prompt_word,
                             instruct=instruct, fewshot_turns=fewshot_turns) if calibrate else None
@@ -558,7 +562,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             cal_acc = [0.0, 0.0]   # calibrated sums (same as raw when priors=None)
             for j, (tmpl, pfx) in enumerate(zip(YN_WORD_PROMPTS, prefix)):
                 if instruct:
-                    p = build_chat_prompt(tokenizer, tmpl.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    p = build_chat_prompt(tokenizer, tmpl.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                 else:
                     p = pfx + tmpl.format(country=c, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, p, choices, leading_space=leading_space)
@@ -572,7 +576,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             raw_scores = raw_acc  # [yes_logprob_sum, no_logprob_sum] before calibration
         else:
             if instruct:
-                prompt = build_chat_prompt(tokenizer, template.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                prompt = build_chat_prompt(tokenizer, template.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
             else:
                 prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
             if generate:
@@ -606,7 +610,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_accumulated = [0.0, 0.0]
                 for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
                     if instruct:
-                        up = build_chat_prompt(tokenizer, tmpl.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                        up = build_chat_prompt(tokenizer, tmpl.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                     else:
                         up = pfx + tmpl.format(country=_probe, scenario=scenario_text(ex))
                     us_s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
@@ -616,7 +620,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_raw_scores = us_accumulated
             else:
                 if instruct:
-                    us_prompt = build_chat_prompt(tokenizer, template.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    us_prompt = build_chat_prompt(tokenizer, template.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                 else:
                     us_prompt = prefix + template.format(country=_probe, scenario=scenario_text(ex))
                 if generate:
@@ -761,7 +765,18 @@ def main():
              "weights vs changed prompt format. No effect on non-instruct sizes. "
              "Output gains a _raw suffix.",
     )
+    parser.add_argument(
+        "--system-prompt", default=None, metavar="TEXT",
+        help="Explicit system message for chat-templated checkpoints. Without it "
+             "the template's own default is used, and Olmo-3-7B-Instruct-* defaults "
+             "to a function-calling system prompt that the base model never sees — "
+             "so the default makes base-vs-instruct comparisons unfair. Pass "
+             "'neutral' for 'You are a helpful assistant.'. No effect on "
+             "non-instruct sizes. Output gains a _sys suffix.",
+    )
     args = parser.parse_args()
+    if args.system_prompt == "neutral":
+        args.system_prompt = NEUTRAL_CHAT_SYSTEM
 
     if args.generate and (args.calibrate or args.mc_format):
         import sys; sys.exit("--generate is incompatible with --calibrate and --mc-format")
@@ -786,9 +801,10 @@ def main():
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
     raw_sfx = "_raw" if args.raw_prompt else ""
+    sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -806,6 +822,7 @@ def main():
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
         raw_prompt=args.raw_prompt,
+        system_prompt=args.system_prompt,
     )
 
 

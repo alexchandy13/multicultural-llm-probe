@@ -20,6 +20,7 @@ from tqdm import tqdm
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    NEUTRAL_CHAT_SYSTEM,
     culture_group,
     is_instruct,
     load_model_for_eval,
@@ -161,10 +162,10 @@ def build_fewshot_prefix(rows: list[dict], n_shots: int, seed: int = 42):
 
 
 def build_prompt(prefix: str, reformatted: str, instruct: bool,
-                 tokenizer, fewshot_turns) -> str:
+                 tokenizer, fewshot_turns, system_prompt: str | None = None) -> str:
     full_q = reformatted + PROMPT_SUFFIX
     if instruct:
-        return build_chat_prompt(tokenizer, full_q, fewshot=fewshot_turns)
+        return build_chat_prompt(tokenizer, full_q, fewshot=fewshot_turns, system=system_prompt)
     return prefix + full_q
 
 
@@ -173,7 +174,8 @@ def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b", precision: str = "matched_bf16",
                  us_probe: bool = False, probe_country: str | None = None,
                  neutral_fewshot: bool = True, few_shot: int = 0,
-                 neutral_shots: int = 2):
+                 neutral_shots: int = 2,
+                 system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     instruct = is_instruct(model_size)
@@ -216,7 +218,8 @@ def evaluate_one(condition_name: str, out_path: Path,
         gold     = "yes" if row["answer"] else "no"
         group    = culture_group(country)
 
-        prompt = build_prompt(prefix, reformatted, instruct, tokenizer, fewshot_turns)
+        prompt = build_prompt(prefix, reformatted, instruct, tokenizer, fewshot_turns,
+                              system_prompt=system_prompt)
         scores = score_choices(model, tokenizer, prompt, CHOICES, leading_space=leading_space)
         pred   = CHOICES[0] if scores[0] > scores[1] else CHOICES[1]
 
@@ -231,7 +234,8 @@ def evaluate_one(condition_name: str, out_path: Path,
         us_pred = us_raw_scores = None
         if _probe and country != _probe:
             probe_q = make_probe_prompt(reformatted, country, _probe)
-            probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns)
+            probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns,
+                                        system_prompt=system_prompt)
             us_scores = score_choices(model, tokenizer, probe_prompt, CHOICES, leading_space=leading_space)
             us_pred = CHOICES[0] if us_scores[0] > us_scores[1] else CHOICES[1]
             us_raw_scores = list(us_scores)
@@ -299,7 +303,13 @@ def main():
     parser.add_argument("--us-probe", action="store_true")
     parser.add_argument("--probe-country", default=None)
     parser.add_argument("--out-path", default=None)
+    parser.add_argument(
+        "--system-prompt", default=None, metavar="TEXT",
+        help="Explicit system message for chat-templated checkpoints. Without it\n             the template's own default is used, and Olmo-3-7B-Instruct-* defaults\n             to a function-calling system prompt the base model never sees, which\n             makes the comparison depend on an invisible variable. Pass 'neutral'\n             for 'You are a helpful assistant.'. No effect on non-instruct sizes.\n             Output gains a _sys suffix.",
+    )
     args = parser.parse_args()
+    if args.system_prompt == "neutral":
+        args.system_prompt = NEUTRAL_CHAT_SYSTEM
 
     size_sfx = f"_{args.model_size}" if args.model_size != "8b" else "_8b"
     if args.probe_country:
@@ -317,9 +327,10 @@ def main():
     else:
         # _nfs stays bare at the historical 2 shots so old filenames keep matching
         shot_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
+    sys_sfx = "_sys" if args.system_prompt else ""
 
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{probe_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{probe_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -330,6 +341,7 @@ def main():
         neutral_fewshot=not args.no_fewshot,
         few_shot=args.few_shot,
         neutral_shots=args.neutral_shots,
+        system_prompt=args.system_prompt,
     )
 
 

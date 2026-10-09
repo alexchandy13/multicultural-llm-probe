@@ -28,6 +28,7 @@ from tqdm import tqdm
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    NEUTRAL_CHAT_SYSTEM,
     culture_group,
     is_instruct,
     load_model_for_eval,
@@ -249,7 +250,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False,
                  neutral_fewshot: bool = False, probe_country: str | None = None,
-                 shuffle_options: bool = False):
+                 shuffle_options: bool = False,
+                 system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
@@ -296,7 +298,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             accumulated = [0.0, 0.0, 0.0, 0.0]
             for pfx_str, pfx_tmpl in zip(prefix, BLEND_MP_PREFIXES):
                 if instruct:
-                    p = build_chat_prompt(tokenizer, pfx_tmpl + prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                    p = build_chat_prompt(tokenizer, pfx_tmpl + prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX, system=system_prompt)
                 else:
                     p = pfx_str + pfx_tmpl + prompt + SCORING_SUFFIX
                 s = score_choices(model, tokenizer, p)
@@ -306,7 +308,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             raw_scores = list(accumulated)
         else:
             if instruct:
-                p = build_chat_prompt(tokenizer, prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                p = build_chat_prompt(tokenizer, prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX, system=system_prompt)
             else:
                 p = prefix + prompt + SCORING_SUFFIX
             raw_scores = score_choices(model, tokenizer, p)
@@ -328,7 +330,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_acc = [0.0, 0.0, 0.0, 0.0]
                 for pfx_str, pfx_tmpl in zip(prefix, BLEND_MP_PREFIXES):
                     if instruct:
-                        up = build_chat_prompt(tokenizer, pfx_tmpl + us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                        up = build_chat_prompt(tokenizer, pfx_tmpl + us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX, system=system_prompt)
                     else:
                         up = pfx_str + pfx_tmpl + us_prompt + SCORING_SUFFIX
                     us_s = score_choices(model, tokenizer, up)
@@ -337,7 +339,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_pred = CHOICES[max(range(4), key=us_acc.__getitem__)]
             else:
                 if instruct:
-                    up = build_chat_prompt(tokenizer, us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                    up = build_chat_prompt(tokenizer, us_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX, system=system_prompt)
                 else:
                     up = prefix + us_prompt + SCORING_SUFFIX
                 us_scores = score_choices(model, tokenizer, up)
@@ -431,7 +433,13 @@ def main():
              "exclusion — all 16 countries are evaluated. Mutually exclusive with "
              "--few-shot. Output gains a _nfs suffix.",
     )
+    parser.add_argument(
+        "--system-prompt", default=None, metavar="TEXT",
+        help="Explicit system message for chat-templated checkpoints. Without it\n             the template's own default is used, and Olmo-3-7B-Instruct-* defaults\n             to a function-calling system prompt the base model never sees, which\n             makes the comparison depend on an invisible variable. Pass 'neutral'\n             for 'You are a helpful assistant.'. No effect on non-instruct sizes.\n             Output gains a _sys suffix.",
+    )
     args = parser.parse_args()
+    if args.system_prompt == "neutral":
+        args.system_prompt = NEUTRAL_CHAT_SYSTEM
 
     if args.neutral_fewshot and args.few_shot > 0:
         import sys; sys.exit("--neutral-fewshot and --few-shot are mutually exclusive")
@@ -448,10 +456,11 @@ def main():
         usprobe_sfx = "_usprobe"
     else:
         usprobe_sfx = ""
+    sys_sfx = "_sys" if args.system_prompt else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{usprobe_sfx}.json"
+        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{usprobe_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -465,6 +474,7 @@ def main():
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
         shuffle_options=args.shuffle_options,
+        system_prompt=args.system_prompt,
     )
 
 
