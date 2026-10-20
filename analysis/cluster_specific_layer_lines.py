@@ -85,8 +85,17 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-size", default="8b",
                     choices=["3b", "8b", "gemma4", "qwen35"])
-    ap.add_argument("--dataset", default="normad")
-    ap.add_argument("--yn-only", action="store_true", default=True)
+    ap.add_argument("--dataset", default="normad",
+                    choices=["normad", "blend", "culturalbench"])
+    ap.add_argument("--residualized", action="store_true",
+                    help="Read the *_resid_* membership files, i.e. the selections "
+                         "made after projecting out the shared rank-1 component. "
+                         "Those are the ones carrying cluster-specific signal; the "
+                         "raw files are dominated by a single shared pattern "
+                         "(91-99%% of variance depending on benchmark).")
+    ap.add_argument("--subdir", default=None,
+                    help="Write into a subdirectory of the figures dir, so the 12 "
+                         "size x dataset x version combinations stay separable.")
     ap.add_argument("--conditions", nargs="+", default=CONDITIONS)
     ap.add_argument("--normalize", action="store_true",
                     help="Plot each cluster's share of its own total instead of raw "
@@ -101,9 +110,14 @@ def main():
     args = ap.parse_args()
 
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
-    suffix = args.dataset + ("_yn" if args.yn_only else "")
+    # _yn is a NormAd-only distinction (the binary variant); blend and
+    # culturalbench have no such suffix. _resid marks the residualized run.
+    suffix = (args.dataset
+              + ("_yn" if args.dataset == "normad" else "")
+              + ("_resid" if args.residualized else ""))
 
-    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+    out_dir = FIGURES_DIR / args.subdir if args.subdir else FIGURES_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
     wrote = []
     for cond in args.conditions:
         cond_dir = NEURONS_ROOT / f"{cond}{size_sfx}"
@@ -138,7 +152,7 @@ def main():
 
         ztag = "" if args.zscore_threshold == 0.5 else f"_z{args.zscore_threshold:g}"
         tag = ztag + ("_norm" if args.normalize else "") + ("_log" if args.log_y else "")
-        out = FIGURES_DIR / f"line_cluster_specific_count_{cond}{size_sfx}_{suffix}{tag}.pdf"
+        out = out_dir / f"line_cluster_specific_count_{cond}{size_sfx}_{suffix}{tag}.pdf"
         fig.savefig(out, bbox_inches="tight")
         plt.close(fig)
         wrote.append(out)
@@ -146,7 +160,7 @@ def main():
               f"{len(counts)} clusters, {sum(sum(v.values()) for v in counts.values())} neurons "
               f"-> {out.name}")
 
-    print(f"\n{len(wrote)} figure(s) in {FIGURES_DIR}")
+    print(f"  -> {len(wrote)} figure(s) in {out_dir}")
 
 
 if __name__ == "__main__":

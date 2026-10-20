@@ -69,12 +69,21 @@ for k in sorted(set(R)-set(L)): print("REMOTE ONLY:", k)
 print(f"\n{len(both)-len(bad)}/{len(set(L)|set(R))} verified identical, {len(bad)} mismatched")
 print("SAFE TO DELETE" if both and not bad and not (set(L)-set(R)) else "DO NOT DELETE")
 PY
+    # Stamp the pattern into the verdict so `delete` cannot act on
+    # another pattern's verdict -- the likely mistake when several
+    # batches are archived one after another.
+    echo "VERDICT FOR PATTERN: $PATTERN"
     ;;
 
   delete)
     grep -q "SAFE TO DELETE" "$SUMS.verdict" 2>/dev/null || {
         echo "refusing: run compare first and save its output to $SUMS.verdict" >&2
         echo "  bash scripts/archive_scores_to_cluster.sh compare '$PATTERN' | tee $SUMS.verdict" >&2
+        exit 1; }
+    grep -qxF "VERDICT FOR PATTERN: $PATTERN" "$SUMS.verdict" || {
+        echo "refusing: $SUMS.verdict is not the verdict for '$PATTERN'." >&2
+        grep "VERDICT FOR PATTERN:" "$SUMS.verdict" >&2 || true
+        echo "re-run verify and compare for this pattern before deleting." >&2
         exit 1; }
     echo "[delete] removing local copies of $PATTERN"
     find "$LDIR" -name "$PATTERN" -print -delete
