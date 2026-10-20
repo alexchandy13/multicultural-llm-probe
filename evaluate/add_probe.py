@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 from pathlib import Path
 
@@ -344,7 +345,14 @@ def main():
             1 for x in new_predictions if x.get("us_pred") is not None)
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(out_data, indent=2))
+        # Write to a sibling temp file and rename, so a preempted or killed task
+        # cannot leave a truncated JSON at out_path. write_text() truncates
+        # first, which on a requeued scavenger job would destroy the previous
+        # result before writing the new one. os.replace is atomic within a
+        # filesystem, so out_path is always either the old file or the new one.
+        tmp_path = out_path.with_name(out_path.name + f".tmp{os.getpid()}")
+        tmp_path.write_text(json.dumps(out_data, indent=2))
+        os.replace(tmp_path, out_path)
         print(f"Wrote {out_path}  ({len(new_predictions)} predictions)", flush=True)
 
 
