@@ -7,7 +7,7 @@
 #SBATCH --time=1:30:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-9
+#SBATCH --array=0-3
 #SBATCH --output=slurm/eval_normad_nc_g4.%A_%a.out
 #SBATCH --error=slurm/eval_normad_nc_g4.%A_%a.err
 
@@ -30,6 +30,9 @@
 # The few-shot shots are stripped to match the item, so the demonstrated
 # format and the scored format are the same.
 #
+# Scoped to the two SFT+DPO conditions (cultural and generic); base and SFT
+# are not run. 2 conditions x 2 modes = 4 tasks per model.
+#
 # 1,818 examples, one forward pass each (fs2_yn is single-template), so ~2 min
 # on 8b and ~4 on Gemma. Gemma-4-12B is ~24 GB in bf16, too tight for one
 # A5000, so its tasks request two cards.
@@ -41,7 +44,7 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-CONDS=(base sft_aya_cult sft_aya_nocult sftdpo_aya_cult sftdpo_aya_nocult)
+CONDS=(sftdpo_aya_cult sftdpo_aya_nocult)
 MODES=(coherent drop)
 
 N_MODES=${#MODES[@]}
