@@ -11,13 +11,18 @@ it nothing produce the same answers, and a high US-default rate is evidence
 that the model ignores the country -- not that it is anchored on the US. A low
 value means the US token does something specific.
 
-Needs the country-ablation runs from slurm/eval_normad_nocountry_job.sh:
-  normad_{cond}_{size}_nfs_mpw_nocountry_batch_calibrated.json
+Reads the _fs2_yn setting. Needs the country-ablation runs from
+slurm/eval_normad_nocountry_job.sh:
+  normad_{cond}_{size}_fs2_yn_nocountry.json      (coherent mode)
+  normad_{cond}_{size}_fs2_yn_nocountrydrop.json  (drop mode)
 alongside the existing
-  normad_{cond}_{size}_nfs_mpw_usprobe_batch_calibrated.json
+  normad_{cond}_{size}_fs2_yn_usprobe.json
+
+Both runs exclude the same holdout countries, so the 1,697 rows pair by index;
+the loader checks that and refuses if they differ.
 
     python analysis/nocountry_agreement.py
-    python analysis/nocountry_agreement.py --group Non-Western
+    python analysis/nocountry_agreement.py --mode drop --group Non-Western
 """
 from __future__ import annotations
 
@@ -43,9 +48,11 @@ def ci(p: float, n: int) -> float:
     return 1.96 * sqrt(max(p * (1 - p), 0) / n) if n else 0.0
 
 
-def rates(cond: str, size: str, group: str | None, errors_only: bool):
-    us = load(f"normad_{cond}_{size}_nfs_mpw_usprobe_batch_calibrated.json")
-    nc = load(f"normad_{cond}_{size}_nfs_mpw_nocountry_batch_calibrated.json")
+def rates(cond: str, size: str, group: str | None, errors_only: bool,
+          mode: str = "coherent"):
+    sfx = "_nocountry" if mode == "coherent" else "_nocountrydrop"
+    us = load(f"normad_{cond}_{size}_fs2_yn_usprobe.json")
+    nc = load(f"normad_{cond}_{size}_fs2_yn{sfx}.json")
     if us is None or nc is None:
         return None
     if len(us) != len(nc):
@@ -71,6 +78,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", default=None,
                     help="Restrict to one group field value, e.g. Non-Western.")
+    ap.add_argument("--mode", default="coherent", choices=["coherent", "drop"],
+                    help="Which country-ablation variant to compare against.")
     ap.add_argument("--errors-only", action="store_true",
                     help="Condition on the model's errors, as the US-default "
                          "rate does.")
@@ -78,14 +87,14 @@ def main() -> None:
 
     scope = (f"group={args.group}" if args.group else "all non-US") + \
             (", errors only" if args.errors_only else ", all examples")
-    print(f"NormAd _nfs_mpw, batch-calibrated — {scope}\n")
+    print(f"NormAd _fs2_yn, no-country mode={args.mode} — {scope}\n")
     print(f"{'condition':22s} {'real vs US':>16s} {'real vs blank':>16s} "
           f"{'US vs blank':>16s} {'n':>6s}")
     missing = []
     for size in MODELS:
         print(f"--- {size}")
         for cond in CONDS:
-            r = rates(cond, size, args.group, args.errors_only)
+            r = rates(cond, size, args.group, args.errors_only, args.mode)
             if r is None:
                 missing.append(f"{cond}/{size}")
                 continue
