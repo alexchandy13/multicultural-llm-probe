@@ -74,12 +74,60 @@ def rates(cond: str, size: str, group: str | None, errors_only: bool,
     }
 
 
+REPS = {"us": "US (English)", "netherlands": "Netherlands (Protestant)",
+        "hungary": "Hungary (Catholic)",
+        "bosnia_and_herzegovina": "Bosnia (Orthodox)",
+        "mexico": "Mexico (Latin America)", "taiwan": "Taiwan (Confucian)",
+        "philippines": "Philippines (South Asia)",
+        "iran": "Iran (African-Islamic)"}
+
+
+def per_probe_country(cond: str, size: str, mode: str, group: str | None,
+                      errors_only: bool):
+    """{probe country: (P(probe_pred == blank_pred), n)}.
+
+    The point of comparing all eight: if the blank-country prediction agrees
+    with every probe country at about the same rate, the model is not anchored
+    on any of them -- it is ignoring the country field. A country that agrees
+    noticeably more is a genuine default.
+
+    Each probe file stores its swapped prediction in us_pred regardless of
+    which country was swapped in, and leaves it None for rows already from
+    that country, so those rows drop out per country and n varies slightly.
+    """
+    sfx = "_nocountry" if mode == "coherent" else "_nocountrydrop"
+    nc = load(f"normad_{cond}_{size}_fs2_yn{sfx}.json")
+    if nc is None:
+        return None
+    out = {}
+    for slug in REPS:
+        pb = load(f"normad_{cond}_{size}_fs2_yn_{slug}probe.json")
+        if pb is None:
+            continue
+        if len(pb) != len(nc):
+            raise ValueError(f"{cond}/{size}/{slug}: {len(pb)} probe rows vs "
+                             f"{len(nc)} nocountry rows, cannot pair")
+        pairs = [(a, b) for a, b in zip(pb, nc)
+                 if a.get("us_pred") is not None
+                 and (group is None or a.get("group") == group)]
+        if errors_only:
+            pairs = [(a, b) for a, b in pairs if a["pred"] != a["gold"]]
+        if pairs:
+            agree = sum(a["us_pred"] == b["pred"] for a, b in pairs)
+            out[slug] = (agree / len(pairs), len(pairs))
+    return out or None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", default=None,
                     help="Restrict to one group field value, e.g. Non-Western.")
     ap.add_argument("--mode", default="coherent", choices=["coherent", "drop"],
                     help="Which country-ablation variant to compare against.")
+    ap.add_argument("--per-probe-country", action="store_true",
+                    help="Instead of the three columns, show agreement between "
+                         "the blank-country prediction and EACH of the eight "
+                         "cluster-representative probe countries.")
     ap.add_argument("--errors-only", action="store_true",
                     help="Condition on the model's errors, as the US-default "
                          "rate does.")
@@ -88,6 +136,19 @@ def main() -> None:
     scope = (f"group={args.group}" if args.group else "all non-US") + \
             (", errors only" if args.errors_only else ", all examples")
     print(f"NormAd _fs2_yn, no-country mode={args.mode} — {scope}\n")
+    if args.per_probe_country:
+        for size in MODELS:
+            for cond in CONDS:
+                r = per_probe_country(cond, size, args.mode, args.group,
+                                      args.errors_only)
+                if r is None:
+                    continue
+                print(f"### {size} {cond}   "
+                      f"P(probe prediction == blank-country prediction)")
+                for slug, (v, n) in sorted(r.items(), key=lambda kv: -kv[1][0]):
+                    print(f"  {REPS[slug]:28s} {v:.3f} ± {ci(v, n):.3f}  n={n}")
+                print()
+        return
     print(f"{'condition':22s} {'real vs US':>16s} {'real vs blank':>16s} "
           f"{'US vs blank':>16s} {'n':>6s}")
     missing = []
