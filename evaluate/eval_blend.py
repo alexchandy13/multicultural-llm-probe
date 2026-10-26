@@ -151,6 +151,36 @@ def score_choices(model, tokenizer, prompt: str) -> list[float]:
     return scores
 
 
+_IN_COUNTRY = r"\s*\bin\s+(?:the\s+)?{c}\b"
+
+
+def strip_country(prompt: str, country: str) -> str:
+    """Remove the country from a BLEnD question, leaving a grammatical question.
+
+    BLEnD embeds the country in the question text rather than a separate field,
+    always as "in X" or "in the X" -- verified on all 2,400 sampled rows across
+    all 16 countries, so one pattern covers it and the result reads cleanly:
+
+        "What is a common snack for preschool kids in the UK?"
+        -> "What is a common snack for preschool kids?"
+
+    Unlike NormAd there is no dangling-reference variant to worry about: the
+    phrase removed is the only reference to the country.
+
+    Note what this does to the task. Each option is the correct answer for a
+    different country (see choice_countries), so with no country named the
+    question has no right answer and every option is true somewhere. The
+    model's pick is therefore a revealed default rather than right or wrong,
+    and should be read against choice_countries, not against gold.
+    """
+    for cand in (country, country.replace("_", " ")):
+        out = re.sub(_IN_COUNTRY.format(c=re.escape(cand)), "", prompt,
+                     count=1, flags=re.I)
+        if out != prompt:
+            return out
+    raise ValueError(f"no 'in {country}' phrase in prompt: {prompt[:80]!r}")
+
+
 def us_probe_prompt(prompt: str, country: str, probe: str = "US") -> str:
     """Replace country name in prompt with probe country for probe scoring."""
     replaced = prompt.replace(country, probe)
@@ -251,7 +281,15 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  few_shot: int = 0, us_probe: bool = False, multi_prompt: bool = False,
                  neutral_fewshot: bool = False, probe_country: str | None = None,
                  shuffle_options: bool = False,
+                 no_country: bool = False,
                  system_prompt: str | None = None):
+    if no_country and shuffle_options:
+        raise ValueError(
+            "--no-country with --shuffle-options would mis-attribute every "
+            "pick: permute_options reorders the option texts but "
+            "choice_countries stays keyed by the original letters, so "
+            "pred_country would name the wrong country. Run without shuffling."
+        )
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
@@ -290,6 +328,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         c = ex["country"]
         gold = ex["answer_idx"]
         prompt = ex["prompt"]
+        if no_country:
+            prompt = strip_country(prompt, c)
         if shuffle_options:
             prompt, gold = permute_options(prompt, gold, ex["MCQID"])
         group = culture_group(c)
@@ -345,11 +385,23 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_scores = score_choices(model, tokenizer, up)
                 us_pred = CHOICES[max(range(4), key=us_scores.__getitem__)]
 
-        predictions.append({
+        rec = {
             "country": c, "group": group, "gold": gold,
             "pred": pred, "us_pred": us_pred, "mcqid": ex["MCQID"],
             "scores": raw_scores,
-        })
+        }
+        if no_country:
+            # With no country named every option is correct for somebody, so
+            # the pick is a revealed default rather than right or wrong. Carry
+            # the letter -> country map so the answer can be attributed to a
+            # culture. choice_countries is keyed by the ORIGINAL letters, which
+            # is why --shuffle-options is refused alongside this flag.
+            cc = ex.get("choice_countries")
+            if isinstance(cc, str):
+                cc = json.loads(cc)
+            rec["choice_countries"] = cc
+            rec["pred_country"] = (cc or {}).get(pred)
+        predictions.append(rec)
 
     def acc(key):
         return correct[key] / total[key] if total[key] else None
@@ -416,6 +468,15 @@ def main():
         help="Randomly permute the four option texts per question (seeded by MCQID) and remap the gold letter. BLEnD ships options in a fixed order, so a model with a positional preference always collects the questions whose answer sits in its preferred slot. Output gains a _shuf suffix.",
     )
     parser.add_argument(
+        "--no-country", action="store_true",
+        help="Remove the 'in <country>' phrase from every question, leaving a "
+             "grammatical but country-free question. Each option is the correct "
+             "answer for a different country, so with none named the question "
+             "has no right answer and the pick is a revealed default -- read it "
+             "via the recorded pred_country, not against gold. Output gains a "
+             "_nocountry suffix.",
+    )
+    parser.add_argument(
         "--us-probe", action="store_true",
         help="For each non-US example, also score with country name replaced by 'US'. "
              "Records us_pred in each prediction entry. Output gains a _usprobe suffix.",
@@ -457,10 +518,11 @@ def main():
     else:
         usprobe_sfx = ""
     sys_sfx = "_sys" if args.system_prompt else ""
+    nc_sfx = "_nocountry" if args.no_country else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{usprobe_sfx}{sys_sfx}.json"
+        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{nc_sfx}{usprobe_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -474,6 +536,7 @@ def main():
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
         shuffle_options=args.shuffle_options,
+        no_country=args.no_country,
         system_prompt=args.system_prompt,
     )
 
