@@ -37,12 +37,15 @@ FIGURES = PROJECT_ROOT / "outputs" / "figures" / "cluster_accuracy_pipeline"
 # the Western-adjacent clusters, cool and green for the rest, matching
 # analysis/cluster_specific_layer_lines.py.
 CLUSTER_COLORS = {
-    "EnglishSpeaking":  "#b2182b",
+    # English-speaking (the US probe) takes blue, swapped with South Asia, so
+    # the reference country reads as the neutral/baseline line rather than the
+    # alarm-coloured one.
+    "EnglishSpeaking":  "#4393c3",
     "ProtestantEurope": "#ef8a62",
     "CatholicEurope":   "#f4a582",
     "Orthodox":         "#998ec3",
     "Confucian":        "#2166ac",
-    "SouthAsia":        "#4393c3",
+    "SouthAsia":        "#b2182b",
     "AfricanIslamic":   "#1b7837",
     "LatinAmerica":     "#762a83",
 }

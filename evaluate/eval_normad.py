@@ -207,6 +207,37 @@ NORMAD_COUNTRY_MAP = {
 }
 
 
+_COUNTRY_LINE = re.compile(r"^ *(?:C|c)ountry: *\{country\}\n", re.M)
+_IN_THIS_CULTURE = " in this culture"
+
+
+def strip_country_line(template: str, mode: str = "coherent") -> str:
+    """Remove the country from a prompt template.
+
+    mode="drop"      delete only the "Country: {country}" line. One change, but
+                     YN_PROMPT_TEMPLATE then asks "Is this action socially
+                     acceptable in this culture?" with no culture named.
+    mode="coherent"  also drop " in this culture", giving a well-formed
+                     country-free question.
+
+    "coherent" is the default because a dangling reference is not a neutral
+    control. culnig/dataset_ext.py documents the same mistake on CulturalBench:
+    blanking the country alone left "In , is it customary...", and because
+    gradients grow with uncertainty the malformed prompt inflated the control
+    until it outscored the real prompt at every layer. The cost is that two
+    things change at once, so run both modes and compare.
+
+    Applied to the few-shot template as well as the test item, so the shots
+    demonstrate the same country-free format the item uses.
+    """
+    out = _COUNTRY_LINE.sub("", template, count=1)
+    if out == template:
+        raise ValueError(f"no country line in template: {template[:70]!r}")
+    if mode == "coherent":
+        out = out.replace(_IN_THIS_CULTURE, "")
+    return out
+
+
 def load_normad(path: Path):
     if path.exists() and any(path.iterdir()):
         ds = load_from_disk(str(path))
@@ -240,7 +271,8 @@ def build_neutral_fewshot_prefix(multi_prompt_word: bool = False) -> str | list[
 def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False,
-                         multi_prompt_word: bool = False
+                         multi_prompt_word: bool = False,
+                         no_country: str | None = None
                          ) -> tuple[str | list[str], set[int],
                                     list[tuple[str, str]]]:
     """Build a 1-yes + 1-no few-shot prefix from held-out countries.
@@ -313,6 +345,8 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
         template = MC_PROMPT_TEMPLATE
     else:
         template = PROMPT_TEMPLATE
+    if no_country:
+        template = strip_country_line(template, no_country)
 
     parts = []
     for idx in picks:
@@ -475,6 +509,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
                  multi_prompt_word: bool = False, neutral_fewshot: bool = False,
+                 no_country: str | None = None,
                  probe_country: str | None = None, raw_prompt: bool = False,
                  system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
@@ -521,7 +556,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     elif few_shot > 0:
         prefix, excluded, turns = build_fewshot_prefix(
             ds, few_shot, mc_format=mc_format, yn_only=yn_only,
-            multi_prompt_word=multi_prompt_word,
+            multi_prompt_word=multi_prompt_word, no_country=no_country,
         )
         if instruct:
             fewshot_turns = turns
@@ -562,9 +597,11 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             cal_acc = [0.0, 0.0]   # calibrated sums (same as raw when priors=None)
             for j, (tmpl, pfx) in enumerate(zip(YN_WORD_PROMPTS, prefix)):
                 if instruct:
-                    p = build_chat_prompt(tokenizer, tmpl.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
+                    t = strip_country_line(tmpl, no_country) if no_country else tmpl
+                    p = build_chat_prompt(tokenizer, t.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                 else:
-                    p = pfx + tmpl.format(country=c, scenario=scenario_text(ex))
+                    t = strip_country_line(tmpl, no_country) if no_country else tmpl
+                    p = pfx + t.format(country=c, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, p, choices, leading_space=leading_space)
                 raw_acc[0] += s[0]
                 raw_acc[1] += s[1]
@@ -576,9 +613,11 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             raw_scores = raw_acc  # [yes_logprob_sum, no_logprob_sum] before calibration
         else:
             if instruct:
-                prompt = build_chat_prompt(tokenizer, template.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
+                _t = strip_country_line(template, no_country) if no_country else template
+                prompt = build_chat_prompt(tokenizer, _t.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
             else:
-                prompt = prefix + template.format(country=c, scenario=scenario_text(ex))
+                _t = strip_country_line(template, no_country) if no_country else template
+                prompt = prefix + _t.format(country=c, scenario=scenario_text(ex))
             if generate:
                 pred = generate_answer(model, tokenizer, prompt)
                 if pred == "unparseable":
@@ -724,6 +763,17 @@ def main():
              "Implies yn-only. Output gains a _mpw suffix.",
     )
     parser.add_argument(
+        "--no-country", nargs="?", const="coherent", default=None,
+        choices=["drop", "coherent"],
+        help="Remove the country from the prompt. 'coherent' (the default when "
+             "the flag is given bare) also drops ' in this culture' so the "
+             "question is well formed; 'drop' removes only the Country: line, "
+             "leaving a dangling reference. Comparing these predictions against "
+             "the US-swapped ones shows whether swapping in the US moves the "
+             "model anywhere a blank country does not. Output gains a "
+             "_nocountry or _nocountrydrop suffix.",
+    )
+    parser.add_argument(
         "--us-probe", action="store_true",
         help="For each non-US example, also score the same prompt with the country "
              "token replaced by 'United States'. Records us_pred alongside pred in "
@@ -790,6 +840,9 @@ def main():
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
     yn_sfx = "_yn" if args.yn_only else ""
     mp_sfx = "_mpw" if args.multi_prompt_word else ""
+    nc_sfx = ("" if not args.no_country
+              else "_nocountry" if args.no_country == "coherent"
+              else "_nocountrydrop")
     if args.probe_country:
         slug = args.probe_country.lower().replace(" ", "_")
         usprobe_sfx = f"_{slug}probe"
@@ -804,7 +857,7 @@ def main():
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}{sys_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{nc_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -819,6 +872,7 @@ def main():
         yn_only=args.yn_only,
         us_probe=args.us_probe,
         multi_prompt_word=args.multi_prompt_word,
+        no_country=args.no_country,
         neutral_fewshot=args.neutral_fewshot,
         probe_country=args.probe_country,
         raw_prompt=args.raw_prompt,

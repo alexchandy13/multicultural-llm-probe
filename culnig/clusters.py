@@ -98,3 +98,15 @@ def report_coverage(countries) -> tuple[dict[str, list[str]], list[str]]:
         else:
             by_cluster[cl].append(c)
     return by_cluster, unresolved
+
+
+# The "US-centric / Western" grouping used by the figure scripts. Defined here
+# so the bar charts, the pipeline lines and anything added later cannot drift
+# apart -- it was previously duplicated as a literal in
+# analysis/cluster_accuracy_bars.py and analysis/accuracy_deltas_bars.py.
+#
+# English-speaking plus Protestant Europe are the two IW clusters adjacent to
+# the US on the Inglehart-Welzel map. Catholic Europe is deliberately NOT
+# included: it sits further on the survival/self-expression axis, and including
+# it would make the grouping a proxy for "Europe" rather than "near the US".
+US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}

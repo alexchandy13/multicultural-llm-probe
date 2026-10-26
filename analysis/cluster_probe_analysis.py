@@ -52,24 +52,38 @@ CLUSTER_ORDER = [
     "SouthAsia", "AfricanIslamic",
 ]
 
-CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult", "sftdpo_aya_nocult"]
+# tulu3_* exist for 8b only (there is no Gemma Tulu-3 release), so a gemma4 run
+# simply finds no files for them and skips those rows.
+CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult",
+              "sftdpo_aya_nocult", "tulu3_sft", "tulu3_dpo"]
 
 
 def probe_slug(country: str) -> str:
     return country.lower().replace(" ", "_")
 
 
+# Shot/format suffix per benchmark. These are the variants whose probe grids are
+# complete, and they match the settings the rest of the analysis uses (see
+# BENCH_BY_SHOT in cluster_accuracy_pipeline.py): NormAd with 2 real in-context
+# examples and yes/no labels, CulturalBench with 4 gold-matched neutral shots,
+# BLEnD with the hardcoded neutral pair. The older _nfs_mpw (NormAd) and _nfs
+# (CulturalBench) probe runs cover only taiwan and iran, so reading those left
+# five of seven clusters blank.
+PROBE_SUFFIX = {
+    "normad":              "_fs2_yn",
+    "culturalbench":       "_nfs4",
+    "culturalbench_normy": "_nfs_mpw",
+    "blend":               "_nfs",
+}
+
+
 def load_probe_file(condition: str, model: str, country: str,
-                    benchmark: str = "normad") -> list[dict] | None:
+                    benchmark: str = "normad",
+                    suffix: str | None = None) -> list[dict] | None:
     slug = probe_slug(country)
-    if benchmark == "normad":
-        path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_{slug}probe.json"
-    elif benchmark == "culturalbench_normy":
-        path = BEHAVIORAL / f"culturalbench_normy_{condition}_{model}_nfs_mpw_{slug}probe.json"
-    elif benchmark == "culturalbench":
-        path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_{slug}probe.json"
-    else:
-        path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_{slug}probe.json"
+    sfx = suffix if suffix is not None else PROBE_SUFFIX[benchmark]
+    stem = "culturalbench_normy" if benchmark == "culturalbench_normy" else benchmark
+    path = BEHAVIORAL / f"{stem}_{condition}_{model}{sfx}_{slug}probe.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())["predictions"]
@@ -81,8 +95,22 @@ def accuracy(preds: list[dict]) -> float:
     return sum(1 for p in preds if p["pred"] == p["gold"]) / len(preds)
 
 
+# The probe country's own examples must be excluded -- they match their own
+# counterfactual by construction. A plain string compare misses that for the US,
+# which NormAd and BLEnD write as "US" but CulturalBench writes as
+# "United States", silently leaving 80 trivially-matching examples in the US
+# column. Canonicalise through an alias set instead.
+_US_ALIASES = {"us", "usa", "u.s.", "u.s.a.", "united_states", "america",
+               "united_states_of_america"}
+
+
+def _canon(c: str) -> str:
+    c = str(c).strip().lower().replace(" ", "_").replace("-", "_")
+    return "us" if c in _US_ALIASES else c
+
+
 def same_country(a: str, b: str) -> bool:
-    return a.lower().replace(" ", "_") == b.lower().replace(" ", "_")
+    return _canon(a) == _canon(b)
 
 
 def probe_accuracy(preds: list[dict], probe_country_name: str) -> float:
@@ -111,15 +139,13 @@ def default_rate_among_errors(preds: list[dict], probe_country_name: str) -> tup
 
 
 def load_us_probe_file(condition: str, model: str,
-                       benchmark: str = "normad") -> list[dict] | None:
-    if benchmark == "normad":
-        path = BEHAVIORAL / f"normad_{condition}_{model}_nfs_mpw_usprobe.json"
-    elif benchmark == "culturalbench_normy":
-        path = BEHAVIORAL / f"culturalbench_normy_{condition}_{model}_nfs_mpw_usprobe.json"
-    elif benchmark == "culturalbench":
-        path = BEHAVIORAL / f"culturalbench_{condition}_{model}_nfs_usprobe.json"
-    else:
-        path = BEHAVIORAL / f"blend_{condition}_{model}_nfs_usprobe.json"
+                       benchmark: str = "normad",
+                       suffix: str | None = None) -> list[dict] | None:
+    """Same suffix as load_probe_file -- ClustDR and USDR must come from the
+    same shot setting, or their difference mixes two prompt conditions."""
+    sfx = suffix if suffix is not None else PROBE_SUFFIX[benchmark]
+    stem = "culturalbench_normy" if benchmark == "culturalbench_normy" else benchmark
+    path = BEHAVIORAL / f"{stem}_{condition}_{model}{sfx}_usprobe.json"
     if not path.exists():
         return None
     return json.loads(path.read_text())["predictions"]

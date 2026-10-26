@@ -49,7 +49,7 @@ BEHAVIORAL_DIR = PROJECT_ROOT / "outputs" / "behavioral"
 IW_COORDS = PROJECT_ROOT / "data" / "iw_coordinates.csv"
 FIGURES_DIR = PROJECT_ROOT / "outputs" / "figures"
 
-US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
+from culnig.clusters import US_SIMILAR_CLUSTERS  # noqa: E402
 
 COND_LABELS = {
     "base":   "Base",

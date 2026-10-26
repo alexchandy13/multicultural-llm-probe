@@ -55,7 +55,7 @@ COND_LABELS = {
 # Definition of the binary US-similarity split. Edit to taste — e.g., add
 # CatholicEurope to the US-similar side, or restrict US-similar to just
 # EnglishSpeaking.
-US_SIMILAR_CLUSTERS = {"EnglishSpeaking", "ProtestantEurope"}
+from culnig.clusters import US_SIMILAR_CLUSTERS  # noqa: E402
 
 COLOR_US_SIMILAR = "#4477AA"   # blue
 COLOR_US_DISTANT = "#CC6677"   # warm red
