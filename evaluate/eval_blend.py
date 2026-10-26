@@ -151,34 +151,44 @@ def score_choices(model, tokenizer, prompt: str) -> list[float]:
     return scores
 
 
-_IN_COUNTRY = r"\s*\bin\s+(?:the\s+)?{c}\b"
+# How BLEnD names the country, counted over all 34,000 MCQ rows:
+#   in X / in the X      31,609   prepositional, deletable
+#   is the X's           715      possessive, deletable
+#   from X / from the X  41       prepositional, deletable
+#   has X / has the X    1,635    the country is the SUBJECT, not deletable
+# e.g. "What sports event has the UK won the most gold medals at the Olympics?"
+# Deleting the country there leaves "What sports event has won the most gold
+# medals", which is grammatical but means something else entirely. Those rows
+# keep their country and are flagged instead of being mangled or dropped --
+# dropping them would break index alignment with the *_usprobe.json files the
+# agreement analysis pairs against.
+_STRIP_PATTERNS = (
+    r"\s*\bin\s+(?:the\s+)?{c}\b",
+    r"\s*\bfrom\s+(?:the\s+)?{c}\b",
+    r"\s*(?:the\s+)?{c}'s\b",
+)
 
 
-def strip_country(prompt: str, country: str) -> str:
-    """Remove the country from a BLEnD question, leaving a grammatical question.
+def strip_country(prompt: str, country: str) -> tuple[str, bool]:
+    """Remove the country from a BLEnD question.
 
-    BLEnD embeds the country in the question text rather than a separate field,
-    always as "in X" or "in the X" -- verified on all 2,400 sampled rows across
-    all 16 countries, so one pattern covers it and the result reads cleanly:
+    Returns (prompt, applied). applied=False means no pattern matched and the
+    prompt is unchanged, which happens for the ~4.8% of rows where the country
+    is the grammatical subject.
 
-        "What is a common snack for preschool kids in the UK?"
-        -> "What is a common snack for preschool kids?"
-
-    Unlike NormAd there is no dangling-reference variant to worry about: the
-    phrase removed is the only reference to the country.
-
-    Note what this does to the task. Each option is the correct answer for a
-    different country (see choice_countries), so with no country named the
-    question has no right answer and every option is true somewhere. The
-    model's pick is therefore a revealed default rather than right or wrong,
-    and should be read against choice_countries, not against gold.
+    Note what this does to the task where it succeeds. Each option is the
+    correct answer for a different country (see choice_countries), so with no
+    country named the question has no right answer and every option is true
+    somewhere. The pick is a revealed default, to be read against
+    choice_countries rather than against gold.
     """
     for cand in (country, country.replace("_", " ")):
-        out = re.sub(_IN_COUNTRY.format(c=re.escape(cand)), "", prompt,
-                     count=1, flags=re.I)
-        if out != prompt:
-            return out
-    raise ValueError(f"no 'in {country}' phrase in prompt: {prompt[:80]!r}")
+        for rx in _STRIP_PATTERNS:
+            out = re.sub(rx.format(c=re.escape(cand)), "", prompt, count=1,
+                         flags=re.I)
+            if out != prompt:
+                return out, True
+    return prompt, False
 
 
 def us_probe_prompt(prompt: str, country: str, probe: str = "US") -> str:
@@ -328,8 +338,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         c = ex["country"]
         gold = ex["answer_idx"]
         prompt = ex["prompt"]
+        nc_applied = False
         if no_country:
-            prompt = strip_country(prompt, c)
+            prompt, nc_applied = strip_country(prompt, c)
         if shuffle_options:
             prompt, gold = permute_options(prompt, gold, ex["MCQID"])
         group = culture_group(c)
@@ -401,6 +412,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 cc = json.loads(cc)
             rec["choice_countries"] = cc
             rec["pred_country"] = (cc or {}).get(pred)
+            # False where the country is the sentence subject and could not be
+            # removed; the analysis must exclude these rows.
+            rec["nocountry_applied"] = nc_applied
         predictions.append(rec)
 
     def acc(key):

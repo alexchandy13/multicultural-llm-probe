@@ -50,7 +50,11 @@ def defaults(cond: str, size: str):
     picked, avail, n = Counter(), Counter(), 0
     for x in nc:
         cc = x.get("choice_countries") or {}
-        if not cc or x.get("pred_country") is None:
+        # nocountry_applied is False where the country is the sentence subject
+        # and could not be removed, so those rows still name a country and
+        # must not count toward a "no country given" default.
+        if not cc or x.get("pred_country") is None \
+                or x.get("nocountry_applied") is False:
             continue
         picked[x["pred_country"]] += 1
         # each option is one country's answer, so every row offers four
@@ -69,7 +73,8 @@ def agreement(cond: str, size: str):
         raise ValueError(f"{cond}/{size}: {len(us)} vs {len(nc)} rows, "
                          f"cannot pair by index")
     pairs = [(u, c) for u, c in zip(us, nc)
-             if u.get("us_pred") is not None and u.get("country") != "US"]
+             if u.get("us_pred") is not None and u.get("country") != "US"
+             and c.get("nocountry_applied") is not False]
     n = len(pairs)
     if not n:
         return None
