@@ -258,13 +258,18 @@ def main():
     }
     print(f"  says yes to the norm: {yes_rate:.3f}   n={n}")
 
+    # The _nocountry suffix marks a run that is ONLY the country-free question.
+    # With probe countries the country-free answer rides along inside each
+    # probe file as nc_pred, so the filenames stay as the probe grid expects
+    # and the own-country pass is not scored twice across two jobs.
     nc_sfx = ""
     if args.no_country:
         nc_yes = sum(r["nc_pred"] == "yes" for r in records) / n
         nc_agree = sum(r["nc_pred"] == r["pred"] for r in records) / n
         base["nc_yes_rate"] = nc_yes
         base["nc_agreement_with_own_country"] = nc_agree
-        nc_sfx = "_nocountry"
+        if not probes:
+            nc_sfx = "_nocountry"
         print(f"  no country: yes {nc_yes:.3f}, agrees with own country "
               f"{nc_agree:.3f}")
 

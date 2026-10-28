@@ -134,13 +134,19 @@ def nocountry_vs_countries(cond: str, size: str) -> None:
     "yes" is a defensible answer to all of them -- while the margins still rank
     the norms by how well each fits.
     """
-    ncp = BEHAVIORAL / f"normad_{cond}_{size}_rotknow_nocountry.json"
-    if not ncp.exists():
-        return
-    nc = json.load(ncp.open())["records"]
     found = [(s, l) for s, l in PROBES if know_path(cond, size, s).exists()]
     if not found:
         return
+    # nc_pred rides inside the probe files when one run did both; a
+    # country-free-only run writes it to its own file instead.
+    first = json.load(know_path(cond, size, found[0][0]).open())["records"]
+    if first and "nc_pred" in first[0]:
+        nc = None
+    else:
+        ncp = BEHAVIORAL / f"normad_{cond}_{size}_rotknow_nocountry.json"
+        if not ncp.exists():
+            return
+        nc = json.load(ncp.open())["records"]
 
     print(f"\n  No country vs each country  (n paired against each)")
     print(f"    {'country':32s} {'agree':>7s} {'margin r':>9s} {'yes%':>7s} {'n':>6s}")
