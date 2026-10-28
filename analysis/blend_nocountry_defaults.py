@@ -29,7 +29,9 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 
-CONDS = ["sftdpo_aya_cult", "sftdpo_aya_nocult"]
+# tulu3_dpo is 8b-only (no Gemma release), so its gemma4 cell is
+# reported as missing rather than silently dropped.
+CONDS = ["sftdpo_aya_cult", "sftdpo_aya_nocult", "tulu3_dpo"]
 MODELS = ["8b", "gemma4"]
 
 

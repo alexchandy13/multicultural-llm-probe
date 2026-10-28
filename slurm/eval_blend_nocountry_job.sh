@@ -7,7 +7,7 @@
 #SBATCH --time=2:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-1
+#SBATCH --array=0-2
 #SBATCH --output=slurm/eval_blend_nocountry.%A_%a.out
 #SBATCH --error=slurm/eval_blend_nocountry.%A_%a.err
 
@@ -40,7 +40,10 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-CONDS=(sftdpo_aya_cult sftdpo_aya_nocult)
+# tulu3_dpo added for parity: it already has the country-included _usprobe
+# files, but choice_countries -- the option-letter-to-country map both default
+# analyses need -- is only written by this country-ablation run.
+CONDS=(sftdpo_aya_cult sftdpo_aya_nocult tulu3_dpo)
 COND=${CONDS[$SLURM_ARRAY_TASK_ID]}
 
 echo "[blend_nocountry] condition=$COND model=8b"
