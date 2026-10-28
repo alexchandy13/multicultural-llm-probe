@@ -76,6 +76,30 @@ def make_probe_prompt(reformatted: str, country: str, probe: str) -> str:
     return reformatted.replace(src, dst, 1)
 
 
+def strip_country_phrase(reformatted: str, country: str) -> tuple[str, bool]:
+    """Remove the leading "In <country>," and recapitalise. Returns (text, applied).
+
+    The reformatted questions open with a prepositional phrase naming the
+    country -- "In the Netherlands, is it customary to ...?" -- so the coherent
+    drop deletes the whole phrase rather than blanking the name. Blanking alone
+    leaves "In , is it customary ...", which is the defect culnig/dataset_ext.py
+    records on the CulturalBench control: the malformed prompt scored HIGHER
+    than the real one at every layer, because gradients grow with uncertainty.
+
+    Returns applied=False instead of raising when the phrase is not where it is
+    expected, so one odd row cannot kill a job; the caller counts them. This
+    matters because make_probe_prompt() above uses str.replace, which silently
+    leaves the country in place on exactly those rows.
+    """
+    src = f"In {country_with_article(country)},"
+    if not reformatted.startswith(src):
+        return reformatted, False
+    rest = reformatted[len(src):].lstrip()
+    if not rest:
+        return reformatted, False
+    return rest[0].upper() + rest[1:], True
+
+
 def build_neutral_shots(n_shots: int, gold_yes_rate: float, seed: int = 7):
     """Pick n_shots country-free shots whose labels match the dataset's yes-rate.
 
@@ -174,7 +198,7 @@ def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b", precision: str = "matched_bf16",
                  us_probe: bool = False, probe_country: str | None = None,
                  neutral_fewshot: bool = True, few_shot: int = 0,
-                 neutral_shots: int = 2,
+                 neutral_shots: int = 2, no_country: bool = False,
                  system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
@@ -206,6 +230,7 @@ def evaluate_one(condition_name: str, out_path: Path,
     correct  = defaultdict(int)
     total    = defaultdict(int)
     predictions = []
+    n_nc_applied = 0
 
     for row in tqdm(rows, desc=f"culturalbench/{condition_name}"):
         reformatted = row.get("reformatted_prompt")
@@ -240,6 +265,18 @@ def evaluate_one(condition_name: str, out_path: Path,
             us_pred = CHOICES[0] if us_scores[0] > us_scores[1] else CHOICES[1]
             us_raw_scores = list(us_scores)
 
+        nc_pred = nc_raw_scores = None
+        nc_applied = None
+        if no_country:
+            nc_q, nc_applied = strip_country_phrase(reformatted, country)
+            n_nc_applied += nc_applied
+            nc_prompt = build_prompt(prefix, nc_q, instruct, tokenizer, fewshot_turns,
+                                     system_prompt=system_prompt)
+            nc_scores = score_choices(model, tokenizer, nc_prompt, CHOICES,
+                                      leading_space=leading_space)
+            nc_pred = CHOICES[0] if nc_scores[0] > nc_scores[1] else CHOICES[1]
+            nc_raw_scores = list(nc_scores)
+
         predictions.append({
             "data_idx":   row["data_idx"],
             "question_idx": row["question_idx"],
@@ -248,8 +285,11 @@ def evaluate_one(condition_name: str, out_path: Path,
             "gold":       gold,
             "pred":       pred,
             "us_pred":    us_pred,
+            "nc_pred":    nc_pred,
+            "nocountry_applied": nc_applied,
             "scores":     list(scores),
             "us_scores":  us_raw_scores,
+            "nc_scores":  nc_raw_scores,
         })
 
     def acc(key):
@@ -270,9 +310,33 @@ def evaluate_one(condition_name: str, out_path: Path,
         },
         "predictions": predictions,
     }
+    if no_country:
+        n = total[("all", "all")]
+        result["nocountry_applied_n"] = n_nc_applied
+        result["nc_yes_rate"] = sum(p["nc_pred"] == "yes" for p in predictions) / n
+        result["nc_agreement_with_own_country"] = (
+            sum(p["nc_pred"] == p["pred"] for p in predictions) / n)
+        if _probe:
+            paired = [p for p in predictions if p["us_pred"] is not None]
+            if paired:
+                result["nc_agreement_with_probe"] = (
+                    sum(p["nc_pred"] == p["us_pred"] for p in paired) / len(paired))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2))
     print(f"Wrote {out_path}: overall={result['accuracy_overall']:.3f}")
+    if no_country:
+        n = total[("all", "all")]
+        print(f"  country phrase stripped on {n_nc_applied}/{n} rows")
+        if n_nc_applied < n:
+            print(f"  WARNING: {n - n_nc_applied} rows did not start with "
+                  f"'In <country>,' and were scored unchanged. make_probe_prompt() "
+                  f"uses str.replace and fails silently on these same rows, so "
+                  f"existing probe runs left the country in place there too.")
+        print(f"  no country: yes {result['nc_yes_rate']:.3f}, "
+              f"agrees with own country {result['nc_agreement_with_own_country']:.3f}")
+        if "nc_agreement_with_probe" in result:
+            print(f"  agrees with {_probe} swap "
+                  f"{result['nc_agreement_with_probe']:.3f}")
 
 
 ALL_CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult",
@@ -297,6 +361,13 @@ def main():
                              "gold-matched, so N=4 gives 1 yes / 3 no rather than 2/2. No "
                              "example is excluded from eval. Output suffix becomes _nfsN "
                              "for N != 2.")
+    parser.add_argument("--no-country", action="store_true",
+                        help="Also score each question with the leading "
+                             "'In <country>,' phrase removed and the next word "
+                             "recapitalised, giving a coherent country-free "
+                             "question rather than the blanked 'In , is it ...' "
+                             "that inflated the CULNIG control. Lands in nc_pred "
+                             "beside pred and us_pred; output gains _nocountry.")
     parser.add_argument("--no-fewshot", action="store_true",
                         help="Drop the 2 neutral few-shot examples (the hardcoded default) and evaluate 0-shot. Output loses the _nfs suffix.")
     parser.add_argument("--precision", default="matched_bf16")
@@ -328,9 +399,10 @@ def main():
         # _nfs stays bare at the historical 2 shots so old filenames keep matching
         shot_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
     sys_sfx = "_sys" if args.system_prompt else ""
+    nc_sfx = "_nocountry" if args.no_country else ""
 
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{probe_sfx}{sys_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{nc_sfx}{probe_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -341,6 +413,7 @@ def main():
         neutral_fewshot=not args.no_fewshot,
         few_shot=args.few_shot,
         neutral_shots=args.neutral_shots,
+        no_country=args.no_country,
         system_prompt=args.system_prompt,
     )
 
