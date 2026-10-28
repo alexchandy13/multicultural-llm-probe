@@ -74,11 +74,57 @@ def same_country(a: str, b: str) -> bool:
 
 # The v1 scenario template with "Scenario:" replaced by "Norm:". Every other
 # word is identical, which is what makes the two arms comparable.
+# The question asks whether the norm SHOULD be followed. Three earlier
+# wordings were rejected, each for a specific defect:
+#
+#   "Is this a social norm in this country?" -- every Rule-of-Thumb in NormAd
+#   is a real norm somewhere, so this is trivially yes and carries no signal.
+#
+#   "Would you expect people to follow this norm?" -- measures compliance, not
+#   normative status. A norm can be the genuine rule of a culture and still be
+#   widely ignored, so "no" is unreadable: it could mean the norm does not fit
+#   the country, or that it fits and people flout it anyway.
+#
+#   "Would most people agree with this norm?" -- "most people" names a
+#   reference group, and with no country given the natural reading is most
+#   people on earth, which is population-weighted. The country-free answer
+#   would then track the norms of the largest countries rather than the
+#   model's own default.
+#
+#   "Should people follow this norm?" -- moral endorsement, so it is the
+#   wording most exposed to the politeness lean: anything that sounds like
+#   courtesy draws yes regardless of culture.
+#
+# "Is this an accepted norm?" asks about the norm's standing rather than about
+# compliance or about what ought to be done, and names no reference group to
+# population-weight. It is also the closest wording to the scenario arm, which
+# asks "Is this action socially acceptable in this culture?" -- the two arms
+# are being compared to each other, so keeping them in the same word family
+# means a gap between them is about scenario-vs-norm and not about one
+# question being phrased more strongly than the other.
+#
+# Dropping "in this country" leaves the model's own unprompted normative
+# default, which is what gets compared against the US.
 ROT_PROMPT_TEMPLATE = (
     "You are evaluating cultural knowledge.\n"
     "Country: {country}\n"
     "Norm: {rot}\n"
-    "Question: Is this a social norm in this country?\n"
+    "Question: Is this an accepted norm in this country?\n"
+    "Answer with exactly one of: yes, no.\n"
+    "Answer:"
+)
+
+# Country-free counterpart, written out rather than produced by deleting the
+# "Country:" line. Deleting the line alone would leave "people in this
+# country" pointing at nothing -- the incoherent control that
+# culnig/dataset_ext.py records on CulturalBench, where a dangling reference
+# inflated the control until it outscored the real prompt. So "in this
+# country" goes too, and the two templates differ in nothing else, which is
+# what makes nc_pred comparable to us_pred.
+ROT_PROMPT_TEMPLATE_NOCOUNTRY = (
+    "You are evaluating cultural knowledge.\n"
+    "Norm: {rot}\n"
+    "Question: Is this an accepted norm?\n"
     "Answer with exactly one of: yes, no.\n"
     "Answer:"
 )
@@ -106,6 +152,14 @@ def main():
                         "costs 1 + k passes per example rather than 2k: for the "
                         "8-country grid that is 9 instead of 16. Use 'us' for the "
                         "United States.")
+    p.add_argument("--no-country", action="store_true",
+                   help="Also ask the norm with no country at all, using the "
+                        "hand-written country-free template (the 'in this country' "
+                        "clause goes too, so nothing dangles). Lands in nc_pred "
+                        "alongside the own-country answer, and the output gains a "
+                        "_nocountry suffix. This is the baseline the country swap "
+                        "lacks: us_pred says what the model answers when told a "
+                        "country, nc_pred what it answers when told none.")
     p.add_argument("--system-prompt", default=None, metavar="TEXT")
     p.add_argument("--limit", type=int, default=None)
     args = p.parse_args()
@@ -140,13 +194,18 @@ def main():
     if probes:
         print(f"Country swaps: {', '.join(p for p, _ in probes)}")
 
-    def ask(country_name: str, rot: str):
-        body = ROT_PROMPT_TEMPLATE.format(country=country_name, rot=rot)
+    def score(body: str):
         prompt = (build_chat_prompt(tokenizer, body, system=args.system_prompt)
                   if instruct else body)
         s = score_choices(model, tokenizer, prompt, YN_CHOICES,
                           leading_space=leading_space)
         return YN_CHOICES[max(range(2), key=s.__getitem__)], s
+
+    def ask(country_name: str, rot: str):
+        return score(ROT_PROMPT_TEMPLATE.format(country=country_name, rot=rot))
+
+    def ask_nocountry(rot: str):
+        return score(ROT_PROMPT_TEMPLATE_NOCOUNTRY.format(rot=rot))
 
     records = []
     # slug -> per-example swapped answer, aligned with records by index. None
@@ -158,14 +217,19 @@ def main():
         c = country(ex)
         rot = rule_of_thumb(ex)
         pred, scores = ask(c, rot)
-        records.append({
+        rec = {
             "country": c,
             "group": culture_group(c),
             "gold": gold_label(ex),      # the SCENARIO's gold, for pairing
             "rot": rot,
             "pred": pred,
             "scores": scores,
-        })
+        }
+        if args.no_country:
+            nc_pred, nc_scores = ask_nocountry(rot)
+            rec["nc_pred"] = nc_pred
+            rec["nc_scores"] = nc_scores
+        records.append(rec)
         for probe_name, slug in probes:
             if same_country(c, probe_name):
                 swapped[slug].append(None)
@@ -194,6 +258,16 @@ def main():
     }
     print(f"  says yes to the norm: {yes_rate:.3f}   n={n}")
 
+    nc_sfx = ""
+    if args.no_country:
+        nc_yes = sum(r["nc_pred"] == "yes" for r in records) / n
+        nc_agree = sum(r["nc_pred"] == r["pred"] for r in records) / n
+        base["nc_yes_rate"] = nc_yes
+        base["nc_agreement_with_own_country"] = nc_agree
+        nc_sfx = "_nocountry"
+        print(f"  no country: yes {nc_yes:.3f}, agrees with own country "
+              f"{nc_agree:.3f}")
+
     def write(path: Path, payload: dict) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic: on the scavenger partition a preemption mid-dump leaves a
@@ -210,7 +284,8 @@ def main():
     # that probe's swapped answer -- the same shape a single-probe run wrote,
     # so nothing downstream needs to know this was one job.
     if not probes:
-        write(Path(args.out_path) if args.out_path else stem.with_name(stem.name + ".json"),
+        write(Path(args.out_path) if args.out_path
+              else stem.with_name(f"{stem.name}{nc_sfx}.json"),
               {**base, "probe_country": None, "records": records})
         return
 
@@ -219,7 +294,7 @@ def main():
         for rec, extra in zip(records, swapped[slug]):
             rows.append({**rec, **extra} if extra else dict(rec))
         withp = [r for r in rows if "us_pred" in r]
-        write(stem.with_name(f"{stem.name}_{slug}.json"),
+        write(stem.with_name(f"{stem.name}{nc_sfx}_{slug}.json"),
               {**base, "probe_country": probe_name, "records": rows})
         if withp:
             agree = sum(r["us_pred"] == r["pred"] for r in withp) / len(withp)

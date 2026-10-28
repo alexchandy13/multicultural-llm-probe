@@ -87,6 +87,82 @@ def mcnemar_exact(b: int, c: int) -> float:
     return min(1.0, 2 * tail)
 
 
+def margin(scores) -> float:
+    """scores is [yes_logprob, no_logprob], so this is positive for yes."""
+    return scores[0] - scores[1]
+
+
+def spearman(xs: list[float], ys: list[float]) -> float:
+    """Rank correlation, average ranks for ties. Used instead of Pearson because
+    the yes-minus-no margins are not on a meaningful linear scale -- only their
+    ordering over norms is."""
+    def rank(v):
+        order = sorted(range(len(v)), key=lambda i: v[i])
+        r = [0.0] * len(v)
+        i = 0
+        while i < len(order):
+            j = i
+            while j + 1 < len(order) and v[order[j + 1]] == v[order[i]]:
+                j += 1
+            avg = (i + j) / 2 + 1
+            for k in range(i, j + 1):
+                r[order[k]] = avg
+            i = j + 1
+        return r
+    rx, ry = rank(xs), rank(ys)
+    n = len(xs)
+    mx, my = sum(rx) / n, sum(ry) / n
+    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry))
+    dx = sum((a - mx) ** 2 for a in rx) ** 0.5
+    dy = sum((b - my) ** 2 for b in ry) ** 0.5
+    return num / (dx * dy) if dx and dy else float("nan")
+
+
+def nocountry_vs_countries(cond: str, size: str) -> None:
+    """Whose norms does the model hold by default?
+
+    The country-free prompt asks the same question with no country named, so
+    its answers are the model's unprompted normative defaults. Comparing those
+    to each probe country's answers, over the same 1,697 norms, says which
+    country's norms the defaults look like. If the US column sits above the
+    other seven, the defaults are US-like; if all eight are level, the model is
+    not conditioning on the country at all and nothing here is US-specific.
+
+    Reported two ways: agreement of the yes/no decisions, and Spearman
+    correlation of the yes-minus-no margins. The margins matter because the
+    decisions can be near-constant -- every NormAd norm is a real norm, so
+    "yes" is a defensible answer to all of them -- while the margins still rank
+    the norms by how well each fits.
+    """
+    ncp = BEHAVIORAL / f"normad_{cond}_{size}_rotknow_nocountry.json"
+    if not ncp.exists():
+        return
+    nc = json.load(ncp.open())["records"]
+    found = [(s, l) for s, l in PROBES if know_path(cond, size, s).exists()]
+    if not found:
+        return
+
+    print(f"\n  No country vs each country  (n paired against each)")
+    print(f"    {'country':32s} {'agree':>7s} {'margin r':>9s} {'yes%':>7s} {'n':>6s}")
+    nc_yes = sum(r["nc_pred"] == "yes" for r in nc) / len(nc)
+    for slug, label in found:
+        d = json.load(know_path(cond, size, slug).open())["records"]
+        align(d, nc)
+        rows = [(a, b) for a, b in zip(d, nc) if "us_pred" in a]
+        if not rows:
+            print(f"    {label:32s} {'--':>7s}")
+            continue
+        agree = sum(a["us_pred"] == b["nc_pred"] for a, b in rows) / len(rows)
+        r = spearman([margin(a["us_scores"]) for a, _ in rows],
+                     [margin(b["nc_scores"]) for _, b in rows])
+        pyes = sum(a["us_pred"] == "yes" for a, _ in rows) / len(rows)
+        print(f"    {label:32s} {agree * 100:6.1f}% {r:9.3f} {pyes * 100:6.1f}% "
+              f"{len(rows):6d}")
+    print(f"    no-country yes-rate = {nc_yes * 100:.1f}%")
+    print("    (agree = same yes/no as the country-free prompt; margin r = Spearman\n"
+          "     over the yes-minus-no margins, which survives a near-constant decision.)")
+
+
 def report(cond: str, size: str) -> None:
     print(f"\n{'=' * 70}\n{cond}  /  {size}\n{'=' * 70}")
     apply_rows = load_apply(cond, size)
@@ -145,6 +221,8 @@ def report(cond: str, size: str) -> None:
                   f"{sum(r['us_pred'] == r['pred'] for r in rows) / len(rows) * 100:6.1f}% "
                   f"{sum(r['pred'] == 'yes' for r in rows) / len(rows) * 100:8.1f}% "
                   f"{len(rows):6d}")
+
+    nocountry_vs_countries(cond, size)
 
 
 def main():
