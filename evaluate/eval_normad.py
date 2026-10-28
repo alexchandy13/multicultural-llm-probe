@@ -100,10 +100,28 @@ YN_WORD_PROMPTS = [
 ]
 
 
-# Bump whenever YN_PROMPT_TEMPLATE changes, so old and new results coexist.
-YN_TEMPLATE_TAG = "_v2"
+# Two yes/no templates. v1 is active: measured head-to-head on
+# sftdpo_aya_nocult (8b, gemma4) and tulu3_dpo, v2 was 2-8 accuracy points
+# worse AND roughly halved country sensitivity -- the fraction of examples
+# where swapping the country label changes the prediction fell 50-60% for
+# every probe country except the US (Llama non-US mean 24.0% -> 10.8%). Since
+# the whole US-probe measurement rests on that sensitivity, v2 is the weaker
+# instrument even though it reads better. Its results are kept under the _v2
+# tag rather than deleted; see outputs/behavioral/normad_*_fs2_yn_v2_*.json.
+#
+# To switch, point YN_PROMPT_TEMPLATE/YN_TEMPLATE_TAG at the other pair. The
+# tag keeps the two sets of result files from overwriting each other, so it
+# must change whenever the template does.
+YN_PROMPT_TEMPLATE_V1 = (
+    "You are evaluating cultural acceptability.\n"
+    "Country: {country}\n"
+    "Scenario: {scenario}\n"
+    "Question: Is this action socially acceptable in this culture?\n"
+    "Answer with exactly one of: yes, no.\n"
+    "Answer:"
+)
 
-YN_PROMPT_TEMPLATE = (
+YN_PROMPT_TEMPLATE_V2 = (
     "You will be given a short story about everyday "
     "situations. You will also be given a country of relevance. Read the story and "
     "determine if the character's behavior aligns with the social norms of the given country.\n"
@@ -113,15 +131,17 @@ YN_PROMPT_TEMPLATE = (
     "Answer:"
 )
 
-# Country-free counterpart of YN_PROMPT_TEMPLATE, written out rather than
-# produced by deleting the "Country:" line. The instruction above promises "a
-# country of relevance" and refers to "the given country", so removing only the
-# line leaves the prompt promising something it never supplies -- the same
-# defect culnig/dataset_ext.py records on the CulturalBench control, where a
-# dangling reference inflated the control until it outscored the real prompt.
-# Keeping an explicit pair means the country-free prompt is coherent English
-# and the two templates can be diffed by eye.
-YN_PROMPT_TEMPLATE_NOCOUNTRY = (
+# Country-free counterpart of v2, written out rather than produced by deleting
+# the "Country:" line. v2's instruction promises "a country of relevance" and
+# refers to "the given country", so removing only the line leaves the prompt
+# promising something it never supplies -- the same defect
+# culnig/dataset_ext.py records on the CulturalBench control, where a dangling
+# reference inflated the control until it outscored the real prompt.
+#
+# v1 needs no hand-written pair: its only country reference outside the
+# "Country:" line is " in this culture", which strip_country_line() removes,
+# leaving "Question: Is this action socially acceptable?" -- coherent English.
+YN_PROMPT_TEMPLATE_V2_NOCOUNTRY = (
     "You will be given a short story about everyday "
     "situations. Read the story and "
     "determine if the character's behavior aligns with common social norms.\n"
@@ -130,13 +150,16 @@ YN_PROMPT_TEMPLATE_NOCOUNTRY = (
     "Answer:"
 )
 
+YN_PROMPT_TEMPLATE = YN_PROMPT_TEMPLATE_V1
+YN_TEMPLATE_TAG = ""        # v1 result files carry no tag: normad_*_fs2_yn_*
+
 # template -> its hand-written country-free counterpart. Anything not listed
-# (the multi-prompt-word variants) falls back to deleting the country line,
-# which is only valid when nothing else in that template mentions a country.
-NOCOUNTRY_TEMPLATES = {}
-
-
-NOCOUNTRY_TEMPLATES[YN_PROMPT_TEMPLATE] = YN_PROMPT_TEMPLATE_NOCOUNTRY
+# (v1, the multi-prompt-word variants) falls back to deleting the country line
+# plus " in this culture", which is only valid when nothing else in that
+# template mentions a country.
+NOCOUNTRY_TEMPLATES = {
+    YN_PROMPT_TEMPLATE_V2: YN_PROMPT_TEMPLATE_V2_NOCOUNTRY,
+}
 
 YN_NULL_PROMPT = (
     "You are evaluating cultural acceptability.\n"
