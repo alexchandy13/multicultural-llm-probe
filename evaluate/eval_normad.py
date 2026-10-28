@@ -100,14 +100,43 @@ YN_WORD_PROMPTS = [
 ]
 
 
+# Bump whenever YN_PROMPT_TEMPLATE changes, so old and new results coexist.
+YN_TEMPLATE_TAG = "_v2"
+
 YN_PROMPT_TEMPLATE = (
-    "You are evaluating cultural acceptability.\n"
+    "You will be given a short story about everyday "
+    "situations. You will also be given a country of relevance. Read the story and "
+    "determine if the character's behavior aligns with the social norms of the given country.\n"
     "Country: {country}\n"
     "Scenario: {scenario}\n"
-    "Question: Is this action socially acceptable in this culture?\n"
-    "Answer with exactly one of: yes, no.\n"
+    "Without any explanation, answer with exactly one of: yes, no.\n"
     "Answer:"
 )
+
+# Country-free counterpart of YN_PROMPT_TEMPLATE, written out rather than
+# produced by deleting the "Country:" line. The instruction above promises "a
+# country of relevance" and refers to "the given country", so removing only the
+# line leaves the prompt promising something it never supplies -- the same
+# defect culnig/dataset_ext.py records on the CulturalBench control, where a
+# dangling reference inflated the control until it outscored the real prompt.
+# Keeping an explicit pair means the country-free prompt is coherent English
+# and the two templates can be diffed by eye.
+YN_PROMPT_TEMPLATE_NOCOUNTRY = (
+    "You will be given a short story about everyday "
+    "situations. Read the story and "
+    "determine if the character's behavior aligns with common social norms.\n"
+    "Scenario: {scenario}\n"
+    "Without any explanation, answer with exactly one of: yes, no.\n"
+    "Answer:"
+)
+
+# template -> its hand-written country-free counterpart. Anything not listed
+# (the multi-prompt-word variants) falls back to deleting the country line,
+# which is only valid when nothing else in that template mentions a country.
+NOCOUNTRY_TEMPLATES = {}
+
+
+NOCOUNTRY_TEMPLATES[YN_PROMPT_TEMPLATE] = YN_PROMPT_TEMPLATE_NOCOUNTRY
 
 YN_NULL_PROMPT = (
     "You are evaluating cultural acceptability.\n"
@@ -211,31 +240,24 @@ _COUNTRY_LINE = re.compile(r"^ *(?:C|c)ountry: *\{country\}\n", re.M)
 _IN_THIS_CULTURE = " in this culture"
 
 
-def strip_country_line(template: str, mode: str = "coherent") -> str:
-    """Remove the country from a prompt template.
+def strip_country_line(template: str) -> str:
+    """Return the country-free counterpart of a prompt template.
 
-    mode="drop"      delete only the "Country: {country}" line. One change, but
-                     YN_PROMPT_TEMPLATE then asks "Is this action socially
-                     acceptable in this culture?" with no culture named.
-    mode="coherent"  also drop " in this culture", giving a well-formed
-                     country-free question.
-
-    "coherent" is the default because a dangling reference is not a neutral
-    control. culnig/dataset_ext.py documents the same mistake on CulturalBench:
-    blanking the country alone left "In , is it customary...", and because
-    gradients grow with uncertainty the malformed prompt inflated the control
-    until it outscored the real prompt at every layer. The cost is that two
-    things change at once, so run both modes and compare.
+    Uses the hand-written pair from NOCOUNTRY_TEMPLATES, which rewrites the
+    instruction text that refers to the country as well as removing the
+    "Country:" line. Templates without a pair fall back to deleting the line,
+    which is only safe when nothing else in the template mentions a country --
+    so a template whose instruction promises one needs a pair adding here.
 
     Applied to the few-shot template as well as the test item, so the shots
-    demonstrate the same country-free format the item uses.
+    demonstrate the same country-free format the item is scored in.
     """
+    if template in NOCOUNTRY_TEMPLATES:
+        return NOCOUNTRY_TEMPLATES[template]
     out = _COUNTRY_LINE.sub("", template, count=1)
     if out == template:
         raise ValueError(f"no country line in template: {template[:70]!r}")
-    if mode == "coherent":
-        out = out.replace(_IN_THIS_CULTURE, "")
-    return out
+    return out.replace(_IN_THIS_CULTURE, "")
 
 
 def load_normad(path: Path):
@@ -272,7 +294,7 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False,
                          multi_prompt_word: bool = False,
-                         no_country: str | None = None
+                         no_country: bool = False
                          ) -> tuple[str | list[str], set[int],
                                     list[tuple[str, str]]]:
     """Build a 1-yes + 1-no few-shot prefix from held-out countries.
@@ -346,7 +368,7 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
     else:
         template = PROMPT_TEMPLATE
     if no_country:
-        template = strip_country_line(template, no_country)
+        template = strip_country_line(template)
 
     parts = []
     for idx in picks:
@@ -509,7 +531,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
                  generate: bool = False, yn_only: bool = False, us_probe: bool = False,
                  multi_prompt_word: bool = False, neutral_fewshot: bool = False,
-                 no_country: str | None = None,
+                 no_country: bool = False,
                  probe_country: str | None = None, raw_prompt: bool = False,
                  system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
@@ -597,10 +619,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             cal_acc = [0.0, 0.0]   # calibrated sums (same as raw when priors=None)
             for j, (tmpl, pfx) in enumerate(zip(YN_WORD_PROMPTS, prefix)):
                 if instruct:
-                    t = strip_country_line(tmpl, no_country) if no_country else tmpl
+                    t = strip_country_line(tmpl) if no_country else tmpl
                     p = build_chat_prompt(tokenizer, t.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                 else:
-                    t = strip_country_line(tmpl, no_country) if no_country else tmpl
+                    t = strip_country_line(tmpl) if no_country else tmpl
                     p = pfx + t.format(country=c, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, p, choices, leading_space=leading_space)
                 raw_acc[0] += s[0]
@@ -613,10 +635,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             raw_scores = raw_acc  # [yes_logprob_sum, no_logprob_sum] before calibration
         else:
             if instruct:
-                _t = strip_country_line(template, no_country) if no_country else template
+                _t = strip_country_line(template) if no_country else template
                 prompt = build_chat_prompt(tokenizer, _t.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
             else:
-                _t = strip_country_line(template, no_country) if no_country else template
+                _t = strip_country_line(template) if no_country else template
                 prompt = prefix + _t.format(country=c, scenario=scenario_text(ex))
             if generate:
                 pred = generate_answer(model, tokenizer, prompt)
@@ -763,15 +785,13 @@ def main():
              "Implies yn-only. Output gains a _mpw suffix.",
     )
     parser.add_argument(
-        "--no-country", nargs="?", const="coherent", default=None,
-        choices=["drop", "coherent"],
-        help="Remove the country from the prompt. 'coherent' (the default when "
-             "the flag is given bare) also drops ' in this culture' so the "
-             "question is well formed; 'drop' removes only the Country: line, "
-             "leaving a dangling reference. Comparing these predictions against "
-             "the US-swapped ones shows whether swapping in the US moves the "
-             "model anywhere a blank country does not. Output gains a "
-             "_nocountry or _nocountrydrop suffix.",
+        "--no-country", action="store_true",
+        help="Score a country-free version of the prompt: the Country: line is "
+             "removed and the instruction rewritten so it no longer refers to a "
+             "country (see NOCOUNTRY_TEMPLATES). Comparing these predictions "
+             "against the US-swapped ones shows whether swapping in the US "
+             "moves the model anywhere a blank country does not. Output gains a "
+             "_nocountry suffix.",
     )
     parser.add_argument(
         "--us-probe", action="store_true",
@@ -838,11 +858,12 @@ def main():
     size_sfx = "" if args.model_size == "3b" else f"_{args.model_size}"
     fs_sfx = f"_fs{args.few_shot}" if args.few_shot > 0 else ""
     nfs_sfx = "_nfs" if args.neutral_fewshot else ""
-    yn_sfx = "_yn" if args.yn_only else ""
+    # The yes/no template was revised (duplicate question removed, instruction
+    # paragraph added), so tag its outputs rather than overwriting the files
+    # produced under the previous wording.
+    yn_sfx = f"_yn{YN_TEMPLATE_TAG}" if args.yn_only else ""
     mp_sfx = "_mpw" if args.multi_prompt_word else ""
-    nc_sfx = ("" if not args.no_country
-              else "_nocountry" if args.no_country == "coherent"
-              else "_nocountrydrop")
+    nc_sfx = "_nocountry" if args.no_country else ""
     if args.probe_country:
         slug = args.probe_country.lower().replace(" ", "_")
         usprobe_sfx = f"_{slug}probe"

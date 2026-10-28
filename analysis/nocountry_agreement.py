@@ -13,8 +13,7 @@ value means the US token does something specific.
 
 Reads the _fs2_yn setting. Needs the country-ablation runs from
 slurm/eval_normad_nocountry_job.sh:
-  normad_{cond}_{size}_fs2_yn_nocountry.json      (coherent mode)
-  normad_{cond}_{size}_fs2_yn_nocountrydrop.json  (drop mode)
+  normad_{cond}_{size}_fs2_yn_nocountry.json
 alongside the existing
   normad_{cond}_{size}_fs2_yn_usprobe.json
 
@@ -22,7 +21,7 @@ Both runs exclude the same holdout countries, so the 1,697 rows pair by index;
 the loader checks that and refuses if they differ.
 
     python analysis/nocountry_agreement.py
-    python analysis/nocountry_agreement.py --mode drop --group Non-Western
+    python analysis/nocountry_agreement.py --group Non-Western
 """
 from __future__ import annotations
 
@@ -48,11 +47,9 @@ def ci(p: float, n: int) -> float:
     return 1.96 * sqrt(max(p * (1 - p), 0) / n) if n else 0.0
 
 
-def rates(cond: str, size: str, group: str | None, errors_only: bool,
-          mode: str = "coherent"):
-    sfx = "_nocountry" if mode == "coherent" else "_nocountrydrop"
+def rates(cond: str, size: str, group: str | None, errors_only: bool):
     us = load(f"normad_{cond}_{size}_fs2_yn_usprobe.json")
-    nc = load(f"normad_{cond}_{size}_fs2_yn{sfx}.json")
+    nc = load(f"normad_{cond}_{size}_fs2_yn_nocountry.json")
     if us is None or nc is None:
         return None
     if len(us) != len(nc):
@@ -82,7 +79,7 @@ REPS = {"us": "US (English)", "netherlands": "Netherlands (Protestant)",
         "iran": "Iran (African-Islamic)"}
 
 
-def per_probe_country(cond: str, size: str, mode: str, group: str | None,
+def per_probe_country(cond: str, size: str, group: str | None,
                       errors_only: bool):
     """{probe country: (P(probe_pred == blank_pred), n)}.
 
@@ -95,8 +92,7 @@ def per_probe_country(cond: str, size: str, mode: str, group: str | None,
     which country was swapped in, and leaves it None for rows already from
     that country, so those rows drop out per country and n varies slightly.
     """
-    sfx = "_nocountry" if mode == "coherent" else "_nocountrydrop"
-    nc = load(f"normad_{cond}_{size}_fs2_yn{sfx}.json")
+    nc = load(f"normad_{cond}_{size}_fs2_yn_nocountry.json")
     if nc is None:
         return None
     out = {}
@@ -122,8 +118,6 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--group", default=None,
                     help="Restrict to one group field value, e.g. Non-Western.")
-    ap.add_argument("--mode", default="coherent", choices=["coherent", "drop"],
-                    help="Which country-ablation variant to compare against.")
     ap.add_argument("--per-probe-country", action="store_true",
                     help="Instead of the three columns, show agreement between "
                          "the blank-country prediction and EACH of the eight "
@@ -135,11 +129,11 @@ def main() -> None:
 
     scope = (f"group={args.group}" if args.group else "all non-US") + \
             (", errors only" if args.errors_only else ", all examples")
-    print(f"NormAd _fs2_yn, no-country mode={args.mode} — {scope}\n")
+    print(f"NormAd _fs2_yn, country-free prompt — {scope}\n")
     if args.per_probe_country:
         for size in MODELS:
             for cond in CONDS:
-                r = per_probe_country(cond, size, args.mode, args.group,
+                r = per_probe_country(cond, size, args.group,
                                       args.errors_only)
                 if r is None:
                     continue
@@ -155,7 +149,7 @@ def main() -> None:
     for size in MODELS:
         print(f"--- {size}")
         for cond in CONDS:
-            r = rates(cond, size, args.group, args.errors_only, args.mode)
+            r = rates(cond, size, args.group, args.errors_only)
             if r is None:
                 missing.append(f"{cond}/{size}")
                 continue
