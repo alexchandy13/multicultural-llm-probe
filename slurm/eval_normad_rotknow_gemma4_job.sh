@@ -24,13 +24,22 @@
 # stored in us_pred exactly as the scenario arm stores it. Same 8 probe
 # countries, one per IW cluster, so the grids line up cell for cell.
 #
-# All 8 probes run in ONE task per condition. The own-country answers do not
-# depend on the probe country, so scoring them once covers all 8: 1 + 8 = 9
-# passes per example instead of 8 x 2 = 16, and 2 tasks instead of 16. Output
-# is still one file per probe country, identical in shape to a single-probe
-# run, so nothing downstream changes.
+# Plus the coherent country-free drop (--no-country): the same question with
+# the "Country:" line and "in this country" both removed, so nothing dangles.
+# That answer is the model's own normative default, and comparing it to each
+# of the 8 countries is what says whether the default is US-like.
 #
-# 9 passes x 1,697 = 15,273 per task, ~50 min on Gemma-4-12B, which needs two cards in bf16. Walltime is 4h because a
+# All of it runs in ONE task per condition. Neither the own-country answer nor
+# the country-free answer depends on the probe country, so scoring each once
+# covers all 8 probes: 1 + 1 + 8 = 10 passes per example rather than 8 x 2 for
+# the probes plus 2 more for a separate country-free job, which would score
+# the own-country prompt twice. 2 tasks instead of 16 + 2.
+#
+# Output is still one file per probe country, each carrying pred (own
+# country), nc_pred (no country) and us_pred (swapped), so nothing downstream
+# needs to know this was one job.
+#
+# 10 passes x 1,697 = 16,970 per task, ~56 min on Gemma-4-12B, which needs two cards in bf16. Walltime is 4h because a
 # scavenger preemption now costs the whole condition rather than one probe.
 #
 # 2 conditions = 2 tasks (no Gemma Tulu-3 release).
@@ -51,5 +60,6 @@ python evaluate/eval_normad_rot_knowledge.py \
     --condition "$COND" \
     --model-size gemma4 \
     --precision matched_bf16 \
+    --no-country \
     --probe-countries us netherlands hungary bosnia_and_herzegovina \
                       mexico taiwan philippines iran

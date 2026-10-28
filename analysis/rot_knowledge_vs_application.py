@@ -150,11 +150,14 @@ def nocountry_vs_countries(cond: str, size: str) -> None:
 
     print(f"\n  No country vs each country  (n paired against each)")
     print(f"    {'country':32s} {'agree':>7s} {'margin r':>9s} {'yes%':>7s} {'n':>6s}")
-    nc_yes = sum(r["nc_pred"] == "yes" for r in nc) / len(nc)
+    nc_src = nc if nc is not None else first
+    nc_yes = sum(r["nc_pred"] == "yes" for r in nc_src) / len(nc_src)
     for slug, label in found:
         d = json.load(know_path(cond, size, slug).open())["records"]
-        align(d, nc)
-        rows = [(a, b) for a, b in zip(d, nc) if "us_pred" in a]
+        b_rows = d if nc is None else nc
+        if nc is not None:
+            align(d, nc)
+        rows = [(a, b) for a, b in zip(d, b_rows) if "us_pred" in a]
         if not rows:
             print(f"    {label:32s} {'--':>7s}")
             continue
