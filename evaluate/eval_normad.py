@@ -317,7 +317,8 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
                          mc_format: bool = False,
                          yn_only: bool = False,
                          multi_prompt_word: bool = False,
-                         no_country: bool = False
+                         no_country: bool = False,
+                         context_arm: str = "none"
                          ) -> tuple[str | list[str], set[int],
                                     list[tuple[str, str]]]:
     """Build a 1-yes + 1-no few-shot prefix from held-out countries.
@@ -392,16 +393,19 @@ def build_fewshot_prefix(ds, n_shots: int, seed: int = 42,
         template = PROMPT_TEMPLATE
     if no_country:
         template = strip_country_line(template)
+    template = add_context_line(template, context_arm)
 
     parts = []
     for idx in picks:
         ex = ds[idx]
         lbl = gold_label(ex)
         answer = MC_LABEL_MAP[lbl] if mc_format else lbl
-        parts.append(template.format(country=country(ex), scenario=scenario_text(ex)) + f" {answer}\n\n")
+        parts.append(template.format(country=country(ex), scenario=scenario_text(ex),
+                                     context=context_value(ex, context_arm)) + f" {answer}\n\n")
 
     turns = [
-        (template.format(country=country(ds[idx]), scenario=scenario_text(ds[idx])),
+        (template.format(country=country(ds[idx]), scenario=scenario_text(ds[idx]),
+                         context=context_value(ds[idx], context_arm)),
          MC_LABEL_MAP[gold_label(ds[idx])] if mc_format else gold_label(ds[idx]))
         for idx in picks
     ]
@@ -549,6 +553,63 @@ def scenario_text(example: dict) -> str:
     return ""
 
 
+def rule_of_thumb(example: dict) -> str:
+    """NormAd's "Rule-of-Thumb": the single norm the story complies with (gold
+    yes), violates (gold no), or is unrelated to (gold neutral)."""
+    for key in ("Rule-of-Thumb", "rule_of_thumb", "rot"):
+        if key in example and example[key]:
+            return str(example[key]).strip()
+    return ""
+
+
+def social_value(example: dict) -> str:
+    """NormAd's "Value": the abstract social value behind the rule of thumb.
+    One rung more abstract than the rule, so it supplies the norm's motivation
+    without naming the behaviour."""
+    for key in ("Value", "value", "social_value"):
+        if key in example and example[key]:
+            return str(example[key]).strip()
+    return ""
+
+
+# Supplied-context arms for the knowledge-vs-application experiment. "none" is
+# the standard eval: the model must retrieve the norm from the country name and
+# then apply it. "rot" hands it the rule outright, so what remains is only the
+# application step; "value" hands over the motivating value, which constrains
+# the answer without naming the behaviour.
+#
+# The context is injected as one extra line directly under "Country:", leaving
+# every other word of the template untouched. That minimal delta is deliberate:
+# the v1-vs-v2 comparison showed a rewritten preamble alone can halve this
+# model family's country sensitivity, so any accuracy gap here has to be
+# attributable to the added line and nothing else.
+CONTEXT_FIELDS = {
+    "none":  (None, None),
+    "rot":   ("Norm", rule_of_thumb),
+    "value": ("Value", social_value),
+}
+
+_COUNTRY_LINE_ANY = re.compile(r"^( *)((?:C|c)ountry: *\{country\}\n)", re.M)
+
+
+def add_context_line(template: str, arm: str) -> str:
+    """Insert "<Label>: {context}" immediately after the Country: line."""
+    label, _ = CONTEXT_FIELDS[arm]
+    if label is None:
+        return template
+    out, n = _COUNTRY_LINE_ANY.subn(
+        lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}{label}: {{context}}\n",
+        template, count=1)
+    if n == 0:
+        raise ValueError(f"no country line to anchor context after: {template[:70]!r}")
+    return out
+
+
+def context_value(example: dict, arm: str) -> str:
+    _, getter = CONTEXT_FIELDS[arm]
+    return "" if getter is None else getter(example)
+
+
 def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  model_size: str = "3b", precision: str = "matched_bf16",
                  calibrate: bool = False, few_shot: int = 0, mc_format: bool = False,
@@ -556,7 +617,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  multi_prompt_word: bool = False, neutral_fewshot: bool = False,
                  no_country: bool = False,
                  probe_country: str | None = None, raw_prompt: bool = False,
-                 system_prompt: str | None = None):
+                 system_prompt: str | None = None, context_arm: str = "none"):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_normad(data_path)
@@ -573,6 +634,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     else:
         choices = CHOICES
         template = PROMPT_TEMPLATE
+    template = add_context_line(template, context_arm)
 
     # Always exclude holdout countries so 0-shot and few-shot eval on identical examples.
     # neutral_fewshot uses no dataset examples, so holdout countries can be evaluated.
@@ -602,6 +664,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         prefix, excluded, turns = build_fewshot_prefix(
             ds, few_shot, mc_format=mc_format, yn_only=yn_only,
             multi_prompt_word=multi_prompt_word, no_country=no_country,
+            context_arm=context_arm,
         )
         if instruct:
             fewshot_turns = turns
@@ -659,10 +722,10 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         else:
             if instruct:
                 _t = strip_country_line(template) if no_country else template
-                prompt = build_chat_prompt(tokenizer, _t.format(country=c, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
+                prompt = build_chat_prompt(tokenizer, _t.format(country=c, scenario=scenario_text(ex), context=context_value(ex, context_arm)), fewshot=fewshot_turns, system=system_prompt)
             else:
                 _t = strip_country_line(template) if no_country else template
-                prompt = prefix + _t.format(country=c, scenario=scenario_text(ex))
+                prompt = prefix + _t.format(country=c, scenario=scenario_text(ex), context=context_value(ex, context_arm))
             if generate:
                 pred = generate_answer(model, tokenizer, prompt)
                 if pred == "unparseable":
@@ -704,9 +767,9 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                 us_raw_scores = us_accumulated
             else:
                 if instruct:
-                    us_prompt = build_chat_prompt(tokenizer, template.format(country=_probe, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
+                    us_prompt = build_chat_prompt(tokenizer, template.format(country=_probe, scenario=scenario_text(ex), context=context_value(ex, context_arm)), fewshot=fewshot_turns, system=system_prompt)
                 else:
-                    us_prompt = prefix + template.format(country=_probe, scenario=scenario_text(ex))
+                    us_prompt = prefix + template.format(country=_probe, scenario=scenario_text(ex), context=context_value(ex, context_arm))
                 if generate:
                     us_pred = generate_answer(model, tokenizer, us_prompt)
                 else:
@@ -851,6 +914,16 @@ def main():
              "--few-shot. Output gains a _nfs suffix.",
     )
     parser.add_argument(
+        "--context", choices=["none", "rot", "value"], default="none",
+        help="Supply the norm in the prompt instead of making the model retrieve "
+             "it from the country name. 'rot' inserts NormAd's Rule-of-Thumb, "
+             "'value' its abstract Value, as one extra line under 'Country:'. "
+             "Scored against --context none this separates containing a norm from "
+             "applying it: the gap is the retrieval deficit, and the --context rot "
+             "accuracy is the application ceiling. Output gains a _rot/_value "
+             "suffix.",
+    )
+    parser.add_argument(
         "--raw-prompt", action="store_true",
         help="Bypass the chat template on an instruct checkpoint and score it as a "
              "base model, so its prompt is byte-identical to a base model's. Use it "
@@ -887,6 +960,7 @@ def main():
     yn_sfx = f"_yn{YN_TEMPLATE_TAG}" if args.yn_only else ""
     mp_sfx = "_mpw" if args.multi_prompt_word else ""
     nc_sfx = "_nocountry" if args.no_country else ""
+    ctx_sfx = "" if args.context == "none" else f"_{args.context}"
     if args.probe_country:
         slug = args.probe_country.lower().replace(" ", "_")
         usprobe_sfx = f"_{slug}probe"
@@ -901,7 +975,7 @@ def main():
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{nc_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}{sys_sfx}.json"
+        / f"normad_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{yn_sfx}{mp_sfx}{ctx_sfx}{nc_sfx}{usprobe_sfx}{gen_sfx}{mc_sfx}{cal_sfx}{raw_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -914,6 +988,7 @@ def main():
         mc_format=args.mc_format,
         generate=args.generate,
         yn_only=args.yn_only,
+        context_arm=args.context,
         us_probe=args.us_probe,
         multi_prompt_word=args.multi_prompt_word,
         no_country=args.no_country,
