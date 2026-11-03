@@ -4,9 +4,10 @@
 #SBATCH --account=scavenger
 #SBATCH --qos=scavenger
 #SBATCH --gres=gpu:rtxa5000:2
-#SBATCH --time=2:30:00
+#SBATCH --time=4:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
+#SBATCH --requeue
 #SBATCH --array=0-5
 #SBATCH --output=slurm/eval_ots_nc_g4.%A_%a.out
 #SBATCH --error=slurm/eval_ots_nc_g4.%A_%a.err

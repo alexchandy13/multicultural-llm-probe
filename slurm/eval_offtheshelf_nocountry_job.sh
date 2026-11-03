@@ -7,6 +7,7 @@
 #SBATCH --time=2:30:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
+#SBATCH --requeue
 #SBATCH --array=0-5
 #SBATCH --output=slurm/eval_ots_nocountry.%A_%a.out
 #SBATCH --error=slurm/eval_ots_nocountry.%A_%a.err

@@ -1,33 +1,47 @@
 #!/bin/bash
 #SBATCH --job-name=ots_probe
-#SBATCH --partition=clip
-#SBATCH --account=clip
-#SBATCH --qos=high
+#SBATCH --partition=scavenger
+#SBATCH --account=scavenger
+#SBATCH --qos=scavenger
 #SBATCH --gres=gpu:rtxa6000:1
-#SBATCH --time=12:00:00
+#SBATCH --time=8:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
-#SBATCH --array=0-2
+#SBATCH --requeue
+#SBATCH --array=0-8
 #SBATCH --output=slurm/eval_ots_probe.%A_%a.out
 #SBATCH --error=slurm/eval_ots_probe.%A_%a.err
 
-# Cluster-representative probe grid for Llama-3.1-8B-Instruct, all three
-# benchmarks. Completes the off-the-shelf arm: the pretrained 8b already has
-# all 8 probe files per benchmark, the instruct release has none except BLEnD's
-# US swap.
+# Cluster-representative probe grid for Llama-3.1-8B-Instruct, raw-prompted.
+# Completes the off-the-shelf arm: the pretrained 8b already has all 8 probe
+# files per benchmark, the instruct release has none.
 #
 # add_probe.py rather than the eval scripts: it reads `pred` from the
-# _usprobe.json and runs the swap pass only, which is half the forward passes.
-# --probe-country is nargs="+", so all 7 countries share ONE model load -- on a
-# one-pass job that load is most of the non-GPU cost, which is why this is 3
-# tasks and not 21.
+# _usprobe_raw.json and runs the swap pass only, half the forward passes.
+#
+# TASK LAYOUT is uneven on purpose. --probe-country is nargs="+", so several
+# countries can share one model load, which is most of the non-GPU cost of a
+# one-pass job. That is worth doing for NormAd (1,697 rows) and CulturalBench
+# (4,905), where all 7 finish in minutes. It is NOT viable for BLEnD: 23,032
+# rows is ~1.5 h per country on a 12B model, measured from
+# eval_blend_nocountry_gemma4_job.sh fitting one pass in 2 h, so 7 in one task
+# would exceed any walltime this partition grants. BLEnD therefore gets one
+# country per task.
+#   task 0   normad         all 7 countries
+#   task 1   culturalbench  all 7 countries
+#   task 2-8 blend          one country each
 #
 # US is not in the list: it IS the base file, so its swap is already recorded
 # there as us_pred.
 #
 # --raw-prompt must match how the base file was made, or `pred` and `us_pred`
-# in the same row would come from different prompt formats. add_probe carries
-# the _raw tail from the base name into the output name for the same reason.
+# in one row would come from different prompt formats. add_probe carries the
+# _raw tail from the base name into the output name for the same reason.
+#
+# --requeue plus --skip-existing is the pair that makes scavenger safe here: a
+# preempted task comes back and resumes at the first missing country instead of
+# redoing the grid. A walltime TIMEOUT is not requeued, which is the other
+# reason BLEnD is one country per task.
 #
 # DEPENDENCY: every task needs eval_offtheshelf_usprobe_job.sh to have written
 # the raw-prompted base file first -- BLEnD included, since the BLEnD instruct
@@ -35,12 +49,6 @@
 # Submit as:
 #   JID=$(sbatch --parsable slurm/eval_offtheshelf_usprobe_job.sh)
 #   sbatch --dependency=afterok:$JID slurm/eval_offtheshelf_probe_job.sh
-#
-# --skip-existing makes a requeue resume at the first missing country instead
-# of redoing the grid, which matters because BLEnD is 23,032 examples x 7
-# countries at ~10 it/s, roughly 4.5 h. NormAd and CulturalBench are minutes.
-# Full grid, no --sample-frac, so these pair with the existing full-coverage
-# probe files rather than a hashed subset of them.
 
 set -euo pipefail
 source env.sh
@@ -50,13 +58,13 @@ conda activate llm
 MODEL=8b_instruct
 COUNTRIES=(netherlands hungary bosnia_and_herzegovina mexico taiwan philippines iran)
 
-BENCHES=(normad culturalbench blend)
-BENCH=${BENCHES[$SLURM_ARRAY_TASK_ID]}
-
-case "$BENCH" in
-  normad)        BASE="outputs/behavioral/normad_base_${MODEL}_fs2_yn_usprobe_raw.json" ;;
-  culturalbench) BASE="outputs/behavioral/culturalbench_base_${MODEL}_nfs4_usprobe_raw.json" ;;
-  blend)         BASE="outputs/behavioral/blend_base_${MODEL}_nfs_usprobe_raw.json" ;;
+case "$SLURM_ARRAY_TASK_ID" in
+  0) BENCH=normad;        BASE="outputs/behavioral/normad_base_${MODEL}_fs2_yn_usprobe_raw.json"
+     PROBES=("${COUNTRIES[@]}") ;;
+  1) BENCH=culturalbench; BASE="outputs/behavioral/culturalbench_base_${MODEL}_nfs4_usprobe_raw.json"
+     PROBES=("${COUNTRIES[@]}") ;;
+  *) BENCH=blend;         BASE="outputs/behavioral/blend_base_${MODEL}_nfs_usprobe_raw.json"
+     PROBES=("${COUNTRIES[$(( SLURM_ARRAY_TASK_ID - 2 ))]}") ;;
 esac
 
 if [[ ! -f "$BASE" ]]; then
@@ -64,11 +72,11 @@ if [[ ! -f "$BASE" ]]; then
     exit 1
 fi
 
-echo "[ots_probe] benchmark=$BENCH condition=base model=$MODEL base=$BASE"
+echo "[ots_probe] benchmark=$BENCH model=$MODEL probes=${PROBES[*]} base=$(basename $BASE)"
 
 python evaluate/add_probe.py \
     --base "$BASE" \
-    --probe-country "${COUNTRIES[@]}" \
+    --probe-country "${PROBES[@]}" \
     --condition base \
     --model-size "$MODEL" \
     --precision matched_bf16 \

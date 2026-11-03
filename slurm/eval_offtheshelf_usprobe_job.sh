@@ -7,6 +7,7 @@
 #SBATCH --time=3:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
+#SBATCH --requeue
 #SBATCH --array=0-2
 #SBATCH --output=slurm/eval_ots_usprobe.%A_%a.out
 #SBATCH --error=slurm/eval_ots_usprobe.%A_%a.err
