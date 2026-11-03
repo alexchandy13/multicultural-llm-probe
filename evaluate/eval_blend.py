@@ -292,6 +292,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
                  neutral_fewshot: bool = False, probe_country: str | None = None,
                  shuffle_options: bool = False,
                  no_country: bool = False,
+                 raw_prompt: bool = False,
                  system_prompt: str | None = None):
     if no_country and shuffle_options:
         raise ValueError(
@@ -304,7 +305,13 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     tokenizer, model = load_model_for_eval(cond, precision=precision)
     ds = load_blend(data_path)
 
-    instruct = is_instruct(model_size)
+    # raw_prompt forces an instruct checkpoint down the plain-text path so its
+    # prompt is byte-identical to a base model's. Without it, comparing a vendor
+    # instruct release against our aya conditions or tulu3_* changes two things
+    # at once: the weights AND one flat string becoming a sequence of chat turns.
+    instruct = is_instruct(model_size) and not raw_prompt
+    if raw_prompt and is_instruct(model_size):
+        print("Raw prompt: chat template bypassed, scoring as a base model")
     fewshot_turns: list[tuple[str, str]] | None = None
 
     holdout_excluded = {ex["MCQID"] for ex in ds if ex["country"] in HOLDOUT_COUNTRIES}
@@ -496,6 +503,16 @@ def main():
              "Records us_pred in each prediction entry. Output gains a _usprobe suffix.",
     )
     parser.add_argument(
+        "--raw-prompt", action="store_true",
+        help="Bypass the chat template on an instruct checkpoint and score it as "
+             "a base model, so its prompt is byte-identical to a base model's. "
+             "Use it to separate the two things an instruct-vs-base gap "
+             "confounds: changed weights vs changed prompt format. Our aya "
+             "conditions and tulu3_* are already scored this way, so this is "
+             "what puts a vendor instruct release on the same footing. No "
+             "effect, and no filename change, on non-instruct sizes."
+    )
+    parser.add_argument(
         "--probe-country", default=None,
         help="Generalised probe: replace country name with this string for every example "
              "that doesn't already use it. Stored as us_pred (for compatibility). "
@@ -533,10 +550,13 @@ def main():
         usprobe_sfx = ""
     sys_sfx = "_sys" if args.system_prompt else ""
     nc_sfx = "_nocountry" if args.no_country else ""
+    # Guarded by is_instruct so passing --raw-prompt to a non-instruct size
+    # is a true no-op and does not rename files the probe grid pairs against.
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"
-        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{nc_sfx}{usprobe_sfx}{sys_sfx}.json"
+        / f"blend_{args.condition}{size_sfx}{fs_sfx}{nfs_sfx}{shuf_sfx}{mp_sfx}{nc_sfx}{usprobe_sfx}{raw_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition,
@@ -551,6 +571,7 @@ def main():
         probe_country=args.probe_country,
         shuffle_options=args.shuffle_options,
         no_country=args.no_country,
+        raw_prompt=args.raw_prompt,
         system_prompt=args.system_prompt,
     )
 

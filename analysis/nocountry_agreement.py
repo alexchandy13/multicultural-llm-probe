@@ -45,7 +45,10 @@ BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 
 CONDS = ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult",
          "sftdpo_aya_nocult", "tulu3_sft", "tulu3_dpo"]
-MODELS = ["8b", "gemma4"]
+# Off-the-shelf releases are model_size labels under condition "base":
+# 8b/gemma4 are the pretrained weights, *_instruct the vendors' own
+# post-training. Listing them here is what makes them show up as rows.
+MODELS = ["8b", "8b_instruct", "gemma4", "gemma4_instruct"]
 
 # prefix, the shot/format suffix the probe grid was run at, and the field in
 # the no-country file that holds the country-free prediction.
@@ -90,12 +93,21 @@ def ci(p: float, n: int) -> float:
     return 1.96 * sqrt(max(p * (1 - p), 0) / n) if n else 0.0
 
 
+# The vendor instruct releases are run with --raw-prompt, which bypasses the
+# chat template so their prompts are byte-identical to every other cell's --
+# sftdpo_aya_* and tulu3_* are scored as flat strings too, because is_instruct()
+# keys off the size label and they run at model_size=8b. The eval scripts tag
+# those outputs _raw, last in the name, so the lookup has to ask for it.
+RAW_SIZES = {"8b_instruct", "gemma4_instruct"}
+
+
 def path_for(bench: str, cond: str, size: str, probe: str | None) -> str:
     sfx = BENCHMARKS[bench]["suffix"]
+    raw = "_raw" if size in RAW_SIZES else ""
     if probe is None:
-        return f"{bench}_{cond}_{size}{sfx}_nocountry.json"
+        return f"{bench}_{cond}_{size}{sfx}_nocountry{raw}.json"
     tail = "_usprobe" if probe == "us" else f"_{probe}probe"
-    return f"{bench}_{cond}_{size}{sfx}{tail}.json"
+    return f"{bench}_{cond}_{size}{sfx}{tail}{raw}.json"
 
 
 def usable(row: dict, bench: str) -> bool:
@@ -161,6 +173,40 @@ def per_probe_country(bench: str, cond: str, size: str, group: str | None,
         if pairs:
             agree = sum(a["us_pred"] == b[blank_field] for a, b in pairs)
             out[slug] = (agree / len(pairs), len(pairs))
+    return out or None
+
+
+def per_probe_default(bench: str, cond: str, size: str, group: str | None,
+                      errors_only: bool):
+    """{probe country: (P(pred == probe_pred), n)} -- the classic default rate.
+
+    Unlike per_probe_country() this needs no country-ablation run: it compares
+    the swapped prediction against the TRUE-country prediction, both of which
+    live in the probe file.
+
+    Read it with care on BLEnD. There each option is a different country's
+    correct answer, so naming a country points at a specific option rather than
+    only setting the context: the better the model knows the probe country, the
+    harder the swap pulls the answer, and the LOWER this rate goes. On BLEnD it
+    therefore tracks knowledge of the probe country rather than defaulting, and
+    the five probe countries absent from BLEnD's 16 cannot be steered to an
+    option at all. NormAd and CulturalBench are binary judgements with no
+    country-keyed options, so there the rate means what it says.
+    """
+    out = {}
+    for slug in REPS:
+        pb = load(path_for(bench, cond, size, slug))
+        if pb is None:
+            continue
+        rows = [r for r in pb
+                if r.get("us_pred") is not None
+                and not same_country(r.get("country", ""), slug)
+                and (group is None or r.get("group") == group)]
+        if errors_only:
+            rows = [r for r in rows if r["pred"] != r["gold"]]
+        if rows:
+            out[slug] = (sum(r["pred"] == r["us_pred"] for r in rows) / len(rows),
+                         len(rows))
     return out or None
 
 

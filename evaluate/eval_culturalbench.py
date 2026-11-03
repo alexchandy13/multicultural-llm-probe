@@ -199,10 +199,16 @@ def evaluate_one(condition_name: str, out_path: Path,
                  us_probe: bool = False, probe_country: str | None = None,
                  neutral_fewshot: bool = True, few_shot: int = 0,
                  neutral_shots: int = 2, no_country: bool = False,
+                 raw_prompt: bool = False,
                  system_prompt: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
-    instruct = is_instruct(model_size)
+    # See eval_blend.py: raw_prompt holds the prompt format constant so an
+    # instruct-vs-base gap is a weights gap. It also flips leading_space back
+    # to True below, since the flat prompt ends where a space-prefixed token goes.
+    instruct = is_instruct(model_size) and not raw_prompt
+    if raw_prompt and is_instruct(model_size):
+        print("Raw prompt: chat template bypassed, scoring as a base model")
 
     rows = json.loads(DATA_PATH.read_text())
     # Precedence: --few-shot N (real shots) > NFS (default) > --no-fewshot (bare).
@@ -372,6 +378,16 @@ def main():
                         help="Drop the 2 neutral few-shot examples (the hardcoded default) and evaluate 0-shot. Output loses the _nfs suffix.")
     parser.add_argument("--precision", default="matched_bf16")
     parser.add_argument("--us-probe", action="store_true")
+    parser.add_argument(
+        "--raw-prompt", action="store_true",
+        help="Bypass the chat template on an instruct checkpoint and score it as "
+             "a base model, so its prompt is byte-identical to a base model's. "
+             "Use it to separate the two things an instruct-vs-base gap "
+             "confounds: changed weights vs changed prompt format. Our aya "
+             "conditions and tulu3_* are already scored this way, so this is "
+             "what puts a vendor instruct release on the same footing. No "
+             "effect, and no filename change, on non-instruct sizes."
+    )
     parser.add_argument("--probe-country", default=None)
     parser.add_argument("--out-path", default=None)
     parser.add_argument(
@@ -400,9 +416,11 @@ def main():
         shot_sfx = "_nfs" if args.neutral_shots == 2 else f"_nfs{args.neutral_shots}"
     sys_sfx = "_sys" if args.system_prompt else ""
     nc_sfx = "_nocountry" if args.no_country else ""
+    # Guarded by is_instruct so the flag is a true no-op on non-instruct sizes.
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
 
     out = Path(args.out_path) if args.out_path else (
-        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{nc_sfx}{probe_sfx}{sys_sfx}.json"
+        BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{nc_sfx}{probe_sfx}{raw_sfx}{sys_sfx}.json"
     )
     evaluate_one(
         args.condition, out,
@@ -414,6 +432,7 @@ def main():
         few_shot=args.few_shot,
         neutral_shots=args.neutral_shots,
         no_country=args.no_country,
+        raw_prompt=args.raw_prompt,
         system_prompt=args.system_prompt,
     )
 

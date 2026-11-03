@@ -971,7 +971,9 @@ def main():
     gen_sfx = "_gen" if args.generate else ""
     mc_sfx = "_mc" if args.mc_format else ""
     cal_sfx = "_calibrated" if args.calibrate else ""
-    raw_sfx = "_raw" if args.raw_prompt else ""
+    # Guarded by is_instruct so passing --raw-prompt to a non-instruct size is a
+    # true no-op: it already changed nothing, and now it renames nothing either.
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"

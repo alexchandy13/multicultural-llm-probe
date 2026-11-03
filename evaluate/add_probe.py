@@ -258,6 +258,12 @@ def main():
     parser.add_argument("--out", default=None)
     parser.add_argument("--precision", default="matched_bf16")
     parser.add_argument(
+        "--raw-prompt", action="store_true",
+        help="Bypass the chat template on an instruct checkpoint, matching the "
+             "way our aya conditions and tulu3_* are scored. Must match how the "
+             "--base file was produced, which is why a _raw tail on that file is "
+             "carried into the output name rather than stripped.")
+    parser.add_argument(
         "--sample-frac", type=float, default=1.0, metavar="F",
         help="Score only a deterministic fraction F of examples (BLEnD only). "
              "1.0 scores everything. BLEnD's 23k examples per country make a full "
@@ -292,6 +298,13 @@ def main():
         if args.out:
             return Path(args.out)
         slug = probe.lower().replace(" ", "_")
+        # _raw and _sys say how the prompt was built, so they have to survive the
+        # rename: dropping them would name a raw-prompted probe file as if it were
+        # chat-templated and let the two collide at one path. Any other tail
+        # (_batch_calibrated and friends) is stripped as before.
+        m = re.search(r"_usprobe((?:_raw|_sys)*)", base_path.name)
+        if m:
+            return BEHAVIORAL / f"{base_path.name[:m.start()]}_{slug}probe{m.group(1)}.json"
         return BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json", base_path.name)
 
     if args.data_path:
@@ -319,7 +332,7 @@ def main():
     # One model load for every probe country, not one per country.
     cond = resolve_condition(args.condition, model_size=args.model_size)
     tokenizer, model = load_model_for_eval(cond, precision=args.precision)
-    instruct = is_instruct(args.model_size)
+    instruct = is_instruct(args.model_size) and not args.raw_prompt
 
     for probe, out_path in todo:
         print(f"--- probe={probe} -> {out_path.name}", flush=True)
