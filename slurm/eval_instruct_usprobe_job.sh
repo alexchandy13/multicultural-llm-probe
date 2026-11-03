@@ -37,16 +37,24 @@
 # one B300 and three H200s, so this schedules instead of queueing. B300 is also
 # sm_100, which an older torch build cannot target at all.
 #
-# NO --raw-prompt. These are measured through their chat templates, which is how
-# they ship and how anyone uses them. The flag remains for the separate question
-# of how much of a base-vs-instruct gap is prompt format rather than weights.
-#
 # Skips and exits 0 when its output already exists, so re-submitting to fill
 # gaps costs one model load per task.
 #
 # 5 models x 3 benchmarks = 15 tasks. The BLEnD tasks are the tight ones: two
 # passes over 23k rows at 32B is ~6-8 h. If sbatch rejects 12 h the partition
 # cap is lower, and BLEnD needs --sample-frac support in eval_blend.py.
+#
+# --raw-prompt on every task: the chat template is bypassed so each model sees a
+# flat string ending in "Answer:", byte-identical across models. Two reasons.
+# It matches the Llama/Gemma cells already running, so every cell in the table
+# was queried the same way. And it sidesteps the thinking templates -- Qwen3
+# enables a reasoning mode by default and gpt-oss emits a reasoning channel, so
+# under the chat template the token after "Answer:" can be a thought opener
+# rather than yes/no, and scoring would read the wrong position.
+#
+# The cost is that an instruct model on a flat prompt is off-distribution, so
+# accuracy is understated. Agreement rates are the metric here, not accuracy.
+# Outputs gain a _raw tail, so a templated rerun lands beside them, not on them.
 #
 # Submit with: sbatch slurm/eval_instruct_nocountry_job.sh
 
@@ -74,14 +82,14 @@ echo "[inst_usprobe] benchmark=$BENCH condition=offshelf model=$MODEL"
 case "$BENCH" in
   normad)
     python evaluate/eval_normad.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --few-shot 2 --yn-only --us-probe
+        --precision matched_bf16 --few-shot 2 --yn-only --us-probe --raw-prompt
     ;;
   culturalbench)
     python evaluate/eval_culturalbench.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-shots 4 --us-probe
+        --precision matched_bf16 --neutral-shots 4 --us-probe --raw-prompt
     ;;
   blend)
     python evaluate/eval_blend.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-fewshot --us-probe
+        --precision matched_bf16 --neutral-fewshot --us-probe --raw-prompt
     ;;
 esac

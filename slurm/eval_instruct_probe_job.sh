@@ -29,9 +29,6 @@
 #
 # US is absent from COUNTRIES: it IS the base file, recorded there as us_pred.
 #
-# NO --raw-prompt -- these are measured through their chat templates, matching
-# eval_instruct_nocountry_job.sh so the two pair by row order.
-#
 # --requeue plus --skip-existing means a preempted task resumes at the first
 # missing country instead of redoing the grid.
 #
@@ -40,6 +37,18 @@
 #   sbatch --dependency=afterok:$J slurm/eval_instruct_probe_job.sh
 #
 # 5 models x 9 = 45 tasks.
+#
+# --raw-prompt on every task: the chat template is bypassed so each model sees a
+# flat string ending in "Answer:", byte-identical across models. Two reasons.
+# It matches the Llama/Gemma cells already running, so every cell in the table
+# was queried the same way. And it sidesteps the thinking templates -- Qwen3
+# enables a reasoning mode by default and gpt-oss emits a reasoning channel, so
+# under the chat template the token after "Answer:" can be a thought opener
+# rather than yes/no, and scoring would read the wrong position.
+#
+# The cost is that an instruct model on a flat prompt is off-distribution, so
+# accuracy is understated. Agreement rates are the metric here, not accuracy.
+# Outputs gain a _raw tail, so a templated rerun lands beside them, not on them.
 
 set -euo pipefail
 source env.sh
@@ -75,4 +84,5 @@ python evaluate/add_probe.py \
     --condition offshelf \
     --model-size "$MODEL" \
     --precision matched_bf16 \
+    --raw-prompt \
     --skip-existing

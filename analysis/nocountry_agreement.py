@@ -102,13 +102,15 @@ def ci(p: float, n: int) -> float:
     return 1.96 * sqrt(max(p * (1 - p), 0) / n) if n else 0.0
 
 
-# Released instruct models are queried THROUGH their chat template, which is
-# how they ship and how anyone uses them, so their files carry no _raw tail.
-# The --raw-prompt path still exists in the eval scripts as a robustness check
-# (it bypasses the template so an instruct model is scored byte-identically to
-# a base one); list a size here if you want the analysis to read those files
-# instead.
-RAW_SIZES: set[str] = set()
+# These models are run with --raw-prompt: the chat template is bypassed so the
+# prompt is byte-identical across models, and the thinking templates on Qwen3
+# and gpt-oss cannot inject a reasoning channel ahead of the scored token.
+# The eval scripts tag those outputs _raw, last in the name, so the lookup has
+# to ask for it. Drop a size from this set to read its templated files instead.
+RAW_SIZES: set[str] = {
+    "olmo3_instruct", "qwen35_instruct", "8b_instruct", "gemma4_instruct",
+    "gptoss20b", "qwen38_27b", "gemma4_31b", "olmo3_32b", "llama70b",
+}
 
 
 def path_for(bench: str, cond: str, size: str, probe: str | None) -> str:

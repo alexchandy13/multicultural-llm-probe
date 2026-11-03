@@ -34,12 +34,20 @@
 # one B300 and three H200s, so this schedules instead of queueing. B300 is also
 # sm_100, which an older torch build cannot target at all.
 #
-# NO --raw-prompt. These are measured through their chat templates, which is how
-# they ship and how anyone uses them. The flag remains for the separate question
-# of how much of a base-vs-instruct gap is prompt format rather than weights.
-#
 # 5 models x 3 benchmarks = 15 tasks. BLEnD's 23k rows set the walltime; at 32B
 # one pass is ~3-4 h against ~1.5 h for a 12B.
+#
+# --raw-prompt on every task: the chat template is bypassed so each model sees a
+# flat string ending in "Answer:", byte-identical across models. Two reasons.
+# It matches the Llama/Gemma cells already running, so every cell in the table
+# was queried the same way. And it sidesteps the thinking templates -- Qwen3
+# enables a reasoning mode by default and gpt-oss emits a reasoning channel, so
+# under the chat template the token after "Answer:" can be a thought opener
+# rather than yes/no, and scoring would read the wrong position.
+#
+# The cost is that an instruct model on a flat prompt is off-distribution, so
+# accuracy is understated. Agreement rates are the metric here, not accuracy.
+# Outputs gain a _raw tail, so a templated rerun lands beside them, not on them.
 #
 # Submit with: sbatch slurm/eval_instruct_nocountry_job.sh
 
@@ -60,14 +68,14 @@ echo "[inst_nocountry] benchmark=$BENCH condition=offshelf model=$MODEL"
 case "$BENCH" in
   normad)
     python evaluate/eval_normad.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --few-shot 2 --yn-only --no-country
+        --precision matched_bf16 --few-shot 2 --yn-only --no-country --raw-prompt
     ;;
   culturalbench)
     python evaluate/eval_culturalbench.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-shots 4 --no-country
+        --precision matched_bf16 --neutral-shots 4 --no-country --raw-prompt
     ;;
   blend)
     python evaluate/eval_blend.py --condition offshelf --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-fewshot --no-country
+        --precision matched_bf16 --neutral-fewshot --no-country --raw-prompt
     ;;
 esac
