@@ -332,6 +332,22 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
             cond.base, quantization_config=bnb, device_map="auto",
             torch_dtype=torch.bfloat16,
         )
+    elif "gpt-oss" in cond.base:
+        # gpt-oss ships MXFP4 weights. The default load path uses triton MXFP4
+        # kernels, which need Hopper (sm_90); on an A6000 (sm_86) it dies with
+        # "illegal memory access" while materializing the first tensor. Asking
+        # for an explicit dequantize converts the checkpoint to bf16 on load
+        # instead, which is ~40 GB and runs on any card with the room.
+        try:
+            from transformers import Mxfp4Config
+            qcfg = Mxfp4Config(dequantize=True)
+        except ImportError:
+            print("[_common] Mxfp4Config unavailable; loading gpt-oss as-is")
+            qcfg = None
+        model = AutoModelForCausalLM.from_pretrained(
+            cond.base, quantization_config=qcfg,
+            torch_dtype=torch.bfloat16, device_map="auto",
+        )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             cond.base, torch_dtype=torch.bfloat16, device_map="auto",
