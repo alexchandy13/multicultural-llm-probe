@@ -51,8 +51,9 @@ CONDS = ["offshelf", "base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult"
 # Off-the-shelf instruct releases, one per lab where possible. "base" is the
 # condition for all of them -- no adapter of ours is loaded; the arm is
 # carried entirely by model_size.
-MODELS = ["olmo3_instruct", "qwen35_instruct", "8b_instruct", "gemma4_instruct",
-          "gptoss20b",
+MODELS = ["olmo3_instruct", "qwen35_instruct", "gptoss20b",
+          # already covered raw by the eval_offtheshelf_* jobs
+          "8b_instruct", "gemma4_instruct",
           # larger siblings, run after the pilot clears
           "qwen38_27b", "gemma4_31b", "olmo3_32b", "llama70b",
           # pretrained counterparts, kept as the "already present before any

@@ -8,7 +8,7 @@
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --requeue
-#SBATCH --array=0-44
+#SBATCH --array=0-26
 #SBATCH --output=slurm/eval_inst_probe.%A_%a.out
 #SBATCH --error=slurm/eval_inst_probe.%A_%a.err
 
@@ -36,7 +36,7 @@
 #   J=$(sbatch --parsable slurm/eval_instruct_usprobe_job.sh)
 #   sbatch --dependency=afterok:$J slurm/eval_instruct_probe_job.sh
 #
-# 5 models x 9 = 45 tasks.
+# 3 models x 9 = 27 tasks.
 #
 # --raw-prompt on every task: the chat template is bypassed so each model sees a
 # flat string ending in "Answer:", byte-identical across models. Two reasons.
@@ -55,7 +55,7 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-MODELS=(olmo3_instruct qwen35_instruct 8b_instruct gemma4_instruct gptoss20b)
+MODELS=(olmo3_instruct qwen35_instruct gptoss20b)
 COUNTRIES=(netherlands hungary bosnia_and_herzegovina mexico taiwan philippines iran)
 
 PER_MODEL=9

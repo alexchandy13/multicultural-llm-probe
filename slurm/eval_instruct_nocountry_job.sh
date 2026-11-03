@@ -8,7 +8,7 @@
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=4
 #SBATCH --requeue
-#SBATCH --array=0-14
+#SBATCH --array=0-8
 #SBATCH --output=slurm/eval_inst_nocountry.%A_%a.out
 #SBATCH --error=slurm/eval_inst_nocountry.%A_%a.err
 
@@ -19,11 +19,13 @@
 # Tier: models whose bf16 weights fit two A6000s (96 GB).
 #   olmo3_instruct   allenai/Olmo-3-7B-Instruct        ~14 GB
 #   qwen35_instruct  Qwen/Qwen3.5-9B-Instruct          ~18 GB
-#   8b_instruct      meta-llama/Llama-3.1-8B-Instruct  ~16 GB  (cached)
-#   gemma4_instruct  google/gemma-4-12b-it             ~24 GB  (cached)
 #   gptoss20b        openai/gpt-oss-20b                ~42 GB once bf16-upcast
 #
-# This is the PILOT: the smallest member of each family, so unresolvable model
+# This is the PILOT. Llama-3.1-8B-Instruct and gemma-4-12b-it are absent on
+# purpose: the eval_offtheshelf_* jobs already cover them raw-prompted, so
+# repeating them here would differ only in the condition slug in the
+# filename. The analysis reads both slugs.
+# These three are the smallest member of each remaining family, so unresolvable model
 # ids, degenerate output and chat-template surprises all surface cheaply before
 # the 27-70B tier. To scale up, swap MODELS for the larger siblings
 # (qwen38_27b gemma4_31b olmo3_32b) and refit --array to 3 or 9 per model.
@@ -34,7 +36,7 @@
 # one B300 and three H200s, so this schedules instead of queueing. B300 is also
 # sm_100, which an older torch build cannot target at all.
 #
-# 5 models x 3 benchmarks = 15 tasks. BLEnD's 23k rows set the walltime; at 32B
+# 3 models x 3 benchmarks = 9 tasks. BLEnD's 23k rows set the walltime; at 32B
 # one pass is ~3-4 h against ~1.5 h for a 12B.
 #
 # --raw-prompt on every task: the chat template is bypassed so each model sees a
@@ -56,7 +58,7 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-MODELS=(olmo3_instruct qwen35_instruct 8b_instruct gemma4_instruct gptoss20b)
+MODELS=(olmo3_instruct qwen35_instruct gptoss20b)
 BENCHES=(normad culturalbench blend)
 
 N_BENCH=${#BENCHES[@]}
