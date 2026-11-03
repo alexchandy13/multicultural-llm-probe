@@ -43,12 +43,21 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 
-CONDS = ["base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult",
+CONDS = ["offshelf", "base", "sft_aya_cult", "sft_aya_nocult", "sftdpo_aya_cult",
          "sftdpo_aya_nocult", "tulu3_sft", "tulu3_dpo"]
 # Off-the-shelf releases are model_size labels under condition "base":
 # 8b/gemma4 are the pretrained weights, *_instruct the vendors' own
 # post-training. Listing them here is what makes them show up as rows.
-MODELS = ["8b", "8b_instruct", "gemma4", "gemma4_instruct"]
+# Off-the-shelf instruct releases, one per lab where possible. "base" is the
+# condition for all of them -- no adapter of ours is loaded; the arm is
+# carried entirely by model_size.
+MODELS = ["olmo3_instruct", "qwen35_instruct", "8b_instruct", "gemma4_instruct",
+          "gptoss20b",
+          # larger siblings, run after the pilot clears
+          "qwen38_27b", "gemma4_31b", "olmo3_32b", "llama70b",
+          # pretrained counterparts, kept as the "already present before any
+          # post-training" reference rather than as the main arm.
+          "8b", "gemma4"]
 
 # prefix, the shot/format suffix the probe grid was run at, and the field in
 # the no-country file that holds the country-free prediction.
@@ -93,12 +102,13 @@ def ci(p: float, n: int) -> float:
     return 1.96 * sqrt(max(p * (1 - p), 0) / n) if n else 0.0
 
 
-# The vendor instruct releases are run with --raw-prompt, which bypasses the
-# chat template so their prompts are byte-identical to every other cell's --
-# sftdpo_aya_* and tulu3_* are scored as flat strings too, because is_instruct()
-# keys off the size label and they run at model_size=8b. The eval scripts tag
-# those outputs _raw, last in the name, so the lookup has to ask for it.
-RAW_SIZES = {"8b_instruct", "gemma4_instruct"}
+# Released instruct models are queried THROUGH their chat template, which is
+# how they ship and how anyone uses them, so their files carry no _raw tail.
+# The --raw-prompt path still exists in the eval scripts as a robustness check
+# (it bypasses the template so an instruct model is scored byte-identically to
+# a base one); list a size here if you want the analysis to read those files
+# instead.
+RAW_SIZES: set[str] = set()
 
 
 def path_for(bench: str, cond: str, size: str, probe: str | None) -> str:

@@ -32,6 +32,44 @@ MODEL_REGISTRY = {
     "gemma4": "google/gemma-4-12B",
     "gemma4_instruct": "google/gemma-4-12b-it",
     "qwen35": "Qwen/Qwen3.5-9B-Base",
+    # Instruct sibling of the Qwen base above. Alibaba-trained, so its
+    # pretraining corpus is not English/US-dominant the way every other entry
+    # here is (Meta, Google, AI2). That makes it the one model in the set that
+    # separates "anchored on the US" from "anchored on whatever culture the
+    # corpus is majority of".
+    # Qwen names the post-trained checkpoint with NO suffix and the base one
+    # "-Base", the opposite of Meta. So the finetuned 9B is Qwen3.5-9B, not
+    # Qwen3.5-9B-Instruct, which probably does not exist. Qwen3 also ships a
+    # hybrid thinking mode on by default in its chat template; if 3.5 does the
+    # same, the token after "Answer:" is a thought opener and scoring reads the
+    # wrong position. Check its prediction distribution on the first run.
+    "qwen35_instruct": "Qwen/Qwen3.5-9B",
+    # Cohere, trained for multilingual/cross-cultural coverage. Pointed choice
+    # because the Aya dataset is our own SFT data: if a model built for cultural
+    # breadth still defaults to the US, the finding is hard to attribute to
+    # careless data curation.
+    "aya_expanse": "CohereLabs/aya-expanse-8b",
+    # ---- the instruct set for the breadth-across-labs result ----
+    # Sizes here are chosen for coverage of labs and of scale, not architecture:
+    # OLMo at 7B and 32B is a within-family scale pair on a fully open corpus,
+    # and Llama at 70B is the "does it survive scale" point. Several of these
+    # ids are inferred from a sibling release rather than confirmed, so a
+    # RepositoryNotFoundError here means the string is wrong, not the model.
+    "llama70b":    "meta-llama/Llama-3.1-70B-Instruct",
+    "gemma4_31b":  "google/gemma-4-31b-it",
+    # OpenAI's open-weight release ships MoE weights in MXFP4, so the download
+    # is ~13 GB while a bf16 load upcasts to ~42 GB. It also defaults to
+    # emitting a reasoning channel before the answer, which is the same hazard
+    # noted for Olmo-3-Think below: the token after "Answer:" would be a
+    # thought opener rather than yes/no. Check its first output file.
+    "gptoss20b":   "openai/gpt-oss-20b",
+    "olmo3_32b":   "allenai/Olmo-3-32B-Instruct",
+    "qwen38_27b":  "Qwen/Qwen3.8-27B-Instruct",
+    # Mistral at a size comparable to the other small cells. Their current
+    # "Small" line is 24B, so the 8B is the family match rather than a scaled
+    # -down Small. Gated on HF: if it 403s, mistralai/Mistral-7B-Instruct-v0.3
+    # is ungated and only a little older.
+    "ministral8b": "mistralai/Ministral-8B-Instruct-2410",
     # Sparse MoE: 64 experts, top-8, 16 layers (~7B total / ~1B active).
     # Published base -> SFT -> DPO chain on one architecture, so these three give
     # the alignment pipeline without training adapters (cf. the tulu3_* conditions).
@@ -53,6 +91,10 @@ MODEL_REGISTRY = {
     "olmo3": "allenai/Olmo-3-1025-7B",
     "olmo3_sft": "allenai/Olmo-3-7B-Instruct-SFT",
     "olmo3_dpo": "allenai/Olmo-3-7B-Instruct-DPO",
+    # The shipped instruct model. olmo3_sft/olmo3_dpo above are intermediate
+    # post-training stages AI2 also released; this is the final one, so it is
+    # the right cell for a "released finetuned model" comparison.
+    "olmo3_instruct": "allenai/Olmo-3-7B-Instruct",
     "gemma4_moe": "google/gemma-4-26B-A4B",
     "gemma4_moe_instruct": "google/gemma-4-26B-A4B-it",
 }
@@ -141,6 +183,13 @@ def resolve_condition(name: str, sft_epoch: int = 3, dpo_epoch: int = 2,
 
     if name == "base":
         return Condition("base", base, None, model_size=model_size)
+    if name == "offshelf":
+        # Same resolution as "base" -- no adapter of ours -- but an honest slug.
+        # "base" means "no post-training" everywhere else in the field, and these
+        # are fully post-trained instruct releases, so a file called
+        # normad_base_qwen35_instruct_*.json reads as a contradiction. The old
+        # name stays valid so existing filenames keep resolving.
+        return Condition("offshelf", base, None, model_size=model_size)
     if name == "dpo":
         adapter = _latest_checkpoint(ckpt_root / f"dpo{sfx}")
         return Condition("dpo", base, adapter, final_epoch=dpo_epoch, model_size=model_size)
@@ -305,11 +354,20 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
 CHAT_TEMPLATED_SIZES = {
     "8b_instruct",
     "gemma4_instruct",
+    "qwen35_instruct",
+    "aya_expanse",
+    "llama70b",
+    "gemma4_31b",
+    "gptoss20b",
+    "olmo3_32b",
+    "qwen38_27b",
+    "ministral8b",
     "olmoe_sft",
     "olmoe_instruct",
     "gemma4_moe_instruct",
     "olmo3_sft",
     "olmo3_dpo",
+    "olmo3_instruct",
 }
 
 

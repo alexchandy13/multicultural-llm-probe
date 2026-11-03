@@ -447,7 +447,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     print(f"Wrote {out_path}: overall={result['accuracy_overall']:.3f}")
 
 
-ALL_CONDITIONS = ["base", "dpo", "sft", "sftdpo",
+ALL_CONDITIONS = ["base", "offshelf", "dpo", "sft", "sftdpo",
                   "dpo_coig", "dpo_pku", "sftdpo_coig", "sftdpo_pku",
                   "tulu3_sft", "tulu3_dpo",
                   "dpo_cult", "dpo_nocult",
@@ -460,10 +460,12 @@ def main():
     parser.add_argument("--condition", required=True, choices=ALL_CONDITIONS)
     parser.add_argument(
         "--model-size", default="3b",
-        choices=["3b", "8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35",
+        choices=["3b", "8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35_instruct",
+                 "aya_expanse", "llama70b", "gemma4_31b",
+                 "gptoss20b", "olmo3_32b", "qwen38_27b", "ministral8b", "qwen35",
                  "olmoe", "olmoe_sft", "olmoe_instruct",
                  "gemma4_moe", "gemma4_moe_instruct",
-                 "olmo3", "olmo3_sft", "olmo3_dpo"],
+                 "olmo3", "olmo3_sft", "olmo3_dpo", "olmo3_instruct"],
     )
     parser.add_argument(
         "--precision", default="matched_bf16",

@@ -345,7 +345,7 @@ def evaluate_one(condition_name: str, out_path: Path,
                   f"{result['nc_agreement_with_probe']:.3f}")
 
 
-ALL_CONDITIONS = ["base", "sft_aya_cult", "sft_aya_nocult",
+ALL_CONDITIONS = ["base", "offshelf", "sft_aya_cult", "sft_aya_nocult",
                   "sftdpo_aya_cult", "sftdpo_aya_nocult",
                   "tulu3_sft", "tulu3_dpo"]
 
@@ -354,10 +354,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--condition", required=True, choices=ALL_CONDITIONS)
     parser.add_argument("--model-size", default="8b",
-                        choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct",
+                        choices=["8b", "8b_instruct", "gemma4", "gemma4_instruct", "qwen35_instruct",
+                 "aya_expanse", "llama70b", "gemma4_31b",
+                 "gptoss20b", "olmo3_32b", "qwen38_27b", "ministral8b",
                                  "olmoe", "olmoe_sft", "olmoe_instruct",
                  "gemma4_moe", "gemma4_moe_instruct",
-                 "olmo3", "olmo3_sft", "olmo3_dpo"])
+                 "olmo3", "olmo3_sft", "olmo3_dpo", "olmo3_instruct"])
     parser.add_argument("--few-shot", type=int, default=0, metavar="N",
                         help="Use N real demonstrations drawn from the data (alternating "
                              "yes/no) instead of the neutral shots. The shots are excluded "
