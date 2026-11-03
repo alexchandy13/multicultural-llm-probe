@@ -73,9 +73,9 @@ BENCH=${BENCHES[$(( SLURM_ARRAY_TASK_ID % N_BENCH ))]}
 MODEL=${MODELS[$(( SLURM_ARRAY_TASK_ID / N_BENCH ))]}
 
 case "$BENCH" in
-  normad)        OUT="outputs/behavioral/normad_base_${MODEL}_fs2_yn_usprobe.json" ;;
-  culturalbench) OUT="outputs/behavioral/culturalbench_base_${MODEL}_nfs4_usprobe.json" ;;
-  blend)         OUT="outputs/behavioral/blend_base_${MODEL}_nfs_usprobe.json" ;;
+  normad)        OUT="outputs/behavioral/normad_offshelf_${MODEL}_fs2_yn_usprobe_raw.json" ;;
+  culturalbench) OUT="outputs/behavioral/culturalbench_offshelf_${MODEL}_nfs4_usprobe_raw.json" ;;
+  blend)         OUT="outputs/behavioral/blend_offshelf_${MODEL}_nfs_usprobe_raw.json" ;;
 esac
 if [[ -f "$OUT" ]]; then echo "[inst_usprobe] $OUT exists - nothing to do"; exit 0; fi
 

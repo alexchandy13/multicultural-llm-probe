@@ -65,6 +65,16 @@ N_BENCH=${#BENCHES[@]}
 BENCH=${BENCHES[$(( SLURM_ARRAY_TASK_ID % N_BENCH ))]}
 MODEL=${MODELS[$(( SLURM_ARRAY_TASK_ID / N_BENCH ))]}
 
+# The eval scripts have no checkpointing, so a preempted task restarts from
+# zero. This at least stops a requeue redoing a task that already finished --
+# which matters because BLEnD is ~1.3-2.5 h and scavenger preempts.
+case "$BENCH" in
+  normad)        OUT="outputs/behavioral/normad_offshelf_${MODEL}_fs2_yn_nocountry_raw.json" ;;
+  culturalbench) OUT="outputs/behavioral/culturalbench_offshelf_${MODEL}_nfs4_nocountry_raw.json" ;;
+  blend)         OUT="outputs/behavioral/blend_offshelf_${MODEL}_nfs_nocountry_raw.json" ;;
+esac
+if [[ -f "$OUT" ]]; then echo "[inst_nocountry] $OUT exists - nothing to do"; exit 0; fi
+
 echo "[inst_nocountry] benchmark=$BENCH condition=offshelf model=$MODEL"
 
 case "$BENCH" in

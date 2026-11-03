@@ -63,11 +63,11 @@ MODEL=${MODELS[$(( SLURM_ARRAY_TASK_ID / PER_MODEL ))]}
 OFFSET=$(( SLURM_ARRAY_TASK_ID % PER_MODEL ))
 
 case "$OFFSET" in
-  0) BENCH=normad;        BASE="outputs/behavioral/normad_base_${MODEL}_fs2_yn_usprobe.json"
+  0) BENCH=normad;        BASE="outputs/behavioral/normad_offshelf_${MODEL}_fs2_yn_usprobe_raw.json"
      PROBES=("${COUNTRIES[@]}") ;;
-  1) BENCH=culturalbench; BASE="outputs/behavioral/culturalbench_base_${MODEL}_nfs4_usprobe.json"
+  1) BENCH=culturalbench; BASE="outputs/behavioral/culturalbench_offshelf_${MODEL}_nfs4_usprobe_raw.json"
      PROBES=("${COUNTRIES[@]}") ;;
-  *) BENCH=blend;         BASE="outputs/behavioral/blend_base_${MODEL}_nfs_usprobe.json"
+  *) BENCH=blend;         BASE="outputs/behavioral/blend_offshelf_${MODEL}_nfs_usprobe_raw.json"
      PROBES=("${COUNTRIES[$(( OFFSET - 2 ))]}") ;;
 esac
 

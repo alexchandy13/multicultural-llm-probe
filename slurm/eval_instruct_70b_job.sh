@@ -61,9 +61,9 @@ WHICH=$(( SLURM_ARRAY_TASK_ID % 2 ))     # 0 normad, 1 culturalbench
 BENCH=$([ "$WHICH" -eq 0 ] && echo normad || echo culturalbench)
 
 if [[ "$BENCH" == "normad" ]]; then
-    BASE="outputs/behavioral/normad_base_${MODEL}_fs2_yn_usprobe.json"
+    BASE="outputs/behavioral/normad_offshelf_${MODEL}_fs2_yn_usprobe_raw.json"
 else
-    BASE="outputs/behavioral/culturalbench_base_${MODEL}_nfs4_usprobe.json"
+    BASE="outputs/behavioral/culturalbench_offshelf_${MODEL}_nfs4_usprobe_raw.json"
 fi
 
 echo "[inst_70b] stage=$STAGE benchmark=$BENCH model=$MODEL"
