@@ -58,19 +58,47 @@ from evaluate._common import (
     load_model_for_eval,
     resolve_condition,
 )
+from evaluate.country_names import resolve_probe_country
 
 BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 
 
 def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
-                     instruct: bool, data_path: Path) -> list[dict]:
+                     instruct: bool, data_path: Path,
+                     base_name: str = "") -> list[dict]:
     from evaluate.eval_normad import (
         NEUTRAL_SHOTS_NORMAD, YN_WORD_CHOICES, YN_WORD_PROMPTS,
-        build_neutral_fewshot_prefix, country, gold_label, load_normad,
-        scenario_text, score_choices, HOLDOUT_COUNTRIES,
+        build_fewshot_prefix, build_neutral_fewshot_prefix, country,
+        gold_label, load_normad, scenario_text, score_choices,
+        HOLDOUT_COUNTRIES,
     )
     ds = load_normad(data_path)
-    prefix = build_neutral_fewshot_prefix(multi_prompt_word=True)
+    probe = resolve_probe_country(probe, {country(ex) for ex in ds})
+    # The base run's flags are not recorded in its JSON, so they are read off
+    # its filename. Hardcoding multi_prompt_word=True here meant us_scores was
+    # a sum over 4 templates while the base pred came from one, so pred and
+    # us_pred were never on the same scale -- the thing a default rate
+    # compares. Same for the few-shot source: _nfs is the neutral pair, _fs<N>
+    # is N examples drawn from the holdout pool, and they are different prompts.
+    mpw = "_mpw" in base_name
+    neutral_fs = "_nfs" in base_name
+    if mpw:
+        prefix = build_neutral_fewshot_prefix(multi_prompt_word=True)
+    elif neutral_fs:
+        prefix = build_neutral_fewshot_prefix(multi_prompt_word=False)
+    else:
+        m = re.search(r"_fs(\d+)", base_name)
+        if m:
+            # Same seed as the base run, and its shots come from the holdout
+            # pool, which is already excluded below -- so rebuilding the prefix
+            # here does not change which rows are iterated and the zip against
+            # base_data["predictions"] stays aligned.
+            prefix, _fs_excluded, _fs_turns = build_fewshot_prefix(
+                ds, int(m.group(1)), yn_only=True, multi_prompt_word=False)
+        else:
+            # No _fs/_nfs/_mpw marker means a zero-shot base run, which
+            # eval_normad gives an empty prefix.
+            prefix = ""
     fewshot_turns = NEUTRAL_SHOTS_NORMAD if instruct else None
     choices = YN_WORD_CHOICES
     holdout_excluded = {i for i, ex in enumerate(ds) if country(ex) in HOLDOUT_COUNTRIES}
@@ -89,16 +117,27 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
 
         us_pred = us_raw_scores = None
         if c != probe:
-            acc = [0.0, 0.0]
-            for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
+            if mpw:
+                acc = [0.0, 0.0]
+                for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
+                    if instruct:
+                        up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    else:
+                        up = pfx + tmpl.format(country=probe, scenario=scenario_text(ex))
+                    s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
+                    acc[0] += s[0]; acc[1] += s[1]
+                us_pred = "yes" if acc[0] > acc[1] else "no"
+                us_raw_scores = acc
+            else:
+                # Single template, matching a base run without --multi-prompt-word.
+                tmpl = YN_WORD_PROMPTS[0]
                 if instruct:
                     up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
                 else:
-                    up = pfx + tmpl.format(country=probe, scenario=scenario_text(ex))
+                    up = prefix + tmpl.format(country=probe, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
-                acc[0] += s[0]; acc[1] += s[1]
-            us_pred = "yes" if acc[0] > acc[1] else "no"
-            us_raw_scores = acc
+                us_pred = "yes" if s[0] > s[1] else "no"
+                us_raw_scores = list(s)
 
         new_predictions.append({
             "country": existing["country"], "group": existing["group"],
@@ -117,6 +156,8 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
         score_choices, us_probe_prompt, SCORING_SUFFIX,
     )
     ds = load_blend(data_path)
+    probe = resolve_probe_country(probe, {ex["country"] for ex in ds
+                                          if ex.get("country")})
     prefix = build_neutral_fewshot_prefix(multi_prompt=False)
     fewshot_turns = NEUTRAL_SHOTS_BLEND if instruct else None
 
@@ -156,6 +197,8 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
     )
     import json
     rows = json.loads(DATA_PATH.read_text())
+    probe = resolve_probe_country(probe, {r["country"] for r in rows
+                                          if r.get("country")})
     prefix = build_neutral_fewshot_prefix()
     fewshot_turns = NEUTRAL_SHOTS if instruct else None
     leading_space = not instruct
@@ -201,6 +244,8 @@ def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
     )
     import json
     rows = json.loads(DATA_PATH.read_text())
+    probe = resolve_probe_country(probe, {r["country"] for r in rows
+                                          if r.get("country")})
     prefix = build_neutral_fewshot_prefix(multi_prompt_word=True)
     fewshot_turns = NEUTRAL_SHOTS_NORMAD if instruct else None
     choices = YN_WORD_CHOICES
@@ -246,7 +291,12 @@ def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True,
-                        help="Existing _usprobe.json to read pred/scores from.")
+                        help="Baseline run to read pred/scores from: the eval "
+                             "output with the TRUE country in the prompt and no "
+                             "probe. A legacy _usprobe.json also works, since "
+                             "it carries the same baseline pred. Pass 'us' to "
+                             "--probe-country to score the US like any other "
+                             "country.")
     parser.add_argument("--probe-country", required=True, nargs="+", metavar="COUNTRY",
                         help="One or more country names to substitute as probe (e.g. 'iran'). "
                              "Several share a single model load, which is most of the cost "
@@ -298,14 +348,24 @@ def main():
         if args.out:
             return Path(args.out)
         slug = probe.lower().replace(" ", "_")
+        tail = "_usprobe" if slug in ("us", "usa", "united_states") else f"_{slug}probe"
         # _raw and _sys say how the prompt was built, so they have to survive the
         # rename: dropping them would name a raw-prompted probe file as if it were
         # chat-templated and let the two collide at one path. Any other tail
         # (_batch_calibrated and friends) is stripped as before.
+        #
+        # The base may be a plain baseline file (no probe at all) or a legacy
+        # _usprobe file that doubled as one. Both are handled: the probe tail
+        # replaces an existing one if present, and is inserted before
+        # _raw/_sys otherwise. "us" keeps the historical _usprobe spelling so
+        # the analysis paths and every existing file still line up.
         m = re.search(r"_usprobe((?:_raw|_sys)*)", base_path.name)
         if m:
-            return BEHAVIORAL / f"{base_path.name[:m.start()]}_{slug}probe{m.group(1)}.json"
-        return BEHAVIORAL / re.sub(r"_usprobe.*$", f"_{slug}probe.json", base_path.name)
+            return BEHAVIORAL / f"{base_path.name[:m.start()]}{tail}{m.group(1)}.json"
+        stem = base_path.name[:-len(".json")] if base_path.name.endswith(".json") \
+            else base_path.name
+        m = re.search(r"((?:_raw|_sys)*)$", stem)
+        return BEHAVIORAL / f"{stem[:m.start()]}{tail}{m.group(1)}.json"
 
     if args.data_path:
         data_path = Path(args.data_path)
@@ -345,7 +405,9 @@ def main():
         elif benchmark == "culturalbench":
             new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
         else:
-            new_predictions = run_normad_probe(base_data, probe, model, tokenizer, instruct, data_path)
+            new_predictions = run_normad_probe(base_data, probe, model, tokenizer,
+                                               instruct, data_path,
+                                               base_name=base_path.name)
 
         out_data = dict(base_data)
         out_data["predictions"] = new_predictions

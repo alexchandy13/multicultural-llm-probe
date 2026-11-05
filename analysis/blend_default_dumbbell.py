@@ -67,6 +67,17 @@ CULT_CELLS = [
     ("sftdpo_aya_cult",   "gemma4", "Gemma-4-12B, SFT+DPO (cultural)"),
 ]
 
+# --off-the-shelf swaps the whole set for the vendors' own instruct releases,
+# all raw-prompted. The condition slug differs by when the run was made --
+# "base" for the Llama/Gemma runs, "offshelf" after the rename -- so it is
+# listed per row rather than assumed.
+OTS_CELLS = [
+    ("base",     "8b_instruct",     "Llama-3.1-8B-Instruct"),
+    ("base",     "gemma4_instruct", "Gemma-4-12B-it"),
+    ("offshelf", "olmo3_instruct",  "OLMo-3-7B-Instruct"),
+    ("offshelf", "qwen35_instruct", "Qwen3.5-9B"),
+]
+
 US_COLOR = CLUSTER_COLORS["EnglishSpeaking"]
 NC_COLOR = "#333333"      # no country: the default being measured
 WC_COLOR = "#9a9a9a"      # country given: the control
@@ -184,6 +195,10 @@ def main() -> None:
                          "a country, so it is dropped by default.")
     ap.add_argument("--with-cult", action="store_true",
                     help="Also include the two cultural SFT+DPO arms.")
+    ap.add_argument("--off-the-shelf", action="store_true",
+                    help="Plot the vendors' own off-the-shelf instruct "
+                         "releases (raw-prompted) instead of our "
+                         "post-trained conditions.")
     ap.add_argument("--combined", action="store_true",
                     help="All available cells in one file.")
     ap.add_argument("--vertical", action="store_true",
@@ -197,10 +212,16 @@ def main() -> None:
                          "the country is given. 'all' includes the correct "
                          "answers, so a country's ratio also rises with "
                          "accuracy on its own questions.")
+    ap.add_argument("--exclude", nargs="*", default=[],
+                    help="model_size labels to drop from the cell list, "
+                         "space separated. Used to pull a model whose runs "
+                         "are known bad without editing the cell tables.")
     args = ap.parse_args()
     FIGURES.mkdir(parents=True, exist_ok=True)
 
-    cells = CELLS + (CULT_CELLS if args.with_cult else [])
+    cells = (OTS_CELLS if args.off_the_shelf
+             else CELLS + (CULT_CELLS if args.with_cult else []))
+    cells = [c for c in cells if c[1] not in args.exclude]
     found = []
     for cond, size, title in cells:
         d = ratios(cond, size, args.include_dummy, args.scope)
@@ -223,7 +244,8 @@ def main() -> None:
                    label=("Country named" if args.scope == "all"
                           else "Country named (errors only)")),
     ]
-    sfx = ("_withcult" if args.with_cult else "") + \
+    sfx = ("_ots" if args.off_the_shelf else "") + \
+          ("_withcult" if args.with_cult else "") + \
           ("_withdummy" if args.include_dummy else "") + \
           ("_allrows" if args.scope == "all" else "") + \
           ("_rate" if args.as_rate else "") + \

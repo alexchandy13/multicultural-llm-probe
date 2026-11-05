@@ -25,6 +25,7 @@ import torch
 from datasets import load_dataset, load_from_disk
 from tqdm import tqdm
 
+from evaluate.country_names import resolve_probe_country
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -314,6 +315,20 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
         print("Raw prompt: chat template bypassed, scoring as a base model")
     fewshot_turns: list[tuple[str, str]] | None = None
 
+    # Resolved against the dataset's own country spellings, once, rather than
+    # formatted in as given. A probe prompt has to differ from the baseline in
+    # the country and nothing else; passing "iran" where the data says "Iran",
+    # or "bosnia_and_herzegovina" where it says anything at all, changes the
+    # surface form too and the agreement rate then measures both. The --us-probe
+    # literal goes through the same call so the two flags cannot disagree.
+    # Five of the eight cluster representatives are not among BLEnD's 16
+    # countries, so those fall back to CANONICAL rather than a dataset match.
+    _probe_resolved = None
+    if probe_country or us_probe:
+        _probe_resolved = resolve_probe_country(
+            probe_country or "US", {ex["country"] for ex in ds if ex.get("country")})
+        print(f"Probe country: {_probe_resolved!r}")
+
     holdout_excluded = {ex["MCQID"] for ex in ds if ex["country"] in HOLDOUT_COUNTRIES}
     print(f"Holdout excluded: {sorted(HOLDOUT_COUNTRIES)} ({len(holdout_excluded)} examples)")
 
@@ -381,7 +396,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
             correct[("group", group)] += 1
 
         us_pred = None
-        _probe = probe_country or ("US" if us_probe else None)
+        _probe = _probe_resolved
         if _probe and c != _probe:
             us_prompt = us_probe_prompt(prompt, c, probe=_probe)
             if multi_prompt:

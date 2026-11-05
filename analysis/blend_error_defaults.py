@@ -43,6 +43,15 @@ MODELS = ["8b", "gemma4"]
 def load(name: str):
     p = BEHAVIORAL / name
     return json.loads(p.read_text())["predictions"] if p.exists() else None
+def load_raw_or_plain(stem: str):
+    """Load `stem.json`, preferring a `_raw` sibling when one exists.
+
+    The off-the-shelf instruct runs are scored with --raw-prompt, which puts
+    `_raw` before the extension; our post-trained conditions have no such file.
+    Preferring raw rather than requiring a flag keeps every caller -- including
+    the ones that only pass (cond, size) -- working for both arms.
+    """
+    return load(f"{stem}_raw.json") or load(f"{stem}.json")
 
 
 def verify_join(withc: list[dict], nc: list[dict], tag: str) -> None:
@@ -65,8 +74,8 @@ def verify_join(withc: list[dict], nc: list[dict], tag: str) -> None:
 
 def tally(cond: str, size: str, scope: str):
     """(picked, available, n_rows, accuracy) with the country in the prompt."""
-    withc = load(f"blend_{cond}_{size}_nfs_usprobe.json")
-    nc = load(f"blend_{cond}_{size}_nfs_nocountry.json")
+    withc = load_raw_or_plain(f"blend_{cond}_{size}_nfs_usprobe")
+    nc = load_raw_or_plain(f"blend_{cond}_{size}_nfs_nocountry")
     if withc is None or nc is None:
         return None
     verify_join(withc, nc, f"{cond}/{size}")

@@ -19,6 +19,7 @@ import torch
 from datasets import load_dataset, load_from_disk
 from tqdm import tqdm
 
+from evaluate.country_names import resolve_probe_country
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -650,6 +651,18 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     instruct = is_instruct(model_size) and not raw_prompt
     if raw_prompt and is_instruct(model_size):
         print("Raw prompt: chat template bypassed, scoring as a base model")
+
+    # Resolved against the dataset's own country spellings, once, rather than
+    # formatted in as given. A probe prompt has to differ from the baseline in
+    # the country and nothing else; passing "iran" where the data says "Iran",
+    # or "bosnia_and_herzegovina" where it says anything at all, changes the
+    # surface form too and the agreement rate then measures both. The --us-probe
+    # literal goes through the same call so the two flags cannot disagree.
+    _probe_resolved = None
+    if probe_country or us_probe:
+        _probe_resolved = resolve_probe_country(
+            probe_country or "United States", {country(ex) for ex in ds})
+        print(f"Probe country: {_probe_resolved!r} (as the dataset spells it)")
     # For instruct models, few-shot examples are passed as chat turns rather than
     # prepended as raw strings. fewshot_turns is only used when instruct=True.
     fewshot_turns: list[tuple[str, str]] | None = None
@@ -751,7 +764,7 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
 
         us_pred = None
         us_raw_scores = None
-        _probe = probe_country or ("United States" if us_probe else None)
+        _probe = _probe_resolved
         if _probe and c != _probe:
             if multi_prompt_word:
                 us_accumulated = [0.0, 0.0]

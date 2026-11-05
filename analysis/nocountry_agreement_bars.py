@@ -154,18 +154,19 @@ CELLS = [
     ("tulu3_dpo",         "8b",     "Tulu-3-8B, DPO"),
 ]
 
-# --off-the-shelf swaps in the released checkpoints: no adapter of ours, so
-# condition is "base" throughout and the arm is carried by model_size.
-# Pretrained and instruct are shown together because the pair is the point --
-# whether the vendor's own post-training moves the country-free prediction the
-# way ours does. Their prompts differ (the instruct releases are chat-templated
-# with NEUTRAL_CHAT_SYSTEM, the pretrained ones see the raw string), so read
-# across the pair with that in mind.
+# --off-the-shelf plots the vendors' own instruct releases: no adapter of ours,
+# so the arm is carried entirely by model_size. The condition slug differs by
+# when the run was made -- "base" for the Llama/Gemma runs, "offshelf" for
+# everything after the rename -- and path_for just concatenates it, so both
+# spellings have to be listed per row rather than assumed.
+#
+# All four are scored with --raw-prompt (the chat template bypassed), so the
+# panels are directly comparable to each other and to the pretrained runs.
 OTS_CELLS = [
-    ("base", "8b",              "Llama-3.1-8B (pretrained)"),
-    ("base", "8b_instruct",     "Llama-3.1-8B-Instruct"),
-    ("base", "gemma4",          "Gemma-4-12B (pretrained)"),
-    ("base", "gemma4_instruct", "Gemma-4-12B-it"),
+    ("base",     "8b_instruct",     "Llama-3.1-8B-Instruct"),
+    ("base",     "gemma4_instruct", "Gemma-4-12B-it"),
+    ("offshelf", "olmo3_instruct",  "OLMo-3-7B-Instruct"),
+    ("offshelf", "qwen35_instruct", "Qwen3.5-9B"),
 ]
 
 BENCH_TITLE = {"normad": "NormAd", "culturalbench": "CulturalBench",
@@ -175,7 +176,8 @@ BENCH_TITLE = {"normad": "NormAd", "culturalbench": "CulturalBench",
 def draw(ax, rates: dict, bench: str, title: str, show_ylabel: bool,
          baseline: str = "chance", sort: bool = True,
          color_by: str = "probe", cmap: str = "viridis",
-         scale: str = "rank", metric: str = "blank") -> None:
+         scale: str = "rank", metric: str = "blank",
+         lo: float | None = None) -> None:
     xs, heights, errs, colors, labels = [], [], [], [], []
     PALETTE = distance_colors(cmap, scale) if color_by == "distance" else {}
     entries = [(slug, cluster, label) for slug, cluster, label in BAR_ORDER
@@ -216,7 +218,18 @@ def draw(ax, rates: dict, bench: str, title: str, show_ylabel: bool,
         # chance is a real floor for this measure, not an arbitrary crop, and
         # because every bar is still labelled with its actual value. The
         # dashed line is dropped since the axis itself now marks it.
-        ax.set_ylim(chance, 1.0)
+        #
+        # `lo` overrides the floor when some bar dips below chance. Clipping a
+        # sub-chance bar to zero height would read as "exactly at chance",
+        # which is a different claim, so the axis drops to fit it and the
+        # chance line is drawn back in to keep the reference visible.
+        floor = chance if lo is None else min(lo, chance)
+        ax.set_ylim(floor, 1.0)
+        if floor < chance:
+            ax.axhline(chance, color="#888888", lw=1.0, ls=(0, (4, 3)),
+                       zorder=0)
+            ax.text(-0.62, chance + 0.012, f"chance {chance:.2f}",
+                    ha="left", va="bottom", fontsize=7, color="#666666")
     else:
         ax.set_ylim(0, 1.0)
         ax.axhline(chance, color="#888888", lw=1.0, ls=(0, (4, 3)), zorder=0)
@@ -232,7 +245,7 @@ def draw(ax, rates: dict, bench: str, title: str, show_ylabel: bool,
     if show_ylabel:
         lab = ("Default rate: P(pred == swapped pred)" if metric == "default"
                else "Agreement with country-free prediction")
-        if baseline == "chance":
+        if baseline == "chance" and (lo is None or lo >= chance):
             lab += f"\n(axis starts at chance, {chance:.2f})"
         ax.set_ylabel(lab, fontsize=9)
     # No shading caption: the ramp is decoration on top of an axis that already
@@ -287,14 +300,19 @@ def main() -> None:
                          "length read as distance above chance; 'zero' is the "
                          "untruncated axis.")
     ap.add_argument("--off-the-shelf", action="store_true",
-                    help="Plot the released Llama and Gemma checkpoints "
-                         "(pretrained and the vendors' own instruct tuning) "
-                         "instead of our post-trained conditions.")
+                    help="Plot the vendors' own off-the-shelf instruct "
+                         "releases (raw-prompted) instead of our "
+                         "post-trained conditions.")
+    ap.add_argument("--exclude", nargs="*", default=[],
+                    help="model_size labels to drop from the cell list, "
+                         "space separated. Used to pull a model whose runs "
+                         "are known bad without editing the cell tables.")
     args = ap.parse_args()
 
     bench = args.benchmark
     FIGURES.mkdir(parents=True, exist_ok=True)
     cells = OTS_CELLS if args.off_the_shelf else CELLS
+    cells = [c for c in cells if c[1] not in args.exclude]
     suffix = ("_ots" if args.off_the_shelf else "") + \
              ("_defaultrate" if args.metric == "default" else "") + \
              ("_errors" if args.errors_only else "") + \
@@ -319,6 +337,14 @@ def main() -> None:
         print(f"no {bench} data — run {BENCHMARKS[bench]['job']}")
         return
 
+    # The error bar, not just the point, has to fit: a bar whose value clears
+    # chance but whose lower whisker does not would still be clipped. Computed
+    # across every panel because combined mode shares one y axis, and left at
+    # None when nothing dips, so the usual chance-origin axis is unchanged.
+    dips = [v - ci(v, n) for _, _, _, r in found for v, n in r.values()]
+    lo = min(dips) - 0.02 if dips and min(dips) < (0.25 if bench == "blend"
+                                                  else 0.5) else None
+
     if args.combined:
         fig, axes = plt.subplots(1, len(found), figsize=(8.0 * len(found), 4.8),
                                  sharey=True)
@@ -328,7 +354,7 @@ def main() -> None:
             draw(ax, r, bench, title, show_ylabel=(ax is axes[0]),
                  baseline=args.baseline, sort=not args.no_sort,
                  color_by=args.color_by, cmap=args.cmap, scale=args.scale,
-                 metric=args.metric)
+                 metric=args.metric, lo=lo)
         head = ("default rate P(pred == swapped pred) for each probe country"
                 if args.metric == "default"
                 else "agreement between the country-free prediction and each "
@@ -343,10 +369,12 @@ def main() -> None:
 
     for cond, size, title, r in found:
         fig, ax = plt.subplots(figsize=(9.2, 4.8))
+        # Same floor as the combined figure rather than a per-panel one, so
+        # the single-cell PNGs stay comparable to each other and to it.
         draw(ax, r, bench, f"{BENCH_TITLE[bench]} — {title}", show_ylabel=True,
              baseline=args.baseline, sort=not args.no_sort,
              color_by=args.color_by, cmap=args.cmap, scale=args.scale,
-             metric=args.metric)
+             metric=args.metric, lo=lo)
         fig.tight_layout()
         out = FIGURES / f"nocountry_agree_{bench}_{cond}_{size}{suffix}.png"
         fig.savefig(out, dpi=200)

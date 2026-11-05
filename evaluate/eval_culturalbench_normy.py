@@ -24,6 +24,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
+from evaluate.country_names import resolve_probe_country
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -60,7 +61,15 @@ def evaluate_one(condition_name: str, out_path: Path,
     choices = YN_WORD_CHOICES
     leading_space = not instruct
 
-    _probe = probe_country or ("United States" if us_probe else None)
+    # Same resolution as the other eval scripts: the dataset's own spelling,
+    # so a probe prompt differs from the baseline in the country and nothing
+    # else. See evaluate/country_names.py.
+    _probe = None
+    if probe_country or us_probe:
+        _probe = resolve_probe_country(
+            probe_country or "United States",
+            {r["country"] for r in rows if r.get("country")})
+        print(f"Probe country: {_probe!r} (as the dataset spells it)")
 
     correct     = defaultdict(int)
     total       = defaultdict(int)

@@ -38,6 +38,15 @@ MODELS = ["8b", "gemma4"]
 def load(name: str):
     p = BEHAVIORAL / name
     return json.loads(p.read_text())["predictions"] if p.exists() else None
+def load_raw_or_plain(stem: str):
+    """Load `stem.json`, preferring a `_raw` sibling when one exists.
+
+    The off-the-shelf instruct runs are scored with --raw-prompt, which puts
+    `_raw` before the extension; our post-trained conditions have no such file.
+    Preferring raw rather than requiring a flag keeps every caller -- including
+    the ones that only pass (cond, size) -- working for both arms.
+    """
+    return load(f"{stem}_raw.json") or load(f"{stem}.json")
 
 
 def ci(p: float, n: int) -> float:
@@ -46,7 +55,7 @@ def ci(p: float, n: int) -> float:
 
 def defaults(cond: str, size: str):
     """(picked Counter, available Counter, n) over country-free questions."""
-    nc = load(f"blend_{cond}_{size}_nfs_nocountry.json")
+    nc = load_raw_or_plain(f"blend_{cond}_{size}_nfs_nocountry")
     if nc is None:
         return None
     picked, avail, n = Counter(), Counter(), 0
@@ -68,7 +77,7 @@ def defaults(cond: str, size: str):
 
 def agreement(cond: str, size: str):
     us = load(f"blend_{cond}_{size}_nfs_usprobe.json")
-    nc = load(f"blend_{cond}_{size}_nfs_nocountry.json")
+    nc = load_raw_or_plain(f"blend_{cond}_{size}_nfs_nocountry")
     if us is None or nc is None:
         return None
     if len(us) != len(nc):

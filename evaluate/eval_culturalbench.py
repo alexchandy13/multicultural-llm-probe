@@ -17,6 +17,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
+from evaluate.country_names import resolve_probe_country
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -230,7 +231,18 @@ def evaluate_one(condition_name: str, out_path: Path,
         prefix = ""
         fewshot_turns = None
 
-    _probe = probe_country or ("United States" if us_probe else None)
+    # Resolved against the dataset's own country spellings, once, rather than
+    # formatted in as given. A probe prompt has to differ from the baseline in
+    # the country and nothing else; passing "iran" where the data says "Iran",
+    # or "bosnia_and_herzegovina" where it says anything at all, changes the
+    # surface form too and the agreement rate then measures both. The --us-probe
+    # literal goes through the same call so the two flags cannot disagree.
+    _probe = None
+    if probe_country or us_probe:
+        _probe = resolve_probe_country(
+            probe_country or "United States",
+            {r["country"] for r in rows if r.get("country")})
+        print(f"Probe country: {_probe!r} (as the dataset spells it)")
     leading_space = not instruct
 
     correct  = defaultdict(int)
