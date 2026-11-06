@@ -34,7 +34,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from analysis.cluster_accuracy_pipeline import CLUSTER_COLORS
 from analysis.nocountry_agreement import (
-    BENCHMARKS, ci, per_probe_country, per_probe_default,
+    BENCHMARKS, ci, per_probe_country, per_probe_default, set_arm,
 )
 
 FIGURES = PROJECT_ROOT / "outputs" / "figures" / "nocountry_agreement"
@@ -261,6 +261,13 @@ def draw(ax, rates: dict, bench: str, title: str, show_ylabel: bool,
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--benchmark", default="normad", choices=list(BENCHMARKS))
+    ap.add_argument("--arm", default="raw", choices=["raw", "sys", "plain"],
+                    help="Prompt-format arm to read, which is the last element "
+                         "of every filename: raw for the --raw-prompt runs "
+                         "(_raw), sys for the chat-templated ones (_sys), "
+                         "plain for neither. Arms must not be mixed in one "
+                         "figure -- agreement between a templated probe and a "
+                         "raw baseline measures the prompt format.")
     ap.add_argument("--combined", action="store_true",
                     help="One file with the three panels side by side instead "
                          "of three separate files.")
@@ -308,6 +315,8 @@ def main() -> None:
                          "space separated. Used to pull a model whose runs "
                          "are known bad without editing the cell tables.")
     args = ap.parse_args()
+    # Must happen before any path_for() call, since it selects the filenames.
+    set_arm(args.arm)
 
     bench = args.benchmark
     FIGURES.mkdir(parents=True, exist_ok=True)

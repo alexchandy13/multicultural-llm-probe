@@ -52,6 +52,7 @@ def _in_sample(key, frac: float) -> bool:
     return int(h, 16) / 0x100000000 < frac
 
 from evaluate._common import (
+    NEUTRAL_CHAT_SYSTEM,
     PROJECT_ROOT,
     build_chat_prompt,
     is_instruct,
@@ -65,7 +66,8 @@ BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 
 def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
                      instruct: bool, data_path: Path,
-                     base_name: str = "") -> list[dict]:
+                     base_name: str = "",
+                     system_prompt: str | None = None) -> list[dict]:
     from evaluate.eval_normad import (
         NEUTRAL_SHOTS_NORMAD, YN_WORD_CHOICES, YN_WORD_PROMPTS,
         YN_PROMPT_TEMPLATE, add_context_line,
@@ -122,7 +124,7 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
                 acc = [0.0, 0.0]
                 for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
                     if instruct:
-                        up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                        up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                     else:
                         up = pfx + tmpl.format(country=probe, scenario=scenario_text(ex))
                     s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
@@ -136,7 +138,7 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
                 # prompts and their agreement measured the template gap.
                 tmpl = add_context_line(YN_PROMPT_TEMPLATE, "none")
                 if instruct:
-                    up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
+                    up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns, system=system_prompt)
                 else:
                     up = prefix + tmpl.format(country=probe, scenario=scenario_text(ex))
                 s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
@@ -154,7 +156,8 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
 
 def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
                     instruct: bool, data_path: Path,
-                    sample_frac: float = 1.0) -> list[dict]:
+                    sample_frac: float = 1.0,
+                    system_prompt: str | None = None) -> list[dict]:
     from evaluate.eval_blend import (
         NEUTRAL_SHOTS_BLEND, build_neutral_fewshot_prefix, load_blend,
         score_choices, us_probe_prompt, SCORING_SUFFIX,
@@ -177,7 +180,7 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
             prompt = ex["prompt"]
             probe_prompt = us_probe_prompt(prompt, c, probe=probe)
             if instruct:
-                up = build_chat_prompt(tokenizer, probe_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX)
+                up = build_chat_prompt(tokenizer, probe_prompt, fewshot=fewshot_turns, generation_suffix=SCORING_SUFFIX, system=system_prompt)
             else:
                 up = prefix + probe_prompt + SCORING_SUFFIX
             us_scores = score_choices(model, tokenizer, up)
@@ -195,7 +198,8 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
 
 def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
                             instruct: bool,
-                            neutral_shots: int | None = 2) -> list[dict]:
+                            neutral_shots: int | None = 2,
+                            system_prompt: str | None = None) -> list[dict]:
     from evaluate.eval_culturalbench import (
         CHOICES, build_neutral_fewshot_prefix, build_neutral_shots,
         build_prompt, make_probe_prompt, DATA_PATH,
@@ -239,7 +243,8 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
         us_pred = us_raw_scores = None
         if country.lower().replace(" ", "_") != probe.lower().replace(" ", "_"):
             probe_q = make_probe_prompt(row["reformatted_prompt"], country, probe)
-            probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns)
+            probe_prompt = build_prompt(prefix, probe_q, instruct, tokenizer, fewshot_turns,
+                                        system_prompt=system_prompt)
             us_scores = score_choices(model, tokenizer, probe_prompt, CHOICES, leading_space=leading_space)
             us_pred = CHOICES[0] if us_scores[0] > us_scores[1] else CHOICES[1]
             us_raw_scores = list(us_scores)
@@ -259,7 +264,8 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
 
 
 def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
-                                  instruct: bool) -> list[dict]:
+                                  instruct: bool,
+                                  system_prompt: str | None = None) -> list[dict]:
     from evaluate.eval_culturalbench_normy import DATA_PATH
     from evaluate.eval_normad import (
         NEUTRAL_SHOTS_NORMAD, YN_WORD_CHOICES, YN_WORD_PROMPTS,
@@ -289,7 +295,7 @@ def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
             acc = [0.0, 0.0]
             for tmpl, pfx in zip(YN_WORD_PROMPTS, prefix):
                 if instruct:
-                    up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=story), fewshot=fewshot_turns)
+                    up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=story), fewshot=fewshot_turns, system=system_prompt)
                 else:
                     up = pfx + tmpl.format(country=probe, scenario=story)
                 s = score_choices(model, tokenizer, up, choices, leading_space=leading_space)
@@ -355,10 +361,29 @@ def main():
              "count is an error rather than a silent default, because the "
              "wrong count silently changes the number of shots AND the "
              "yes-rate the prefix implies.")
+    parser.add_argument(
+        "--system-prompt", default=None, metavar="TEXT",
+        help="Explicit system message for chat-templated checkpoints, which "
+             "MUST match the --base run's: without it a template inserts its "
+             "own default (Olmo-3-Instruct's is a function-calling prompt) on "
+             "the probe side only, so probe and baseline differ by a system "
+             "message as well as the country. Pass 'neutral' for "
+             "'You are a helpful assistant.'. No effect under --raw-prompt.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip countries whose output file is already present, so a "
                              "preempted and requeued job resumes instead of redoing work.")
     args = parser.parse_args()
+
+    if args.system_prompt == "neutral":
+        args.system_prompt = NEUTRAL_CHAT_SYSTEM
+    # A _sys tail on the base file means that run carried a system prompt, so
+    # probing it without one would reintroduce the mismatch this flag exists to
+    # prevent. out_for() preserves the tail, so the output would claim _sys too.
+    if "_sys" in Path(args.base).name and not args.system_prompt:
+        parser.error(
+            f"{Path(args.base).name} was run with a system prompt; pass the "
+            f"same --system-prompt (e.g. 'neutral') or the probe prompts will "
+            f"differ from the baseline by more than the country")
 
     if args.out and len(args.probe_country) > 1:
         parser.error("--out names a single file; pass one --probe-country with it")
@@ -449,17 +474,19 @@ def main():
         if benchmark == "blend":
             new_predictions, resolved = run_blend_probe(
                 base_data, probe, model, tokenizer, instruct, data_path,
-                sample_frac=args.sample_frac)
+                sample_frac=args.sample_frac, system_prompt=args.system_prompt)
         elif benchmark == "culturalbench_normy":
-            new_predictions, resolved = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
+            new_predictions, resolved = run_culturalbench_normy_probe(
+                base_data, probe, model, tokenizer, instruct,
+                system_prompt=args.system_prompt)
         elif benchmark == "culturalbench":
             new_predictions, resolved = run_culturalbench_probe(
                 base_data, probe, model, tokenizer, instruct,
-                neutral_shots=neutral_shots)
+                neutral_shots=neutral_shots, system_prompt=args.system_prompt)
         else:
             new_predictions, resolved = run_normad_probe(
                 base_data, probe, model, tokenizer, instruct, data_path,
-                base_name=base_path.name)
+                base_name=base_path.name, system_prompt=args.system_prompt)
 
         out_data = {k: v for k, v in base_data.items()
                     if k != "derived_from"}

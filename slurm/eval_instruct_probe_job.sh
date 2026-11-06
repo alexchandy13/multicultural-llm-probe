@@ -4,7 +4,10 @@
 #SBATCH --account=scavenger
 #SBATCH --qos=scavenger
 #SBATCH --gres=gpu:rtxa5000:1
-#SBATCH --time=4:00:00
+# A task is now every model for one (benchmark, country group), serially, so
+# the ceiling is generous; preemption is covered by --requeue plus
+# --skip-existing, TIMEOUT is not.
+#SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --requeue
@@ -33,7 +36,12 @@
 #   --condition     override the per-model default (base for the Llama/Gemma
 #                   runs, which predate the rename; offshelf for the rest)
 #
-# tasks = n_models * n_benchmarks * (n_countries if --split-countries else 1)
+# ONE TASK PER (benchmark, country group): each task loops over every model in
+# --models, so the full normad+culturalbench probe pass is a 2-wide array
+# rather than 10. The models differ only in which checkpoint is loaded.
+#
+# tasks = n_benchmarks * (n_countries if --split-countries else 1)
+#                      * (n_models if --split-models else 1)
 #
 # --split-countries is what BLEnD wants: 23,032 rows is ~1 h per country, so
 # eight in one task is a serial ~8 h job that is hard to place on a preemptible
@@ -41,19 +49,26 @@
 # covers preemption, not TIMEOUT). NormAd (1,697 rows) and CulturalBench
 # (4,905) finish all eight in minutes, so they want the default.
 #
-# Run with --layout to print the task mapping and exit without scoring
-# anything. It needs no GPU and no slurm, so check the array size that way
-# before submitting:
+# --layout prints the task mapping and the array size, then exits; it needs no
+# GPU and no slurm, so check the size that way before submitting:
 #
-#   bash slurm/eval_instruct_probe_job.sh --layout --models olmo3_instruct \
+#   bash slurm/eval_instruct_probe_job.sh --layout --benchmarks blend \
+#        --split-countries
+#   sbatch --array=0-1 slurm/eval_instruct_probe_job.sh \
+#        --benchmarks normad,culturalbench
+#   sbatch --array=0-7 slurm/eval_instruct_probe_job.sh \
 #        --benchmarks blend --split-countries
-#   sbatch --array=0-7 slurm/eval_instruct_probe_job.sh --models olmo3_instruct \
-#        --benchmarks blend --split-countries
+#
+# --split-models additionally gives one task per model, which BLEnD wants when
+# the queue is deep enough to place a wide array faster than a long task.
+#
+# --array is accepted only to requeue part of a finished grid (--array 3,7).
 #
 # Needs eval_instruct_baseline_job.sh to have finished for each (model,
 # benchmark) pair, which the missing-base check below enforces.
 
 set -euo pipefail
+
 
 # 8b:tulu3_dpo is label:condition -- Tulu is a condition over the 8b base,
 # not a model label, and it is the fully post-trained DPO arm; the SFT-only
@@ -65,10 +80,18 @@ COUNTRIES_ARG="us,netherlands,hungary,bosnia_and_herzegovina,mexico,taiwan,phili
 SPLIT=0
 COND_OVERRIDE=""
 LAYOUT=0
+# One task per model as well, instead of looping them inside the task. Off by
+# default -- see --split-countries, which is the split that actually matters.
+SPLIT_MODELS=0
 # Selects which baseline to probe, and must match the --shots the baseline job
 # ran with: the shot count is part of the filename, and add_probe rebuilds the
 # base run's prefix from that name so the probe prompt carries the same context.
 SHOTS=2
+# Must match the baseline job's arm. --raw-prompt is the default; --templated
+# keeps the chat template and passes --system-prompt neutral, which add_probe
+# requires whenever the base file carries a _sys tail -- otherwise the template
+# inserts its own default system message on the probe side only.
+TEMPLATED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -77,7 +100,9 @@ while [[ $# -gt 0 ]]; do
         --countries)   COUNTRIES_ARG="$2"; shift 2 ;;
         --condition)   COND_OVERRIDE="$2"; shift 2 ;;
         --shots)       SHOTS="$2"; shift 2 ;;
+        --templated)   TEMPLATED=1; shift ;;
         --split-countries) SPLIT=1; shift ;;
+        --split-models) SPLIT_MODELS=1; shift ;;
         --layout)      LAYOUT=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -115,10 +140,11 @@ done
 
 N_MODELS=${#MODELS[@]}
 N_BENCH=${#BENCHES[@]}
-# One "country group" per task when splitting, otherwise a single group holding
-# every country -- which is what makes the index arithmetic the same either way.
+# One "group" per task when splitting, otherwise a single group holding every
+# country / model -- which is what makes the index arithmetic the same either way.
 if [[ $SPLIT -eq 1 ]]; then N_GROUPS=${#COUNTRIES[@]}; else N_GROUPS=1; fi
-N_TASKS=$(( N_MODELS * N_BENCH * N_GROUPS ))
+if [[ $SPLIT_MODELS -eq 1 ]]; then N_MGROUPS=$N_MODELS; else N_MGROUPS=1; fi
+N_TASKS=$(( N_BENCH * N_GROUPS * N_MGROUPS ))
 
 # Precedence: the entry's own condition, then --condition, then the per-label
 # default (base for the Llama/Gemma runs, which predate the rename).
@@ -143,6 +169,14 @@ cond_at() {
 # _common pulls in torch and peft, and --layout has to run on a login node.
 raw_tail_for() {
     local label="$1"
+    if [[ $TEMPLATED -eq 1 ]]; then
+        # Unconditional, unlike _raw: sys_sfx in the eval scripts is gated only
+        # on --system-prompt being set, not on the label being chat-templated.
+        # So a label with no chat template (plain "8b") still gets a _sys name
+        # even though the system message has no effect on it.
+        echo "_sys"
+        return
+    fi
     if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
          | grep -q "\"${label}\","; then
         echo "_raw"
@@ -165,25 +199,35 @@ base_for() {
     esac
 }
 
-# task id -> (model, benchmark, country group). Decomposed most-significant
-# first so a model's tasks stay contiguous.
+# task id -> (benchmark, country group, model group). Benchmark most significant
+# so a benchmark's tasks stay contiguous, which is what --array subsets index into.
 decompose() {
     local id="$1"
-    local per_model=$(( N_BENCH * N_GROUPS ))
-    IDX_MODEL=$(( id / per_model ))
-    local rem=$(( id % per_model ))
-    IDX_BENCH=$(( rem / N_GROUPS ))
-    IDX_GROUP=$(( rem % N_GROUPS ))
+    local per_bench=$(( N_GROUPS * N_MGROUPS ))
+    IDX_BENCH=$(( id / per_bench ))
+    local rem=$(( id % per_bench ))
+    IDX_GROUP=$(( rem / N_MGROUPS ))
+    IDX_MGROUP=$(( rem % N_MGROUPS ))
+}
+
+# The models this task runs: one when splitting, all of them otherwise.
+models_for_task() {
+    if [[ $SPLIT_MODELS -eq 1 ]]; then echo "$IDX_MGROUP"; return; fi
+    seq 0 $(( N_MODELS - 1 ))
 }
 
 if [[ $LAYOUT -eq 1 ]]; then
     echo "tasks: $N_TASKS   (submit with --array=0-$(( N_TASKS - 1 )))"
     for (( t = 0; t < N_TASKS; t++ )); do
         decompose "$t"
-        m=${MODELS[$IDX_MODEL]}; b=${BENCHES[$IDX_BENCH]}; c=$(cond_at "$IDX_MODEL")
+        b=${BENCHES[$IDX_BENCH]}
         if [[ $SPLIT -eq 1 ]]; then p=${COUNTRIES[$IDX_GROUP]}; else p="${COUNTRIES[*]}"; fi
-        printf '  %3d  %-9s %-16s %-13s %s\n' "$t" "$c" "$m" "$b" "$p"
-        printf '       base: %s\n' "$(base_for "$b" "$c" "$m")"
+        printf '  %3d  %-13s %s\n' "$t" "$b" "$p"
+        for mi in $(models_for_task); do
+            c=$(cond_at "$mi")
+            printf '       %-9s %-16s base: %s\n' \
+                   "$c" "${MODELS[$mi]}" "$(base_for "$b" "$c" "${MODELS[$mi]}")"
+        done
     done
     exit 0
 fi
@@ -203,24 +247,44 @@ source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
 decompose "$SLURM_ARRAY_TASK_ID"
-MODEL=${MODELS[$IDX_MODEL]}
 BENCH=${BENCHES[$IDX_BENCH]}
-COND=$(cond_at "$IDX_MODEL")
 if [[ $SPLIT -eq 1 ]]; then PROBES=("${COUNTRIES[$IDX_GROUP]}"); else PROBES=("${COUNTRIES[@]}"); fi
 
-BASE=$(base_for "$BENCH" "$COND" "$MODEL")
-if [[ ! -f "$BASE" ]]; then
-    echo "[inst_probe] missing base $BASE — run eval_instruct_baseline_job.sh first" >&2
+echo "[inst_probe] benchmark=$BENCH probes=${PROBES[*]}"
+
+# Mirrors the baseline arm exactly; add_probe refuses a _sys base without a
+# matching --system-prompt, so a mismatched submission fails before it scores.
+FMT_FLAG=(--raw-prompt)
+[[ $TEMPLATED -eq 1 ]] && FMT_FLAG=(--system-prompt neutral)
+
+# A missing base is this task's fault to report, not a reason to drop the other
+# models in it, so it joins the failure list like any other error.
+FAILED=()
+for mi in $(models_for_task); do
+    MODEL=${MODELS[$mi]}
+    COND=$(cond_at "$mi")
+    BASE=$(base_for "$BENCH" "$COND" "$MODEL")
+    if [[ ! -f "$BASE" ]]; then
+        echo "[inst_probe] missing base $BASE — run eval_instruct_baseline_job.sh first" >&2
+        FAILED+=("$COND/$MODEL:no-base")
+        continue
+    fi
+    echo "[inst_probe] === $BENCH / $COND / $MODEL  base=$BASE"
+    if ! python evaluate/add_probe.py \
+        --base "$BASE" \
+        --probe-country "${PROBES[@]}" \
+        --condition "$COND" \
+        --model-size "$MODEL" \
+        --precision matched_bf16 \
+        "${FMT_FLAG[@]}" \
+        --skip-existing; then
+        echo "[inst_probe] FAILED: $BENCH / $COND / $MODEL" >&2
+        FAILED+=("$COND/$MODEL")
+    fi
+done
+
+if (( ${#FAILED[@]} )); then
+    echo "[inst_probe] $BENCH: ${#FAILED[@]} failed: ${FAILED[*]}" >&2
     exit 1
 fi
-
-echo "[inst_probe] model=$MODEL condition=$COND benchmark=$BENCH probes=${PROBES[*]}"
-
-python evaluate/add_probe.py \
-    --base "$BASE" \
-    --probe-country "${PROBES[@]}" \
-    --condition "$COND" \
-    --model-size "$MODEL" \
-    --precision matched_bf16 \
-    --raw-prompt \
-    --skip-existing
+echo "[inst_probe] $BENCH: done"

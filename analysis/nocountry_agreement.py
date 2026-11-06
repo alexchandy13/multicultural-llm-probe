@@ -119,9 +119,38 @@ RAW_SIZES: set[str] = {
 }
 
 
+# Which prompt-format arm to read. It is the last element of every filename.
+#   "raw"    --raw-prompt: the chat template is bypassed and the model is scored
+#            as a base model. Tagged _raw, but only for labels that have a chat
+#            template to bypass -- hence RAW_SIZES.
+#   "sys"    --system-prompt: the chat template is kept. Tagged _sys
+#            unconditionally, since the eval scripts gate that suffix on the
+#            flag alone and not on the label.
+#   "plain"  neither flag.
+# A figure must not mix arms: an agreement rate between a templated probe and a
+# raw baseline measures the prompt format, which is the class of defect this
+# whole module exists to report on.
+ARM = "raw"
+
+
+def set_arm(arm: str) -> None:
+    if arm not in ("raw", "sys", "plain"):
+        raise ValueError(f"unknown arm {arm!r}; expected raw, sys or plain")
+    global ARM
+    ARM = arm
+
+
+def arm_tail(size: str) -> str:
+    if ARM == "plain":
+        return ""
+    if ARM == "sys":
+        return "_sys"
+    return "_raw" if size in RAW_SIZES else ""
+
+
 def path_for(bench: str, cond: str, size: str, probe: str | None) -> str:
     sfx = BENCHMARKS[bench]["suffix"]
-    raw = "_raw" if size in RAW_SIZES else ""
+    raw = arm_tail(size)
     if probe is None:
         return f"{bench}_{cond}_{size}{sfx}_nocountry{raw}.json"
     tail = "_usprobe" if probe == "us" else f"_{probe}probe"
@@ -233,6 +262,13 @@ def main() -> None:
     ap.add_argument("--benchmark", default="normad", choices=list(BENCHMARKS),
                     help="Which benchmark's country ablation to read "
                          "(default normad).")
+    ap.add_argument("--arm", default="raw", choices=["raw", "sys", "plain"],
+                    help="Prompt-format arm to read, which is the last element "
+                         "of every filename: raw for the --raw-prompt runs "
+                         "(_raw), sys for the chat-templated ones (_sys), "
+                         "plain for neither. Arms must not be mixed in one "
+                         "figure -- agreement between a templated probe and a "
+                         "raw baseline measures the prompt format.")
     ap.add_argument("--group", default=None,
                     help="Restrict to one group field value, e.g. Non-Western.")
     ap.add_argument("--per-probe-country", action="store_true",
@@ -243,6 +279,7 @@ def main() -> None:
                     help="Condition on the model's errors, as the US-default "
                          "rate does.")
     args = ap.parse_args()
+    set_arm(args.arm)
 
     bench = args.benchmark
     sfx = BENCHMARKS[bench]["suffix"]

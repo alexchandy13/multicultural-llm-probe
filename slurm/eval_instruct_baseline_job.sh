@@ -4,7 +4,10 @@
 #SBATCH --account=scavenger
 #SBATCH --qos=scavenger
 #SBATCH --gres=gpu:rtxa5000:1
-#SBATCH --time=4:00:00
+# A task is now every model for one benchmark, serially: BLEnD is ~40 min a
+# model, so five is ~3.5 h. Preemption is covered by --requeue plus the
+# per-model skip, but TIMEOUT is not, so the ceiling is generous.
+#SBATCH --time=12:00:00
 #SBATCH --mem=48G
 #SBATCH --cpus-per-task=4
 #SBATCH --requeue
@@ -42,18 +45,27 @@
 #                  interchangeable. resolve_condition() treats them
 #                  identically -- no adapter of ours either way.
 #
-# tasks = n_models * n_benchmarks. Run with --layout to print the mapping and
-# exit; it needs no GPU and no slurm.
+# ONE TASK PER BENCHMARK: tasks = n_benchmarks, and each task loops over every
+# model in --models. The models differ only in which checkpoint gets loaded, so
+# a task per (model, benchmark) buys nothing but more queue slots to chase.
+# --layout prints the mapping and the array size; it needs no GPU and no slurm.
 #
-#   bash slurm/eval_instruct_baseline_job.sh --layout --benchmarks normad
-#   sbatch --array=0-3 slurm/eval_instruct_baseline_job.sh --benchmarks normad
+#   bash slurm/eval_instruct_baseline_job.sh --layout
+#   sbatch --array=0-2 slurm/eval_instruct_baseline_job.sh
+#   sbatch --array=0 slurm/eval_instruct_baseline_job.sh --benchmarks normad
+#
+# --split-models goes back to one task per (model, benchmark), which is worth it
+# only for BLEnD: 23k rows x 5 models is a serial ~3.5 h task, and on a
+# preemptible partition a wide array places sooner than a long task.
 #
 # NormAd is ~1,700 items (minutes), CulturalBench ~4,900, BLEnD ~23k (~40 min,
 # since the baseline is a single pass rather than the two the old us-probe run
-# made). Skips and exits 0 when its output exists, so refilling gaps costs one
-# model load per task.
+# made). Each model is skipped when its output already exists, so a requeue
+# after preemption resumes at the model it died on rather than redoing the
+# task.
 
 set -euo pipefail
+
 
 # 8b:tulu3_dpo is label:condition -- Tulu is a condition over the 8b base,
 # not a model label, and it is the fully post-trained DPO arm; the SFT-only
@@ -62,6 +74,11 @@ MODELS_ARG="8b_instruct,gemma4_instruct,olmo3_instruct,qwen35_instruct,8b:tulu3_
 BENCHES_ARG="normad,culturalbench,blend"
 COND_OVERRIDE=""
 LAYOUT=0
+# One task per (model, benchmark) instead of one per benchmark. Off by default:
+# a model is just a different checkpoint in the same loop, so fanning out over
+# models multiplies queue slots without shortening the critical path. Worth it
+# for BLEnD, where a serial five-model task runs for hours.
+SPLIT_MODELS=0
 # The country-free arm is the same single pass with the country dropped from the
 # prompt, so it belongs here rather than in a second hardcoded script. It is the
 # reference for the country-free agreement metric, and it has to be rebuilt
@@ -92,6 +109,7 @@ while [[ $# -gt 0 ]]; do
         --shots)      SHOTS="$2"; shift 2 ;;
         --templated)  TEMPLATED=1; shift ;;
         --nocountry)  NOCOUNTRY=1; shift ;;
+        --split-models) SPLIT_MODELS=1; shift ;;
         --layout)     LAYOUT=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
@@ -128,7 +146,23 @@ done
 
 N_MODELS=${#MODELS[@]}
 N_BENCH=${#BENCHES[@]}
-N_TASKS=$(( N_MODELS * N_BENCH ))
+# One "model group" per task when splitting, otherwise a single group holding
+# every model -- which is what keeps the index arithmetic identical either way.
+if [[ $SPLIT_MODELS -eq 1 ]]; then N_GROUPS=$N_MODELS; else N_GROUPS=1; fi
+N_TASKS=$(( N_BENCH * N_GROUPS ))
+
+# task id -> (benchmark, model group). Benchmark is most significant so a
+# benchmark's tasks stay contiguous, which is what --array subsets index into.
+decompose() {
+    IDX_BENCH=$(( $1 / N_GROUPS ))
+    IDX_GROUP=$(( $1 % N_GROUPS ))
+}
+
+# The models this task runs: one when splitting, all of them otherwise.
+models_for_task() {
+    if [[ $SPLIT_MODELS -eq 1 ]]; then echo "$IDX_GROUP"; return; fi
+    seq 0 $(( N_MODELS - 1 ))
+}
 
 # Precedence: the entry's own condition, then --condition, then the per-label
 # default (base for the Llama/Gemma runs, which predate the rename).
@@ -156,10 +190,11 @@ raw_tail_for() {
     # --templated passes no --raw-prompt, so raw_sfx is empty; it passes
     # --system-prompt instead, which appends _sys after where _raw would sit.
     if [[ $TEMPLATED -eq 1 ]]; then
-        if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
-             | grep -q "\"${label}\","; then
-            echo "_sys"
-        fi
+        # Unconditional, unlike _raw: sys_sfx in the eval scripts is gated only
+        # on --system-prompt being set, not on the label being chat-templated.
+        # So a label with no chat template (plain "8b") still gets a _sys name
+        # even though the system message has no effect on it.
+        echo "_sys"
         return
     fi
     if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
@@ -194,9 +229,14 @@ out_for() {
 if [[ $LAYOUT -eq 1 ]]; then
     echo "tasks: $N_TASKS   (submit with --array=0-$(( N_TASKS - 1 )))"
     for (( t = 0; t < N_TASKS; t++ )); do
-        mi=$(( t / N_BENCH )); m=${MODELS[$mi]}; b=${BENCHES[$(( t % N_BENCH ))]}
-        c=$(cond_at "$mi")
-        printf '  %3d  %-9s %-16s %-13s -> %s\n' "$t" "$c" "$m" "$b" "$(out_for "$b" "$c" "$m")"
+        decompose "$t"
+        b=${BENCHES[$IDX_BENCH]}
+        printf '  %3d  %s\n' "$t" "$b"
+        for mi in $(models_for_task); do
+            c=$(cond_at "$mi")
+            printf '       %-9s %-16s -> %s\n' \
+                   "$c" "${MODELS[$mi]}" "$(out_for "$b" "$c" "${MODELS[$mi]}")"
+        done
     done
     exit 0
 fi
@@ -215,16 +255,12 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-IDX_MODEL=$(( SLURM_ARRAY_TASK_ID / N_BENCH ))
-MODEL=${MODELS[$IDX_MODEL]}
-BENCH=${BENCHES[$(( SLURM_ARRAY_TASK_ID % N_BENCH ))]}
-COND=$(cond_at "$IDX_MODEL")
-OUT=$(out_for "$BENCH" "$COND" "$MODEL")
+decompose "$SLURM_ARRAY_TASK_ID"
+BENCH=${BENCHES[$IDX_BENCH]}
 
-if [[ -f "$OUT" ]]; then echo "[inst_base] $OUT exists - nothing to do"; exit 0; fi
-
-echo "[inst_base] benchmark=$BENCH condition=$COND model=$MODEL" \
-     "shots=$SHOTS nocountry=$NOCOUNTRY templated=$TEMPLATED"
+echo "[inst_base] benchmark=$BENCH shots=$SHOTS nocountry=$NOCOUNTRY" \
+     "templated=$TEMPLATED models=$(for i in $(models_for_task); do \
+        printf '%s ' "${MODELS[$i]}"; done)"
 
 # Flag arrays rather than a copy of each command per arm, so the arms cannot
 # drift in any other flag -- which is exactly how the probe pass ended up
@@ -234,26 +270,54 @@ NC_FLAG=()
 FMT_FLAG=(--raw-prompt)
 [[ $TEMPLATED -eq 1 ]] && FMT_FLAG=(--system-prompt neutral)
 
-case "$BENCH" in
-  normad)
-    SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--few-shot "$SHOTS")
-    python evaluate/eval_normad.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --yn-only "${FMT_FLAG[@]}" \
-        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
-    ;;
-  culturalbench)
-    # --no-fewshot, not "--neutral-shots 0": neutral_fewshot defaults to True in
-    # evaluate_one, so the prefix has to be switched off explicitly.
-    SHOT_FLAG=(--no-fewshot)
-    (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-shots "$SHOTS")
-    python evaluate/eval_culturalbench.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 "${FMT_FLAG[@]}" \
-        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
-    ;;
-  blend)
-    SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-fewshot)
-    python evaluate/eval_blend.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 "${FMT_FLAG[@]}" \
-        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
-    ;;
-esac
+run_one() {
+    local bench="$1" cond="$2" model="$3"
+    case "$bench" in
+      normad)
+        local SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--few-shot "$SHOTS")
+        python evaluate/eval_normad.py --condition "$cond" --model-size "$model" \
+            --precision matched_bf16 --yn-only "${FMT_FLAG[@]}" \
+            "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
+        ;;
+      culturalbench)
+        # --no-fewshot, not "--neutral-shots 0": neutral_fewshot defaults to True
+        # in evaluate_one, so the prefix has to be switched off explicitly.
+        local SHOT_FLAG=(--no-fewshot)
+        (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-shots "$SHOTS")
+        python evaluate/eval_culturalbench.py --condition "$cond" --model-size "$model" \
+            --precision matched_bf16 "${FMT_FLAG[@]}" \
+            "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
+        ;;
+      blend)
+        local SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-fewshot)
+        python evaluate/eval_blend.py --condition "$cond" --model-size "$model" \
+            --precision matched_bf16 "${FMT_FLAG[@]}" \
+            "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
+        ;;
+    esac
+}
+
+# One model failing must not cost the rest of the task its queue slot, so the
+# loop records the failure and carries on, and the task exits non-zero at the
+# end so sacct still shows FAILED rather than a silent partial grid.
+FAILED=()
+for mi in $(models_for_task); do
+    MODEL=${MODELS[$mi]}
+    COND=$(cond_at "$mi")
+    OUT=$(out_for "$BENCH" "$COND" "$MODEL")
+    if [[ -f "$OUT" ]]; then
+        echo "[inst_base] $OUT exists - skipping"
+        continue
+    fi
+    echo "[inst_base] === $BENCH / $COND / $MODEL -> $OUT"
+    if ! run_one "$BENCH" "$COND" "$MODEL"; then
+        echo "[inst_base] FAILED: $BENCH / $COND / $MODEL" >&2
+        FAILED+=("$COND/$MODEL")
+    fi
+done
+
+if (( ${#FAILED[@]} )); then
+    echo "[inst_base] $BENCH: ${#FAILED[@]} failed: ${FAILED[*]}" >&2
+    exit 1
+fi
+echo "[inst_base] $BENCH: done"
