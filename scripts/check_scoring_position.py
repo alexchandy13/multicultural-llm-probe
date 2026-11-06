@@ -36,7 +36,9 @@ from evaluate._common import (  # noqa: E402
     NEUTRAL_CHAT_SYSTEM, build_chat_prompt, load_model_for_eval,
     resolve_condition,
 )
-from evaluate.eval_normad import YN_PROMPT_TEMPLATE  # noqa: E402
+from evaluate.eval_normad import (  # noqa: E402
+    NEUTRAL_SHOTS_NORMAD, YN_PROMPT_TEMPLATE, build_fewshot_prefix, load_normad,
+)
 
 SCENARIO = ("Aisha's elderly neighbour knocks on her door at dinner time. "
             "She invites him in and serves him a plate before eating herself.")
@@ -55,10 +57,27 @@ def main() -> int:
     ap.add_argument("--raw", action="store_true",
                     help="Score the flat prompt instead of the chat template, "
                          "matching the --raw-prompt arm.")
+    ap.add_argument("--shots", type=int, default=2, metavar="N",
+                    help="Few-shot demonstrations, matching the eval's "
+                         "--few-shot. 0 for zero-shot. This matters: without a "
+                         "prefix the flat prompt does not elicit an answer at "
+                         "all, so a 0-shot reading says nothing about an fs2 run.")
+    ap.add_argument("--data-path", default=str(PROJECT_ROOT / "data" / "normad"))
     ap.add_argument("--top", type=int, default=10)
     args = ap.parse_args()
 
     body = YN_PROMPT_TEMPLATE.format(country="Hungary", scenario=SCENARIO)
+
+    # Built from the same call the eval makes, so the shots are the ones the
+    # real run demonstrates -- including their lowercase yes/no answers, which
+    # is the thing that may or may not fix the casing.
+    prefix = ""
+    fewshot_turns = None
+    if args.shots > 0:
+        ds = load_normad(Path(args.data_path))
+        prefix, _excluded, turns = build_fewshot_prefix(
+            ds, args.shots, yn_only=True, multi_prompt_word=False)
+        fewshot_turns = turns
 
     for label in [m.strip() for m in args.models.split(",") if m.strip()]:
         cond_name = args.condition or (
@@ -67,9 +86,9 @@ def main() -> int:
         tokenizer, model = load_model_for_eval(cond, precision=args.precision)
 
         if args.raw:
-            prompt = body
+            prompt = prefix + body
         else:
-            prompt = build_chat_prompt(tokenizer, body,
+            prompt = build_chat_prompt(tokenizer, body, fewshot=fewshot_turns,
                                        system=NEUTRAL_CHAT_SYSTEM)
 
         enc = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -80,7 +99,7 @@ def main() -> int:
 
         print("=" * 72)
         print(f"{label}  condition={cond_name}  "
-              f"{'raw' if args.raw else 'chat-templated'}")
+              f"{'raw' if args.raw else 'chat-templated'}  shots={args.shots}")
         print(f"prompt tail: {prompt[-90:]!r}")
         for lp, tid in zip(top.values.tolist(), top.indices.tolist()):
             print(f"   {tokenizer.decode([tid])!r:24} {lp:+.3f}")
@@ -93,6 +112,21 @@ def main() -> int:
             ids = tokenizer.encode(pre + word, add_special_tokens=False)
             print(f"   scored {pre + word!r} -> first token "
                   f"{tokenizer.decode([ids[0]])!r} lp={logprobs[ids[0]]:+.3f}")
+
+        # Case variants, to size the surface-form gap: if the scored spelling is
+        # far below the aggregate, the comparison is happening in the tail and a
+        # case-insensitive scorer would read a different answer.
+        for word, variants in (("yes", ("yes", "Yes", "YES")),
+                               ("no", ("no", "No", "NO"))):
+            lps = []
+            for v in variants:
+                ids = tokenizer.encode(pre + v, add_special_tokens=False)
+                lps.append(logprobs[ids[0]])
+            agg = torch.logsumexp(torch.stack(lps), dim=0)
+            scored = lps[0]
+            print(f"   {word!r}: scored {scored:+.3f}  "
+                  f"logsumexp over {list(variants)} {agg:+.3f}  "
+                  f"(missing {agg - scored:+.3f})")
 
         del model
         torch.cuda.empty_cache()
