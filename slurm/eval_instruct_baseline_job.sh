@@ -75,6 +75,14 @@ NOCOUNTRY=0
 # --neutral-shots N for CulturalBench, --neutral-fewshot for BLEnD, which has
 # no count) but the count means the same thing, so one argument drives all three.
 SHOTS=2
+# --raw-prompt is the default: it bypasses the chat template so an instruct
+# checkpoint is scored byte-identically to a base model. --templated is the
+# diagnostic arm -- it keeps the chat template, which is how these models are
+# actually deployed, and is the way to tell a genuine yes/no bias apart from an
+# artifact of scoring an aligned model as a completion model. It pairs with
+# --system-prompt neutral, because Olmo-3-Instruct's template otherwise injects
+# a function-calling system prompt that no other model in the table sees.
+TEMPLATED=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -82,6 +90,7 @@ while [[ $# -gt 0 ]]; do
         --benchmarks) BENCHES_ARG="$2"; shift 2 ;;
         --condition)  COND_OVERRIDE="$2"; shift 2 ;;
         --shots)      SHOTS="$2"; shift 2 ;;
+        --templated)  TEMPLATED=1; shift ;;
         --nocountry)  NOCOUNTRY=1; shift ;;
         --layout)     LAYOUT=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -144,6 +153,15 @@ cond_at() {
 # _common pulls in torch and peft, and --layout has to run on a login node.
 raw_tail_for() {
     local label="$1"
+    # --templated passes no --raw-prompt, so raw_sfx is empty; it passes
+    # --system-prompt instead, which appends _sys after where _raw would sit.
+    if [[ $TEMPLATED -eq 1 ]]; then
+        if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
+             | grep -q "\"${label}\","; then
+            echo "_sys"
+        fi
+        return
+    fi
     if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
          | grep -q "\"${label}\","; then
         echo "_raw"
@@ -206,19 +224,21 @@ OUT=$(out_for "$BENCH" "$COND" "$MODEL")
 if [[ -f "$OUT" ]]; then echo "[inst_base] $OUT exists - nothing to do"; exit 0; fi
 
 echo "[inst_base] benchmark=$BENCH condition=$COND model=$MODEL" \
-     "shots=$SHOTS nocountry=$NOCOUNTRY"
+     "shots=$SHOTS nocountry=$NOCOUNTRY templated=$TEMPLATED"
 
 # Flag arrays rather than a copy of each command per arm, so the arms cannot
 # drift in any other flag -- which is exactly how the probe pass ended up
 # scoring a different template from the baseline.
 NC_FLAG=()
 [[ $NOCOUNTRY -eq 1 ]] && NC_FLAG=(--no-country)
+FMT_FLAG=(--raw-prompt)
+[[ $TEMPLATED -eq 1 ]] && FMT_FLAG=(--system-prompt neutral)
 
 case "$BENCH" in
   normad)
     SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--few-shot "$SHOTS")
     python evaluate/eval_normad.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --yn-only --raw-prompt \
+        --precision matched_bf16 --yn-only "${FMT_FLAG[@]}" \
         "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
   culturalbench)
@@ -227,13 +247,13 @@ case "$BENCH" in
     SHOT_FLAG=(--no-fewshot)
     (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-shots "$SHOTS")
     python evaluate/eval_culturalbench.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --raw-prompt \
+        --precision matched_bf16 "${FMT_FLAG[@]}" \
         "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
   blend)
     SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-fewshot)
     python evaluate/eval_blend.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --raw-prompt \
+        --precision matched_bf16 "${FMT_FLAG[@]}" \
         "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
 esac
