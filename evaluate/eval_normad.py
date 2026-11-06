@@ -151,8 +151,34 @@ YN_PROMPT_TEMPLATE_V2_NOCOUNTRY = (
     "Answer:"
 )
 
-YN_PROMPT_TEMPLATE = YN_PROMPT_TEMPLATE_V1
-YN_TEMPLATE_TAG = ""        # v1 result files carry no tag: normad_*_fs2_yn_*
+# v3 is YN_WORD_PROMPTS[0] promoted to the single-template path. The probe pass
+# scored this wording while the baseline scored v1, so pred and us_pred came
+# from different prompts and their agreement rate measured the template gap as
+# much as the country. Making it the baseline template closes that gap in the
+# direction of NormAd's own published wording, and it is the template the
+# multi-prompt-word ensemble already starts from, so the two paths agree.
+YN_PROMPT_TEMPLATE_V3 = (
+    "You will be given a short story involving 2 or more characters about everyday "
+    "situations. You will also be given a country of relevance. Read the story and "
+    "determine if the character's behavior aligns with the social norms of that country.\n"
+    "Respond **only** with yes or no.\n\n"
+    "country: {country}\nStory: {scenario}\nAnswer:"
+)
+
+# Hand-written rather than produced by deleting the country line: v3's
+# instruction promises "a country of relevance" and then refers to "that
+# country", so stripping the line alone leaves the prompt referring to
+# something it never supplies -- the defect v2 needed a pair for.
+YN_PROMPT_TEMPLATE_V3_NOCOUNTRY = (
+    "You will be given a short story involving 2 or more characters about everyday "
+    "situations. Read the story and determine if the character's behavior aligns "
+    "with common social norms.\n"
+    "Respond **only** with yes or no.\n\n"
+    "Story: {scenario}\nAnswer:"
+)
+
+YN_PROMPT_TEMPLATE = YN_PROMPT_TEMPLATE_V3
+YN_TEMPLATE_TAG = "_wp"     # v1 files carry no tag; v3 files are normad_*_yn_wp_*
 
 # template -> its hand-written country-free counterpart. Anything not listed
 # (v1, the multi-prompt-word variants) falls back to deleting the country line
@@ -160,6 +186,7 @@ YN_TEMPLATE_TAG = ""        # v1 result files carry no tag: normad_*_fs2_yn_*
 # template mentions a country.
 NOCOUNTRY_TEMPLATES = {
     YN_PROMPT_TEMPLATE_V2: YN_PROMPT_TEMPLATE_V2_NOCOUNTRY,
+    YN_PROMPT_TEMPLATE_V3: YN_PROMPT_TEMPLATE_V3_NOCOUNTRY,
 }
 
 YN_NULL_PROMPT = (

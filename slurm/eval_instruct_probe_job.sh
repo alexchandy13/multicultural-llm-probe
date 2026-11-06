@@ -62,6 +62,10 @@ COUNTRIES_ARG="us,netherlands,hungary,bosnia_and_herzegovina,mexico,taiwan,phili
 SPLIT=0
 COND_OVERRIDE=""
 LAYOUT=0
+# Selects which baseline to probe, and must match the --shots the baseline job
+# ran with: the shot count is part of the filename, and add_probe rebuilds the
+# base run's prefix from that name so the probe prompt carries the same context.
+SHOTS=2
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -69,11 +73,16 @@ while [[ $# -gt 0 ]]; do
         --benchmarks)  BENCHES_ARG="$2"; shift 2 ;;
         --countries)   COUNTRIES_ARG="$2"; shift 2 ;;
         --condition)   COND_OVERRIDE="$2"; shift 2 ;;
+        --shots)       SHOTS="$2"; shift 2 ;;
         --split-countries) SPLIT=1; shift ;;
         --layout)      LAYOUT=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+if ! [[ "$SHOTS" =~ ^[0-9]+$ ]]; then
+    echo "--shots takes a non-negative integer, got: $SHOTS" >&2; exit 2
+fi
 
 IFS=',' read -r -a MODELS    <<< "$MODELS_ARG"
 IFS=',' read -r -a BENCHES   <<< "$BENCHES_ARG"
@@ -107,12 +116,19 @@ cond_for() {
     esac
 }
 
+# Kept identical to out_for() in eval_instruct_baseline_job.sh; the two scripts
+# meet on these names and nothing else.
 base_for() {
     local bench="$1" cond="$2" model="$3"
+    local fs="" nfs=""
+    if (( SHOTS > 0 )); then
+        fs="_fs${SHOTS}"
+        if (( SHOTS == 2 )); then nfs="_nfs"; else nfs="_nfs${SHOTS}"; fi
+    fi
     case "$bench" in
-        normad)        echo "outputs/behavioral/normad_${cond}_${model}_fs2_yn_raw.json" ;;
-        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}_nfs4_raw.json" ;;
-        blend)         echo "outputs/behavioral/blend_${cond}_${model}_nfs_raw.json" ;;
+        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp_raw.json" ;;
+        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}_raw.json" ;;
+        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )_raw.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac
 }
@@ -135,6 +151,7 @@ if [[ $LAYOUT -eq 1 ]]; then
         m=${MODELS[$IDX_MODEL]}; b=${BENCHES[$IDX_BENCH]}
         if [[ $SPLIT -eq 1 ]]; then p=${COUNTRIES[$IDX_GROUP]}; else p="${COUNTRIES[*]}"; fi
         printf '  %3d  %-9s %-16s %-13s %s\n' "$t" "$(cond_for "$m")" "$m" "$b" "$p"
+        printf '       base: %s\n' "$(base_for "$b" "$(cond_for "$m")" "$m")"
     done
     exit 0
 fi

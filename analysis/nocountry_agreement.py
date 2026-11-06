@@ -63,7 +63,12 @@ MODELS = ["olmo3_instruct", "qwen35_instruct", "gptoss20b",
 # prefix, the shot/format suffix the probe grid was run at, and the field in
 # the no-country file that holds the country-free prediction.
 BENCHMARKS = {
-    "normad":        {"suffix": "_fs2_yn", "blank_field": "pred",
+    # _wp: eval_normad's YN_TEMPLATE_TAG, set when YN_PROMPT_TEMPLATE moved to
+    # the wording the probe pass had always used. Untagged _fs2_yn files are the
+    # older v1 template, whose probe columns are not comparable to their own
+    # baseline -- they are left readable rather than overwritten, so the suffix
+    # is what selects between the two sets.
+    "normad":        {"suffix": "_fs2_yn_wp", "blank_field": "pred",
                       "job": "slurm/eval_normad_nocountry_job.sh"},
     "culturalbench": {"suffix": "_nfs4",   "blank_field": "nc_pred",
                       "job": "slurm/eval_culturalbench_nocountry_job.sh"},

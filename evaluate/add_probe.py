@@ -68,6 +68,7 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
                      base_name: str = "") -> list[dict]:
     from evaluate.eval_normad import (
         NEUTRAL_SHOTS_NORMAD, YN_WORD_CHOICES, YN_WORD_PROMPTS,
+        YN_PROMPT_TEMPLATE, add_context_line,
         build_fewshot_prefix, build_neutral_fewshot_prefix, country,
         gold_label, load_normad, scenario_text, score_choices,
         HOLDOUT_COUNTRIES,
@@ -129,8 +130,11 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
                 us_pred = "yes" if acc[0] > acc[1] else "no"
                 us_raw_scores = acc
             else:
-                # Single template, matching a base run without --multi-prompt-word.
-                tmpl = YN_WORD_PROMPTS[0]
+                # The baseline template itself, not a copy of it. This path used
+                # YN_WORD_PROMPTS[0] while a --yn-only base run scored
+                # YN_PROMPT_TEMPLATE, so pred and us_pred came from different
+                # prompts and their agreement measured the template gap.
+                tmpl = add_context_line(YN_PROMPT_TEMPLATE, "none")
                 if instruct:
                     up = build_chat_prompt(tokenizer, tmpl.format(country=probe, scenario=scenario_text(ex)), fewshot=fewshot_turns)
                 else:
@@ -145,7 +149,7 @@ def run_normad_probe(base_data: dict, probe: str, model, tokenizer,
             "us_pred": us_pred, "scores": existing.get("scores"),
             "us_scores": us_raw_scores,
         })
-    return new_predictions
+    return new_predictions, probe
 
 
 def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
@@ -186,21 +190,40 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
             "us_pred": us_pred, "mcqid": existing.get("mcqid"),
             "scores": existing.get("scores"),
         })
-    return new_predictions
+    return new_predictions, probe
 
 
 def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
-                            instruct: bool) -> list[dict]:
+                            instruct: bool,
+                            neutral_shots: int | None = 2) -> list[dict]:
     from evaluate.eval_culturalbench import (
-        CHOICES, NEUTRAL_SHOTS, build_neutral_fewshot_prefix,
+        CHOICES, build_neutral_fewshot_prefix, build_neutral_shots,
         build_prompt, make_probe_prompt, DATA_PATH,
     )
     import json
     rows = json.loads(DATA_PATH.read_text())
     probe = resolve_probe_country(probe, {r["country"] for r in rows
                                           if r.get("country")})
-    prefix = build_neutral_fewshot_prefix()
-    fewshot_turns = NEUTRAL_SHOTS if instruct else None
+    # Built exactly as evaluate_one builds it, from the shot count the base run
+    # used. This called build_neutral_fewshot_prefix() with no argument, which
+    # falls back to the 2-shot 1-yes/1-no NEUTRAL_SHOTS -- so an --neutral-shots 4
+    # baseline (4 shots, 1 yes / 3 no) was compared against a probe that saw a
+    # different context and a different implied yes-rate.
+    # None means the base run had no few-shot prefix at all, which is not the
+    # same as "unknown" -- a zero-shot baseline must be probed zero-shot.
+    if neutral_shots is None:
+        prefix = ""
+        fewshot_turns = None
+        print("Neutral few-shot: none (zero-shot base run)")
+    else:
+        usable = [r for r in rows if r.get("reformatted_prompt")]
+        gold_yes_rate = sum(bool(r["answer"]) for r in usable) / len(usable)
+        shots = build_neutral_shots(neutral_shots, gold_yes_rate)
+        prefix = build_neutral_fewshot_prefix(shots)
+        fewshot_turns = shots if instruct else None
+        n_yes = sum(a == "yes" for _, a in shots)
+        print(f"Neutral few-shot: {len(shots)} shots, {n_yes} yes / "
+              f"{len(shots) - n_yes} no (gold yes-rate {gold_yes_rate:.3f})")
     leading_space = not instruct
 
     from evaluate.eval_normad import score_choices
@@ -232,7 +255,7 @@ def run_culturalbench_probe(base_data: dict, probe: str, model, tokenizer,
             "scores":       existing.get("scores"),
             "us_scores":    us_raw_scores,
         })
-    return new_predictions
+    return new_predictions, probe
 
 
 def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
@@ -285,7 +308,7 @@ def run_culturalbench_normy_probe(base_data: dict, probe: str, model, tokenizer,
             "scores":       existing.get("scores"),
             "us_scores":    us_raw_scores,
         })
-    return new_predictions
+    return new_predictions, probe
 
 
 def main():
@@ -324,6 +347,14 @@ def main():
              "us_pred=None and are skipped by consumers. The chosen fraction is "
              "recorded as probe_sample_frac in the output.",
     )
+    parser.add_argument(
+        "--neutral-shots", type=int, default=None, metavar="N",
+        help="CulturalBench: the --neutral-shots the base run used, so the "
+             "probe prefix is the same context. Read from the base filename's "
+             "_nfs<N> tail when omitted; a base whose name carries no shot "
+             "count is an error rather than a silent default, because the "
+             "wrong count silently changes the number of shots AND the "
+             "yes-rate the prefix implies.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Skip countries whose output file is already present, so a "
                              "preempted and requeued job resumes instead of redoing work.")
@@ -367,6 +398,25 @@ def main():
         m = re.search(r"((?:_raw|_sys)*)$", stem)
         return BEHAVIORAL / f"{stem[:m.start()]}{tail}{m.group(1)}.json"
 
+    # CulturalBench only: the probe prefix has to be the base run's prefix, and
+    # the base run's flags are not recorded in its JSON. Prefer the explicit
+    # flag, fall back to the filename, and refuse to guess.
+    neutral_shots = args.neutral_shots
+    if benchmark == "culturalbench" and neutral_shots is None:
+        m = re.search(r"_nfs(\d+)", base_path.name)
+        if m:
+            neutral_shots = int(m.group(1))
+        elif "_nfs" in base_path.name:
+            neutral_shots = 2      # bare _nfs predates the count in the name
+        # else: no _nfs tail at all, so the base run was zero-shot and
+        # neutral_shots stays None, which the runner reads as "no prefix".
+    if benchmark == "culturalbench":
+        src = "--neutral-shots" if args.neutral_shots is not None \
+            else base_path.name
+        print(f"Neutral shots : "
+              f"{'none (zero-shot)' if neutral_shots is None else neutral_shots}"
+              f" (from {src})")
+
     if args.data_path:
         data_path = Path(args.data_path)
     elif benchmark == "blend":
@@ -397,21 +447,24 @@ def main():
     for probe, out_path in todo:
         print(f"--- probe={probe} -> {out_path.name}", flush=True)
         if benchmark == "blend":
-            new_predictions = run_blend_probe(base_data, probe, model, tokenizer,
-                                              instruct, data_path,
-                                              sample_frac=args.sample_frac)
+            new_predictions, resolved = run_blend_probe(
+                base_data, probe, model, tokenizer, instruct, data_path,
+                sample_frac=args.sample_frac)
         elif benchmark == "culturalbench_normy":
-            new_predictions = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
+            new_predictions, resolved = run_culturalbench_normy_probe(base_data, probe, model, tokenizer, instruct)
         elif benchmark == "culturalbench":
-            new_predictions = run_culturalbench_probe(base_data, probe, model, tokenizer, instruct)
+            new_predictions, resolved = run_culturalbench_probe(
+                base_data, probe, model, tokenizer, instruct,
+                neutral_shots=neutral_shots)
         else:
-            new_predictions = run_normad_probe(base_data, probe, model, tokenizer,
-                                               instruct, data_path,
-                                               base_name=base_path.name)
+            new_predictions, resolved = run_normad_probe(
+                base_data, probe, model, tokenizer, instruct, data_path,
+                base_name=base_path.name)
 
-        out_data = dict(base_data)
+        out_data = {k: v for k, v in base_data.items()
+                    if k != "derived_from"}
         out_data["predictions"] = new_predictions
-        out_data["probe_country"] = probe
+        out_data["probe_country"] = resolved
         # Recorded so a sampled file is never mistaken for a full one: with
         # --sample-frac < 1 most us_pred are None by design, and a consumer that
         # did not skip them would read that as disagreement.
@@ -428,7 +481,8 @@ def main():
         tmp_path = out_path.with_name(out_path.name + f".tmp{os.getpid()}")
         tmp_path.write_text(json.dumps(out_data, indent=2))
         os.replace(tmp_path, out_path)
-        print(f"Wrote {out_path}  ({len(new_predictions)} predictions)", flush=True)
+        print(f"Wrote {out_path}  ({len(new_predictions)} predictions, "
+              f"substituted {resolved!r})", flush=True)
 
 
 if __name__ == "__main__":

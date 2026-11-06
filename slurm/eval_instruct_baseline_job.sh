@@ -59,16 +59,35 @@ MODELS_ARG="8b_instruct,gemma4_instruct,olmo3_instruct,qwen35_instruct"
 BENCHES_ARG="normad,culturalbench,blend"
 COND_OVERRIDE=""
 LAYOUT=0
+# The country-free arm is the same single pass with the country dropped from the
+# prompt, so it belongs here rather than in a second hardcoded script. It is the
+# reference for the country-free agreement metric, and it has to be rebuilt
+# whenever the template changes -- a no-country file written under one template
+# cannot be compared against probes scored under another.
+NOCOUNTRY=0
+# Number of few-shot demonstrations, 0 for zero-shot. A flag rather than an
+# edit because it changes the prompt, so it changes the output filename, so a
+# zero-shot run and a few-shot run land side by side instead of on each other.
+# Each benchmark spells its own flag differently (--few-shot N for NormAd,
+# --neutral-shots N for CulturalBench, --neutral-fewshot for BLEnD, which has
+# no count) but the count means the same thing, so one argument drives all three.
+SHOTS=2
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --models)     MODELS_ARG="$2"; shift 2 ;;
         --benchmarks) BENCHES_ARG="$2"; shift 2 ;;
         --condition)  COND_OVERRIDE="$2"; shift 2 ;;
+        --shots)      SHOTS="$2"; shift 2 ;;
+        --nocountry)  NOCOUNTRY=1; shift ;;
         --layout)     LAYOUT=1; shift ;;
         *) echo "unknown argument: $1" >&2; exit 2 ;;
     esac
 done
+
+if ! [[ "$SHOTS" =~ ^[0-9]+$ ]]; then
+    echo "--shots takes a non-negative integer, got: $SHOTS" >&2; exit 2
+fi
 
 IFS=',' read -r -a MODELS  <<< "$MODELS_ARG"
 IFS=',' read -r -a BENCHES <<< "$BENCHES_ARG"
@@ -96,12 +115,26 @@ cond_for() {
     esac
 }
 
+# Must match the suffixes the eval scripts build for the same flags, since the
+# existence check below and the probe job's --base both go through this.
 out_for() {
     local bench="$1" cond="$2" model="$3"
+    # _nocountry sits immediately before the _raw tail, matching the order the
+    # eval scripts assemble their own suffixes in.
+    local nc=""; [[ $NOCOUNTRY -eq 1 ]] && nc="_nocountry"
+    local fs="" nfs=""
+    if (( SHOTS > 0 )); then
+        fs="_fs${SHOTS}"
+        # eval_culturalbench leaves _nfs bare at the historical 2 shots so older
+        # filenames keep matching, and only numbers it from 3 up.
+        if (( SHOTS == 2 )); then nfs="_nfs"; else nfs="_nfs${SHOTS}"; fi
+    fi
     case "$bench" in
-        normad)        echo "outputs/behavioral/normad_${cond}_${model}_fs2_yn_raw.json" ;;
-        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}_nfs4_raw.json" ;;
-        blend)         echo "outputs/behavioral/blend_${cond}_${model}_nfs_raw.json" ;;
+        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp${nc}_raw.json" ;;
+        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${nc}_raw.json" ;;
+        # BLEnD's neutral prefix has no count in its name: it is a fixed set of
+        # four MCQ demos, one per answer letter, so it is on or off.
+        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${nc}_raw.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac
 }
@@ -137,21 +170,35 @@ OUT=$(out_for "$BENCH" "$COND" "$MODEL")
 
 if [[ -f "$OUT" ]]; then echo "[inst_base] $OUT exists - nothing to do"; exit 0; fi
 
-echo "[inst_base] benchmark=$BENCH condition=$COND model=$MODEL"
+echo "[inst_base] benchmark=$BENCH condition=$COND model=$MODEL" \
+     "shots=$SHOTS nocountry=$NOCOUNTRY"
 
-# Flags match the old us-probe jobs exactly apart from the dropped --us-probe,
-# so these baselines are comparable to everything already on disk.
+# Flag arrays rather than a copy of each command per arm, so the arms cannot
+# drift in any other flag -- which is exactly how the probe pass ended up
+# scoring a different template from the baseline.
+NC_FLAG=()
+[[ $NOCOUNTRY -eq 1 ]] && NC_FLAG=(--no-country)
+
 case "$BENCH" in
   normad)
+    SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--few-shot "$SHOTS")
     python evaluate/eval_normad.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --few-shot 2 --yn-only --raw-prompt
+        --precision matched_bf16 --yn-only --raw-prompt \
+        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
   culturalbench)
+    # --no-fewshot, not "--neutral-shots 0": neutral_fewshot defaults to True in
+    # evaluate_one, so the prefix has to be switched off explicitly.
+    SHOT_FLAG=(--no-fewshot)
+    (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-shots "$SHOTS")
     python evaluate/eval_culturalbench.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-shots 4 --raw-prompt
+        --precision matched_bf16 --raw-prompt \
+        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
   blend)
+    SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-fewshot)
     python evaluate/eval_blend.py --condition "$COND" --model-size "$MODEL" \
-        --precision matched_bf16 --neutral-fewshot --raw-prompt
+        --precision matched_bf16 --raw-prompt \
+        "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
     ;;
 esac
