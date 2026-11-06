@@ -479,3 +479,35 @@ def culture_group(country: str) -> str:
 def conditions_from_env() -> list[str]:
     raw = os.environ.get("CONDITIONS", "base sft dpo sftdpo")
     return raw.split()
+
+
+def case_variant_first_ids(tokenizer, choice: str, leading_space: bool) -> list[int]:
+    """Distinct first-token ids for a choice and its case variants.
+
+    An aligned model at zero shot prefers the capitalized answer: Gemma-4 puts
+    'Yes' at -0.002 and 'yes' at -6.56, Llama-3.1-8B-Instruct 'Yes' at -0.33
+    against 'yes' at -3.33. Reading one variant therefore throws away most of
+    the probability mass, and -- worse -- throws away a DIFFERENT amount for
+    each choice: Gemma loses 6.56 nats off yes but only 4.36 off no, moving the
+    yes-no margin by 2.2 nats. Items whose true margin is under that flip on
+    surface form alone. Marginalizing over the variants removes the dependence
+    on a few-shot prefix to coerce one spelling, which is what the fs2 shots
+    were silently doing (their gaps measured ~0 at 2 shots and reappear at 0).
+
+    Variants are only generated for multi-character alphabetic choices. A
+    single letter must be scored as itself: an MCQ's 'A' shares no meaning with
+    'a', which is the article, and summing them would make option A win by
+    grammar. Ids are deduplicated, since logsumexp over a repeated id would
+    double-count that token's mass.
+    """
+    forms = [choice]
+    if len(choice) > 1 and choice.isalpha():
+        forms += [choice.lower(), choice.upper(), choice.capitalize()]
+
+    ids: list[int] = []
+    for form in forms:
+        token_str = (" " + form) if leading_space else form
+        enc = tokenizer.encode(token_str, add_special_tokens=False)
+        if enc and enc[0] not in ids:
+            ids.append(enc[0])
+    return ids

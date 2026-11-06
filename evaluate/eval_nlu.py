@@ -19,6 +19,7 @@ from tqdm import tqdm
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    case_variant_first_ids,
     NEUTRAL_CHAT_SYSTEM,
     is_instruct,
     load_model_for_eval,
@@ -358,8 +359,13 @@ def build_real_fewshot_prefix(dataset: str, n_shots: int, seed: int = 7):
 
 @torch.no_grad()
 def score_choices(model, tokenizer, prompt: str, choices: list[str],
-                  leading_space: bool = True) -> list[float]:
-    """Score each choice as the log-prob of ' {choice}' (or '{choice}') after the prompt."""
+                  leading_space: bool = True,
+                  case_marginal: bool = True) -> list[float]:
+    """Score each choice as the log-prob of ' {choice}' (or '{choice}') after the prompt.
+
+    `case_marginal=True` sums over the choice's case variants instead of
+    reading one spelling; see case_variant_first_ids() in _common for why.
+    """
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
     out = model(**enc)
@@ -367,9 +373,13 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
     scores = []
     for choice in choices:
-        token_str = (" " + choice) if leading_space else choice
-        ids = tokenizer.encode(token_str, add_special_tokens=False)
-        scores.append(last_logits[ids[0]].item() if ids else float("-inf"))
+        if case_marginal:
+            ids = case_variant_first_ids(tokenizer, choice, leading_space)
+        else:
+            token_str = (" " + choice) if leading_space else choice
+            ids = tokenizer.encode(token_str, add_special_tokens=False)[:1]
+        scores.append(torch.logsumexp(last_logits[ids], dim=0).item()
+                      if ids else float("-inf"))
     return scores
 
 

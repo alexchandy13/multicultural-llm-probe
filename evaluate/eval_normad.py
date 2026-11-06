@@ -23,6 +23,7 @@ from evaluate.country_names import resolve_probe_country
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
+    case_variant_first_ids,
     NEUTRAL_CHAT_SYSTEM,
     culture_group,
     is_instruct,
@@ -453,7 +454,8 @@ NULL_PROMPT = (
 @torch.no_grad()
 def score_choices(model, tokenizer, prompt: str, choices: list[str],
                   priors: list[float] | None = None,
-                  leading_space: bool = True) -> list[float]:
+                  leading_space: bool = True,
+                  case_marginal: bool = True) -> list[float]:
     """Return log-prob of the first token of each choice given prompt.
 
     If `priors` is provided (list of log-probs from a content-free prompt),
@@ -465,6 +467,12 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
     that end with "Answer:" where the next token is space-prefixed.
     `leading_space=False`: encodes choice bare, for prompts that end with
     a newline where the model predicts without a preceding space.
+
+    `case_marginal=True` (default) sums the mass of the choice's case variants
+    rather than reading one spelling -- see case_variant_first_ids() for why
+    reading one distorts the margin between choices. compute_priors() goes
+    through this same function, so priors are marginalized the same way and the
+    subtraction stays on one scale.
     """
     device = next(model.parameters()).device
     enc = tokenizer(prompt, return_tensors="pt").to(device)
@@ -473,12 +481,16 @@ def score_choices(model, tokenizer, prompt: str, choices: list[str],
 
     scores = []
     for choice in choices:
-        token_str = (" " + choice) if leading_space else choice
-        ids = tokenizer.encode(token_str, add_special_tokens=False)
+        if case_marginal:
+            ids = case_variant_first_ids(tokenizer, choice, leading_space)
+        else:
+            token_str = (" " + choice) if leading_space else choice
+            ids = tokenizer.encode(token_str, add_special_tokens=False)[:1]
         if not ids:
             scores.append(float("-inf"))
         else:
-            scores.append(last_logits[ids[0]].item())
+            # logsumexp over the variants' ids; one id is the old behaviour.
+            scores.append(torch.logsumexp(last_logits[ids], dim=0).item())
 
     if priors is not None:
         scores = [s - p for s, p in zip(scores, priors)]
