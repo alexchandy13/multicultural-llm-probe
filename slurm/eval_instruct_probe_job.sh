@@ -55,7 +55,10 @@
 
 set -euo pipefail
 
-MODELS_ARG="8b_instruct,gemma4_instruct,olmo3_instruct,qwen35_instruct"
+# 8b:tulu3_dpo is label:condition -- Tulu is a condition over the 8b base,
+# not a model label, and it is the fully post-trained DPO arm; the SFT-only
+# arm is no longer part of the table.
+MODELS_ARG="8b_instruct,gemma4_instruct,olmo3_instruct,qwen35_instruct,8b:tulu3_dpo"
 BENCHES_ARG="normad,culturalbench,blend"
 # us first so a partial run gets the most-used column done first.
 COUNTRIES_ARG="us,netherlands,hungary,bosnia_and_herzegovina,mexico,taiwan,philippines,iran"
