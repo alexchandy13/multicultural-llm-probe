@@ -89,7 +89,18 @@ if ! [[ "$SHOTS" =~ ^[0-9]+$ ]]; then
     echo "--shots takes a non-negative integer, got: $SHOTS" >&2; exit 2
 fi
 
-IFS=',' read -r -a MODELS  <<< "$MODELS_ARG"
+IFS=',' read -r -a MODEL_SPECS <<< "$MODELS_ARG"
+
+# A --models entry may be "label" or "label:condition". The condition slug is
+# part of the output filename and the analysis pairs probe files to baselines by
+# exact name, so it cannot be global: tulu3_dpo and tulu3_sft are conditions over
+# the same 8b base, not model labels, and they have to sit in the same array as
+# the instruct checkpoints to be submitted together.
+MODELS=(); MODEL_CONDS=()
+for spec in "${MODEL_SPECS[@]}"; do
+    MODELS+=("${spec%%:*}")
+    if [[ "$spec" == *:* ]]; then MODEL_CONDS+=("${spec##*:}"); else MODEL_CONDS+=(""); fi
+done
 IFS=',' read -r -a BENCHES <<< "$BENCHES_ARG"
 
 # Validated up front so a typo fails now rather than after a model load, or --
@@ -107,9 +118,13 @@ N_MODELS=${#MODELS[@]}
 N_BENCH=${#BENCHES[@]}
 N_TASKS=$(( N_MODELS * N_BENCH ))
 
-cond_for() {
+# Precedence: the entry's own condition, then --condition, then the per-label
+# default (base for the Llama/Gemma runs, which predate the rename).
+cond_at() {
+    local i="$1"
+    if [[ -n "${MODEL_CONDS[$i]}" ]]; then echo "${MODEL_CONDS[$i]}"; return; fi
     if [[ -n "$COND_OVERRIDE" ]]; then echo "$COND_OVERRIDE"; return; fi
-    case "$1" in
+    case "${MODELS[$i]}" in
         8b_instruct|gemma4_instruct) echo "base" ;;
         *)                           echo "offshelf" ;;
     esac
@@ -117,8 +132,24 @@ cond_for() {
 
 # Must match the suffixes the eval scripts build for the same flags, since the
 # existence check below and the probe job's --base both go through this.
+# The eval scripts append _raw only when --raw-prompt actually changes
+# anything, i.e. when the model label is chat-templated (raw_sfx in
+# eval_normad.py). A label like plain "8b" has no chat template, so its output
+# carries no _raw tail and predicting one here would make the skip check and the
+# probe job's --base both point at a file that is never written. Read from
+# evaluate/_common.py rather than restating the set, and without importing it:
+# _common pulls in torch and peft, and --layout has to run on a login node.
+raw_tail_for() {
+    local label="$1"
+    if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
+         | grep -q "\"${label}\","; then
+        echo "_raw"
+    fi
+}
+
 out_for() {
     local bench="$1" cond="$2" model="$3"
+    local raw; raw=$(raw_tail_for "$model")
     # _nocountry sits immediately before the _raw tail, matching the order the
     # eval scripts assemble their own suffixes in.
     local nc=""; [[ $NOCOUNTRY -eq 1 ]] && nc="_nocountry"
@@ -130,11 +161,11 @@ out_for() {
         if (( SHOTS == 2 )); then nfs="_nfs"; else nfs="_nfs${SHOTS}"; fi
     fi
     case "$bench" in
-        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp${nc}_raw.json" ;;
-        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${nc}_raw.json" ;;
+        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp${nc}${raw}.json" ;;
+        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${nc}${raw}.json" ;;
         # BLEnD's neutral prefix has no count in its name: it is a fixed set of
         # four MCQ demos, one per answer letter, so it is on or off.
-        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${nc}_raw.json" ;;
+        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${nc}${raw}.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac
 }
@@ -142,8 +173,8 @@ out_for() {
 if [[ $LAYOUT -eq 1 ]]; then
     echo "tasks: $N_TASKS   (submit with --array=0-$(( N_TASKS - 1 )))"
     for (( t = 0; t < N_TASKS; t++ )); do
-        m=${MODELS[$(( t / N_BENCH ))]}; b=${BENCHES[$(( t % N_BENCH ))]}
-        c=$(cond_for "$m")
+        mi=$(( t / N_BENCH )); m=${MODELS[$mi]}; b=${BENCHES[$(( t % N_BENCH ))]}
+        c=$(cond_at "$mi")
         printf '  %3d  %-9s %-16s %-13s -> %s\n' "$t" "$c" "$m" "$b" "$(out_for "$b" "$c" "$m")"
     done
     exit 0
@@ -163,9 +194,10 @@ source env.sh
 source /fs/nexus-scratch/$USER/miniforge/etc/profile.d/conda.sh
 conda activate llm
 
-MODEL=${MODELS[$(( SLURM_ARRAY_TASK_ID / N_BENCH ))]}
+IDX_MODEL=$(( SLURM_ARRAY_TASK_ID / N_BENCH ))
+MODEL=${MODELS[$IDX_MODEL]}
 BENCH=${BENCHES[$(( SLURM_ARRAY_TASK_ID % N_BENCH ))]}
-COND=$(cond_for "$MODEL")
+COND=$(cond_at "$IDX_MODEL")
 OUT=$(out_for "$BENCH" "$COND" "$MODEL")
 
 if [[ -f "$OUT" ]]; then echo "[inst_base] $OUT exists - nothing to do"; exit 0; fi

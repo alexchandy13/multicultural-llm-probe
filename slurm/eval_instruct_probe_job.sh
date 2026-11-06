@@ -84,7 +84,18 @@ if ! [[ "$SHOTS" =~ ^[0-9]+$ ]]; then
     echo "--shots takes a non-negative integer, got: $SHOTS" >&2; exit 2
 fi
 
-IFS=',' read -r -a MODELS    <<< "$MODELS_ARG"
+IFS=',' read -r -a MODEL_SPECS <<< "$MODELS_ARG"
+
+# A --models entry may be "label" or "label:condition". The condition slug is
+# part of the output filename and the analysis pairs probe files to baselines by
+# exact name, so it cannot be global: tulu3_dpo and tulu3_sft are conditions over
+# the same 8b base, not model labels, and they have to sit in the same array as
+# the instruct checkpoints to be submitted together.
+MODELS=(); MODEL_CONDS=()
+for spec in "${MODEL_SPECS[@]}"; do
+    MODELS+=("${spec%%:*}")
+    if [[ "$spec" == *:* ]]; then MODEL_CONDS+=("${spec##*:}"); else MODEL_CONDS+=(""); fi
+done
 IFS=',' read -r -a BENCHES   <<< "$BENCHES_ARG"
 IFS=',' read -r -a COUNTRIES <<< "$COUNTRIES_ARG"
 
@@ -106,11 +117,13 @@ N_BENCH=${#BENCHES[@]}
 if [[ $SPLIT -eq 1 ]]; then N_GROUPS=${#COUNTRIES[@]}; else N_GROUPS=1; fi
 N_TASKS=$(( N_MODELS * N_BENCH * N_GROUPS ))
 
-# The condition slug goes into the filename and the analysis pairs probe files
-# against baselines by exact name, so it is per-model rather than global.
-cond_for() {
+# Precedence: the entry's own condition, then --condition, then the per-label
+# default (base for the Llama/Gemma runs, which predate the rename).
+cond_at() {
+    local i="$1"
+    if [[ -n "${MODEL_CONDS[$i]}" ]]; then echo "${MODEL_CONDS[$i]}"; return; fi
     if [[ -n "$COND_OVERRIDE" ]]; then echo "$COND_OVERRIDE"; return; fi
-    case "$1" in
+    case "${MODELS[$i]}" in
         8b_instruct|gemma4_instruct) echo "base" ;;
         *)                           echo "offshelf" ;;
     esac
@@ -118,17 +131,33 @@ cond_for() {
 
 # Kept identical to out_for() in eval_instruct_baseline_job.sh; the two scripts
 # meet on these names and nothing else.
+# The eval scripts append _raw only when --raw-prompt actually changes
+# anything, i.e. when the model label is chat-templated (raw_sfx in
+# eval_normad.py). A label like plain "8b" has no chat template, so its output
+# carries no _raw tail and predicting one here would make the skip check and the
+# probe job's --base both point at a file that is never written. Read from
+# evaluate/_common.py rather than restating the set, and without importing it:
+# _common pulls in torch and peft, and --layout has to run on a login node.
+raw_tail_for() {
+    local label="$1"
+    if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
+         | grep -q "\"${label}\","; then
+        echo "_raw"
+    fi
+}
+
 base_for() {
     local bench="$1" cond="$2" model="$3"
+    local raw; raw=$(raw_tail_for "$model")
     local fs="" nfs=""
     if (( SHOTS > 0 )); then
         fs="_fs${SHOTS}"
         if (( SHOTS == 2 )); then nfs="_nfs"; else nfs="_nfs${SHOTS}"; fi
     fi
     case "$bench" in
-        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp_raw.json" ;;
-        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}_raw.json" ;;
-        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )_raw.json" ;;
+        normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp${raw}.json" ;;
+        culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${raw}.json" ;;
+        blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${raw}.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac
 }
@@ -148,10 +177,10 @@ if [[ $LAYOUT -eq 1 ]]; then
     echo "tasks: $N_TASKS   (submit with --array=0-$(( N_TASKS - 1 )))"
     for (( t = 0; t < N_TASKS; t++ )); do
         decompose "$t"
-        m=${MODELS[$IDX_MODEL]}; b=${BENCHES[$IDX_BENCH]}
+        m=${MODELS[$IDX_MODEL]}; b=${BENCHES[$IDX_BENCH]}; c=$(cond_at "$IDX_MODEL")
         if [[ $SPLIT -eq 1 ]]; then p=${COUNTRIES[$IDX_GROUP]}; else p="${COUNTRIES[*]}"; fi
-        printf '  %3d  %-9s %-16s %-13s %s\n' "$t" "$(cond_for "$m")" "$m" "$b" "$p"
-        printf '       base: %s\n' "$(base_for "$b" "$(cond_for "$m")" "$m")"
+        printf '  %3d  %-9s %-16s %-13s %s\n' "$t" "$c" "$m" "$b" "$p"
+        printf '       base: %s\n' "$(base_for "$b" "$c" "$m")"
     done
     exit 0
 fi
@@ -173,7 +202,7 @@ conda activate llm
 decompose "$SLURM_ARRAY_TASK_ID"
 MODEL=${MODELS[$IDX_MODEL]}
 BENCH=${BENCHES[$IDX_BENCH]}
-COND=$(cond_for "$MODEL")
+COND=$(cond_at "$IDX_MODEL")
 if [[ $SPLIT -eq 1 ]]; then PROBES=("${COUNTRIES[$IDX_GROUP]}"); else PROBES=("${COUNTRIES[@]}"); fi
 
 BASE=$(base_for "$BENCH" "$COND" "$MODEL")
