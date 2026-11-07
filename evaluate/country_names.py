@@ -337,11 +337,51 @@ def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
         repl = "People" if start == 0 else "people"
         return _tidy_spacing(text[:start] + repl + text[end:]), True
 
+    clause = _delete_intro_clause(text, start)
+    if clause is not None:
+        return clause, True
+
     if kind in ("adjective", "attributive"):
         return _delete_span(text, start, end), True
 
     # name / alias
     return _delete_prepositional_phrase(text, start, end), True
+
+
+# Clause-opening words that can introduce a droppable scene-setting clause:
+# 'In Egyptian culture, when is...', 'Among Valencian people, how is...',
+# 'During a traditional Yoruba gathering, how do...'. A closed list rather
+# than "any preposition", the same policy as ATTRIBUTIVE_HEADS -- 'for
+# Spanish people' is not an intro clause, it's the whole question, and
+# dropping through ITS nearest comma (if any) would eat part of the question.
+_CLAUSE_OPENERS = re.compile(
+    r"^(?:in|from|among|within|throughout|across|during)\b", re.I)
+
+
+def _delete_intro_clause(text: str, ref_start: int) -> str | None:
+    """Drop a whole sentence-initial scene-setting clause, through its first
+    comma, when the country/cultural reference sits inside it. Returns None
+    when the text isn't shaped that way, so the caller falls back to deleting
+    just the matched word.
+
+    This exists because deleting only the adjective inside a multi-word head
+    noun phrase breaks the sentence -- 'In Egyptian culture,' has 'culture'
+    as its real head, 'Korean dining etiquette' has 'etiquette' two words
+    later, and either way 'In culture,' / 'In etiquette,' is left standing on
+    its own as a sentence opener, which is not a thing English does. A comma-
+    delimited introductory clause, whatever words it contains, is always
+    droppable: the clause after the comma was written to stand as a complete
+    question on its own, so cutting there needs no parse of what came before.
+    """
+    if not _CLAUSE_OPENERS.match(text):
+        return None
+    comma = text.find(",")
+    if comma == -1 or ref_start >= comma:
+        return None
+    rest = text[comma + 1 :].lstrip()
+    if rest:
+        rest = rest[0].upper() + rest[1:]
+    return _tidy_spacing(rest)
 
 
 def _delete_span(text: str, start: int, end: int) -> str:
@@ -409,10 +449,16 @@ def strip_unregistered_reference(text: str) -> tuple[str, bool]:
     for phrase in UNREGISTERED_NAME_PHRASES:
         m = re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text, re.I)
         if m:
+            clause = _delete_intro_clause(text, m.start())
+            if clause is not None:
+                return clause, True
             return _delete_prepositional_phrase(text, m.start(), m.end()), True
     for word in UNREGISTERED_ADJECTIVES:
         m = re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text)
         if m:
+            clause = _delete_intro_clause(text, m.start())
+            if clause is not None:
+                return clause, True
             return _delete_span(text, m.start(), m.end()), True
     return text, False
 
