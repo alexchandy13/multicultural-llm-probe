@@ -42,7 +42,9 @@ for what they measured.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import random
 from collections import defaultdict
 from pathlib import Path
 
@@ -93,10 +95,32 @@ def options_of(row) -> list[str]:
     return [row[f"prompt_option_{k}"] for k in ("a", "b", "c", "d")]
 
 
+def permuted(options: list[str], gold: str, key) -> tuple[list[str], str]:
+    """Reorder the options deterministically from `key`, returning the new gold.
+
+    CulturalBench-Easy ships 53.6% of its answers as option A, falling
+    monotonically to 10.3% for D -- the question writers put the correct option
+    first and the distractors after it, and Easy preserved that order. So
+    always answering A scores 0.536, and every model here predicts A on about
+    half its rows, which means reported accuracy is part cultural knowledge and
+    part first-option bias with no way to separate the two.
+
+    The seed is the row's data_idx, so the permutation is identical in the
+    baseline, probe and no-country arms. That is not a nicety: probe-vs-baseline
+    agreement compares two scorings of the same row, and a permutation that
+    differed between them would register as a country effect.
+    """
+    rng = random.Random(int(hashlib.md5(str(key).encode()).hexdigest()[:8], 16))
+    order = list(range(len(CHOICES)))
+    rng.shuffle(order)
+    return [options[i] for i in order], CHOICES[order.index(CHOICES.index(gold))]
+
+
 def evaluate_one(condition_name: str, out_path: Path,
                  model_size: str = "8b_instruct",
                  precision: str = "matched_bf16",
                  neutral_fewshot: bool = False,
+                 shuffle_options: bool = True,
                  probe_country: str | None = None,
                  no_country: bool = False,
                  raw_prompt: bool = False,
@@ -133,6 +157,9 @@ def evaluate_one(condition_name: str, out_path: Path,
     correct, total = defaultdict(int), defaultdict(int)
     predictions = []
     swap_counts = defaultdict(int)
+    # Printed at the end: the whole point of shuffling is that this comes out
+    # flat, so the log should show it rather than leave it to be trusted.
+    gold_counts = defaultdict(int)
 
     for row in tqdm(ds, desc=f"cbeasy/{condition_name}"):
         country = row["country"]
@@ -140,6 +167,9 @@ def evaluate_one(condition_name: str, out_path: Path,
         group = culture_group(country)
         question = row["prompt_question"]
         opts = options_of(row)
+        if shuffle_options:
+            opts, gold = permuted(opts, gold, row["data_idx"])
+        gold_counts[gold] += 1
 
         nc_applied = False
         if no_country:
@@ -217,7 +247,13 @@ def evaluate_one(condition_name: str, out_path: Path,
         result["probe_n_scored"] = sum(1 for p in predictions if p["us_pred"] is not None)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(result, indent=2))
+    n = total[("all", "all")]
+    result["gold_letter_rate"] = {k: gold_counts[k] / n for k in CHOICES}
+    result["options_shuffled"] = shuffle_options
     print(f"Wrote {out_path}: overall={result['accuracy_overall']:.3f}")
+    print("  gold letters: " + " ".join(
+        f"{k}:{gold_counts[k] / n:.3f}" for k in CHOICES)
+        + ("" if shuffle_options else "   (UNSHUFFLED: always-A scores 0.536)"))
     if probe:
         print("  swap forms: " + ", ".join(
             f"{k}={v}" for k, v in sorted(swap_counts.items(), key=lambda kv: str(kv[0]))))
@@ -238,6 +274,10 @@ def main():
     p.add_argument("--precision", default="matched_bf16")
     p.add_argument("--neutral-fewshot", action="store_true",
                    help="Prepend BLEnD's 4 country-free MCQ-format shots.")
+    p.add_argument("--no-shuffle", action="store_true",
+                   help="Keep the dataset's option order. Only for reproducing "
+                        "the un-permuted numbers; 53.6%% of golds are A, so "
+                        "accuracy then mixes knowledge with first-option bias.")
     p.add_argument("--probe-country", default=None,
                    help="Replace each question's country reference with this "
                         "one and rescore, writing us_pred/us_scores.")
@@ -260,17 +300,21 @@ def main():
     # Suffixes are assembled in the same order the other eval scripts use, so
     # the job scripts' out_for() can predict the name.
     nfs = "_nfs" if args.neutral_fewshot else ""
+    # Shuffling is the default, so it carries no suffix; the un-permuted run is
+    # the one that has to be labelled, since its accuracy is not comparable.
+    shuf = "_noshuf" if args.no_shuffle else ""
     probe_sfx = f"_probe_{args.probe_country}" if args.probe_country else ""
     nc = "_nocountry" if args.no_country else ""
     raw = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out) if args.out else (
         BEHAVIORAL / f"cbeasy_{args.condition}_{args.model_size}"
-                     f"{nfs}{probe_sfx}{nc}{raw}{sys_sfx}.json")
+                     f"{nfs}{shuf}{probe_sfx}{nc}{raw}{sys_sfx}.json")
 
     evaluate_one(args.condition, out,
                  model_size=args.model_size, precision=args.precision,
                  neutral_fewshot=args.neutral_fewshot,
+                 shuffle_options=not args.no_shuffle,
                  probe_country=args.probe_country,
                  no_country=args.no_country,
                  raw_prompt=args.raw_prompt,
