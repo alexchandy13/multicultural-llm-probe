@@ -136,7 +136,8 @@ DEMONYMS: dict[str, dict[str, tuple[str, ...]]] = {
                                "plural": ("Argentines", "Argentinians")},
     "Australia":              {"adj": ("Australian", "Aussie"),
                                "plural": ("Australians", "Aussies")},
-    "Bangladesh":             {"adj": ("Bangladeshi",),  "plural": ("Bangladeshis",)},
+    "Bangladesh":             {"adj": ("Bangladeshi", "Bengali", "Bangali"),
+                               "plural": ("Bangladeshis", "Bengalis")},
     "Brazil":                 {"adj": ("Brazilian",),    "plural": ("Brazilians",)},
     "Canada":                 {"adj": ("Canadian",),     "plural": ("Canadians",)},
     "Chile":                  {"adj": ("Chilean",),      "plural": ("Chileans",)},
@@ -196,6 +197,7 @@ ALIASES: dict[str, tuple[str, ...]] = {
     "Netherlands":          ("Holland",),
     "United Arab Emirates": ("UAE", "U.A.E."),
     "Czech Republic":       ("Czechia",),
+    "Turkey":               ("Türkiye", "Turkiye"),
 }
 
 

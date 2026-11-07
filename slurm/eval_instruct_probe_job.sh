@@ -132,8 +132,9 @@ IFS=',' read -r -a COUNTRIES <<< "$COUNTRIES_ARG"
 # in python; the benchmark list is checked here because it drives the filenames.
 for b in "${BENCHES[@]}"; do
     case "$b" in
-        normad|culturalbench|blend) ;;
-        *) echo "unknown benchmark: $b (expected normad, culturalbench or blend)" >&2
+        normad|culturalbench|cbeasy|blend) ;;
+        *) echo "unknown benchmark: $b (expected normad, culturalbench,"\
+              "cbeasy or blend)" >&2
            exit 2 ;;
     esac
 done
@@ -194,6 +195,9 @@ base_for() {
     case "$bench" in
         normad)        echo "outputs/behavioral/normad_${cond}_${model}${fs}_yn_wp${raw}.json" ;;
         culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${raw}.json" ;;
+        # cbeasy shares BLEnD's prompt and so BLEnD's prefix: four fixed
+        # MCQ-format shots, on or off, with no count in the name.
+        cbeasy)        echo "outputs/behavioral/cbeasy_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${raw}.json" ;;
         blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${raw}.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac

@@ -138,8 +138,9 @@ IFS=',' read -r -a BENCHES <<< "$BENCHES_ARG"
 # in python; the benchmark list is checked here because it drives the filenames.
 for b in "${BENCHES[@]}"; do
     case "$b" in
-        normad|culturalbench|blend) ;;
-        *) echo "unknown benchmark: $b (expected normad, culturalbench or blend)" >&2
+        normad|culturalbench|cbeasy|blend) ;;
+        *) echo "unknown benchmark: $b (expected normad, culturalbench,"\
+              "cbeasy or blend)" >&2
            exit 2 ;;
     esac
 done
@@ -221,6 +222,9 @@ out_for() {
         culturalbench) echo "outputs/behavioral/culturalbench_${cond}_${model}${nfs}${nc}${raw}.json" ;;
         # BLEnD's neutral prefix has no count in its name: it is a fixed set of
         # four MCQ demos, one per answer letter, so it is on or off.
+        # cbeasy shares BLEnD's prompt and so BLEnD's prefix: four fixed
+        # MCQ-format shots, on or off, with no count in the name.
+        cbeasy)        echo "outputs/behavioral/cbeasy_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${nc}${raw}.json" ;;
         blend)         echo "outputs/behavioral/blend_${cond}_${model}$( (( SHOTS > 0 )) && echo _nfs )${nc}${raw}.json" ;;
         *) echo "unknown benchmark: $bench" >&2; return 1 ;;
     esac
@@ -285,6 +289,12 @@ run_one() {
         local SHOT_FLAG=(--no-fewshot)
         (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-shots "$SHOTS")
         python evaluate/eval_culturalbench.py --condition "$cond" --model-size "$model" \
+            --precision matched_bf16 "${FMT_FLAG[@]}" \
+            "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
+        ;;
+      cbeasy)
+        local SHOT_FLAG=(); (( SHOTS > 0 )) && SHOT_FLAG=(--neutral-fewshot)
+        python evaluate/eval_culturalbench_easy.py --condition "$cond" --model-size "$model" \
             --precision matched_bf16 "${FMT_FLAG[@]}" \
             "${SHOT_FLAG[@]}" "${NC_FLAG[@]}"
         ;;
