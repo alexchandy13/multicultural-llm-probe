@@ -63,7 +63,7 @@ def main() -> int:
         kinds[kind] += 1
         by_country[c][kind] += 1
         examples[kind].append(r)
-        if hit and hit[0] in ("plural", "adjective", "attributive") and c not in DEMONYMS:
+        if kind == "NOT FOUND":
             unswappable.append((c, q))
 
     print(f"rows {len(ds)}   countries {len(countries)}")
@@ -71,16 +71,21 @@ def main() -> int:
     for k, v in kinds.most_common():
         print(f"  {k:12} {v:5d}  {v / len(ds):.3f}")
 
+    # A target with no entry cannot be substituted in a demonym slot at all,
+    # so it is a hard error rather than a coverage gap.
+    bad_targets = [t for t in targets if t not in DEMONYMS]
+    if bad_targets:
+        print(f"\nTARGETS WITH NO DEMONYMS ENTRY: {bad_targets}")
+
+    # Source countries need an entry only to be FOUND; a missing one shows up
+    # as NOT FOUND rows, which is the number to drive down.
     missing = sorted({c for c in countries if c not in DEMONYMS})
-    if missing:
-        print(f"\n{len(missing)} countries with no DEMONYMS entry "
-              f"(rows that need one are listed after):")
-        for c in missing:
-            counts = dict(by_country[c])
-            need = sum(v for k, v in counts.items()
-                       if k in ("plural", "adjective", "attributive"))
-            flag = "  <-- NEEDS AN ENTRY" if need else ""
-            print(f"  {c:26} rows={sum(counts.values()):3d} {counts}{flag}")
+    print(f"\nsource countries with no DEMONYMS entry: {missing or 'none'}")
+    nf = sorted(((by_country[c]["NOT FOUND"], c) for c in countries), reverse=True)
+    print("countries by unreferenced rows (these cannot be probed):")
+    for n, c in nf:
+        if n:
+            print(f"  {c:26} {n:4d} / {sum(by_country[c].values()):4d}")
 
     print(f"\nper-country form breakdown:")
     for c in countries:
@@ -98,14 +103,10 @@ def main() -> int:
                 new, k = swap_country_reference(r["prompt_question"], r["country"], t)
                 print(f"      {t:24} {new}")
 
-    if unswappable:
-        print(f"\n{len(unswappable)} rows use a demonym for a country with no "
-              f"table entry; add them to DEMONYMS in evaluate/country_names.py:")
-        for c, q in unswappable[:20]:
-            print(f"  [{c}] {q[:90]}")
-        return 1
-    print("\nOK: every demonym reference resolves to a table entry.")
-    return 0
+    swappable = len(ds) - len(unswappable)
+    print(f"\nswappable {swappable}/{len(ds)} = {swappable / len(ds):.3f}"
+          f"   unreferenced {len(unswappable)}")
+    return 1 if bad_targets else 0
 
 
 if __name__ == "__main__":

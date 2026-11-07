@@ -109,32 +109,78 @@ def resolve_probe_country(name: str, dataset_countries) -> str:
 # plural used as a noun phrase ('what do Indians prefer'). PLURAL carries its
 # own article where English demands one -- 'the Dutch', not 'Dutch' -- because
 # the article is part of the noun phrase, not of the sentence around it.
-DEMONYMS: dict[str, tuple[str, str]] = {
-    # -- the eight probe targets: verify these sixteen strings by eye --------
-    "United States":          ("American", "Americans"),
-    "Netherlands":            ("Dutch", "the Dutch"),
-    "Hungary":                ("Hungarian", "Hungarians"),
-    "Bosnia and Herzegovina": ("Bosnian", "Bosnians"),
-    "Mexico":                 ("Mexican", "Mexicans"),
-    "Taiwan":                 ("Taiwanese", "Taiwanese people"),
-    "Philippines":            ("Filipino", "Filipinos"),
-    "Iran":                   ("Iranian", "Iranians"),
-    # -- source-side only, for detection ------------------------------------
-    "United Kingdom":         ("British", "the British"),
-    "South Korea":            ("Korean", "Koreans"),
-    "North Korea":            ("North Korean", "North Koreans"),
-    "China":                  ("Chinese", "Chinese people"),
-    "Hong Kong":              ("Hong Kong", "Hong Kongers"),
-    "Japan":                  ("Japanese", "Japanese people"),
-    "India":                  ("Indian", "Indians"),
-    "Spain":                  ("Spanish", "Spaniards"),
-    "Morocco":                ("Moroccan", "Moroccans"),
-    "Vietnam":                ("Vietnamese", "Vietnamese people"),
-    "Malaysia":               ("Malaysian", "Malaysians"),
-    "Chile":                  ("Chilean", "Chileans"),
-    "Czech Republic":         ("Czech", "Czechs"),
-    "United Arab Emirates":   ("Emirati", "Emiratis"),
-    "Dominican Republic":     ("Dominican", "Dominicans"),
+# Each country maps to its forms. The FIRST entry of each tuple is what gets
+# written when this country is the probe TARGET; every entry is matched when it
+# is the SOURCE. One country needs several detection forms -- CulturalBench
+# writes both "In Philippine culture" and "Filipino", and "Nepali" and
+# "Nepalese" -- but it must write exactly one form as a target, or the eight
+# probe columns differ in surface form as well as in country, which is the bug
+# this whole module exists to prevent.
+#
+# "English" is deliberately absent from United Kingdom: it is also the language,
+# and "Do people speak English?" would match and be swapped into nonsense.
+DEMONYMS: dict[str, dict[str, tuple[str, ...]]] = {
+    # -- the eight probe targets: check the first string of each tuple --------
+    "United States":          {"adj": ("American",),     "plural": ("Americans",)},
+    "Netherlands":            {"adj": ("Dutch",),        "plural": ("the Dutch",)},
+    "Hungary":                {"adj": ("Hungarian",),    "plural": ("Hungarians",)},
+    "Bosnia and Herzegovina": {"adj": ("Bosnian",),      "plural": ("Bosnians",)},
+    "Mexico":                 {"adj": ("Mexican",),      "plural": ("Mexicans",)},
+    "Taiwan":                 {"adj": ("Taiwanese",),    "plural": ("Taiwanese people",)},
+    "Philippines":            {"adj": ("Filipino", "Philippine", "Filipina"),
+                               "plural": ("Filipinos", "Filipinas")},
+    "Iran":                   {"adj": ("Iranian", "Persian"),
+                               "plural": ("Iranians", "Persians")},
+    # -- the remaining CulturalBench-Easy countries, detection and targets ---
+    "Argentina":              {"adj": ("Argentine", "Argentinian"),
+                               "plural": ("Argentines", "Argentinians")},
+    "Australia":              {"adj": ("Australian", "Aussie"),
+                               "plural": ("Australians", "Aussies")},
+    "Bangladesh":             {"adj": ("Bangladeshi",),  "plural": ("Bangladeshis",)},
+    "Brazil":                 {"adj": ("Brazilian",),    "plural": ("Brazilians",)},
+    "Canada":                 {"adj": ("Canadian",),     "plural": ("Canadians",)},
+    "Chile":                  {"adj": ("Chilean",),      "plural": ("Chileans",)},
+    "China":                  {"adj": ("Chinese",),      "plural": ("Chinese people",)},
+    "Czech Republic":         {"adj": ("Czech",),        "plural": ("Czechs",)},
+    "Egypt":                  {"adj": ("Egyptian",),     "plural": ("Egyptians",)},
+    "France":                 {"adj": ("French",),       "plural": ("the French",)},
+    "Germany":                {"adj": ("German",),       "plural": ("Germans",)},
+    "Hong Kong":              {"adj": ("Hong Kong", "Hongkong"),
+                               "plural": ("Hong Kongers", "Hongkongers")},
+    "India":                  {"adj": ("Indian",),       "plural": ("Indians",)},
+    "Indonesia":              {"adj": ("Indonesian",),   "plural": ("Indonesians",)},
+    "Israel":                 {"adj": ("Israeli",),      "plural": ("Israelis",)},
+    "Italy":                  {"adj": ("Italian",),      "plural": ("Italians",)},
+    "Japan":                  {"adj": ("Japanese",),     "plural": ("Japanese people",)},
+    "Lebanon":                {"adj": ("Lebanese",),     "plural": ("the Lebanese",)},
+    "Malaysia":               {"adj": ("Malaysian",),    "plural": ("Malaysians",)},
+    "Morocco":                {"adj": ("Moroccan",),     "plural": ("Moroccans",)},
+    "Nepal":                  {"adj": ("Nepali", "Nepalese"),
+                               "plural": ("Nepalis", "Nepalese people")},
+    "New Zealand":            {"adj": ("New Zealand", "Kiwi"),
+                               "plural": ("New Zealanders", "Kiwis")},
+    "Nigeria":                {"adj": ("Nigerian",),     "plural": ("Nigerians",)},
+    "North Korea":            {"adj": ("North Korean",), "plural": ("North Koreans",)},
+    "Pakistan":               {"adj": ("Pakistani",),    "plural": ("Pakistanis",)},
+    "Peru":                   {"adj": ("Peruvian",),     "plural": ("Peruvians",)},
+    "Poland":                 {"adj": ("Polish",),       "plural": ("Poles",)},
+    "Romania":                {"adj": ("Romanian",),     "plural": ("Romanians",)},
+    "Russia":                 {"adj": ("Russian",),      "plural": ("Russians",)},
+    "Saudi Arabia":           {"adj": ("Saudi", "Saudi Arabian"),
+                               "plural": ("Saudis", "Saudi Arabians")},
+    "Singapore":              {"adj": ("Singaporean",),  "plural": ("Singaporeans",)},
+    "South Africa":           {"adj": ("South African",), "plural": ("South Africans",)},
+    "South Korea":            {"adj": ("Korean",),       "plural": ("Koreans",)},
+    "Spain":                  {"adj": ("Spanish",),      "plural": ("Spaniards",)},
+    "Thailand":               {"adj": ("Thai",),         "plural": ("Thais",)},
+    "Turkey":                 {"adj": ("Turkish",),      "plural": ("Turks",)},
+    "Ukraine":                {"adj": ("Ukrainian",),    "plural": ("Ukrainians",)},
+    "United Arab Emirates":   {"adj": ("Emirati",),      "plural": ("Emiratis",)},
+    "United Kingdom":         {"adj": ("British",),
+                               "plural": ("the British", "Brits", "Britons")},
+    "Vietnam":                {"adj": ("Vietnamese",),   "plural": ("Vietnamese people",)},
+    "Zimbabwe":               {"adj": ("Zimbabwean",),   "plural": ("Zimbabweans",)},
+    "Dominican Republic":     {"adj": ("Dominican",),    "plural": ("Dominicans",)},
 }
 
 # Alternative names for the same country, as a question might write them.
@@ -190,11 +236,9 @@ def _forms_for(country: str) -> list[tuple[str, str]]:
     """
     forms: list[tuple[str, str]] = [("name", country)]
     forms += [("alias", a) for a in ALIASES.get(country, ())]
-    adj, plural = DEMONYMS.get(country, (None, None))
-    if plural:
-        forms.append(("plural", plural))
-    if adj:
-        forms.append(("adjective", adj))
+    entry = DEMONYMS.get(country, {})
+    forms += [("plural", p) for p in entry.get("plural", ())]
+    forms += [("adjective", a) for a in entry.get("adj", ())]
     return sorted(forms, key=lambda kv: -len(kv[1]))
 
 
@@ -252,9 +296,9 @@ def swap_country_reference(text: str, country: str, target: str):
             f"differently from the other seven.")
 
     if kind == "plural":
-        repl = DEMONYMS[target][1]
+        repl = DEMONYMS[target]["plural"][0]
     elif kind in ("adjective", "attributive"):
-        repl = DEMONYMS[target][0]
+        repl = DEMONYMS[target]["adj"][0]
     else:
         repl = country_with_article(target)
     return text[:start] + repl + text[end:], kind
