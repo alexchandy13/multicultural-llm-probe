@@ -304,3 +304,53 @@ def swap_country_reference(text: str, country: str, target: str):
     else:
         repl = country_with_article(target)
     return text[:start] + repl + text[end:], kind
+
+
+def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
+    """Delete `text`'s reference to `country`, returning (new_text, applied).
+
+    adjective / attributive: dropping just the word stays grammatical, because
+    it is a modifier -- 'In Korean dining etiquette' -> 'In dining etiquette',
+    'for Spanish people' -> 'for people'. This is the big win: 725 of
+    CulturalBench-Easy's 1,227 rows use one of these two forms.
+
+    name / alias: dropped together with an immediately preceding preposition
+    ('in'/'from') and a following comma, or 'In the Netherlands, which...'
+    becomes 'In, which...' instead of 'Which...'.
+
+    plural: NOT deletable. 'What do Indians prefer' and 'the communication
+    style of the Dutch' use the demonym as the sentence's subject or object,
+    not as a modifier -- deleting it leaves no noun phrase at all. Returned
+    unchanged, same as a row with no reference; the caller must flag both as
+    not run through the no-country arm.
+    """
+    hit = find_country_reference(text, country)
+    if hit is None or hit[0] == "plural":
+        return text, False
+    kind, start, end = hit
+
+    if kind in ("adjective", "attributive"):
+        new = text[:start] + text[end:]
+        return _tidy_spacing(new), True
+
+    # name / alias
+    pre, tail = text[:start], text[end:]
+    m = re.search(r"\b(?:in|from)\s*$", pre, re.I)
+    new_pre = pre[: m.start()] if m else pre
+    sentence_start = bool(m) and not new_pre.strip()
+    new_tail = re.sub(r"^\s*,\s*", "" if sentence_start else " ", tail)
+    new = _tidy_spacing(new_pre + new_tail)
+    if sentence_start and new:
+        new = new[0].upper() + new[1:]
+    return new, True
+
+
+def _tidy_spacing(s: str) -> str:
+    """Collapse runs of spaces and remove a space left before punctuation.
+
+    'aspect in Nigeria?' loses 'in Nigeria' and leaves 'aspect ?' -- the
+    deleted span bordered the question mark on one side with nothing on the
+    other, so there is no following word to normally absorb the space.
+    """
+    s = re.sub(r" {2,}", " ", s).strip()
+    return re.sub(r"\s+([?.,!:;])", r"\1", s)

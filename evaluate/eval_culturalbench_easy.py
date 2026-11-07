@@ -62,8 +62,8 @@ from evaluate._common import (
     resolve_condition,
 )
 from evaluate.country_names import (
-    find_country_reference,
     resolve_probe_country,
+    strip_country_reference,
     swap_country_reference,
 )
 # One MCQ implementation, shared with BLEnD.
@@ -173,19 +173,13 @@ def evaluate_one(condition_name: str, out_path: Path,
 
         nc_applied = False
         if no_country:
-            # Removing a demonym leaves "In dining etiquette", so only a
-            # name-form reference is deletable. Everything else keeps its
-            # country and is flagged, matching BLEnD's treatment of rows where
-            # the country is the sentence subject.
-            hit = find_country_reference(question, country)
-            if hit and hit[0] in ("name", "alias"):
-                s, e = hit[1], hit[2]
-                tail = question[e:]
-                question = (question[:s].rstrip() + tail).lstrip()
-                question = question.lstrip(", ").lstrip()
-                if question:
-                    question = question[0].upper() + question[1:]
-                nc_applied = True
+            # adjective/attributive ("Korean dining etiquette", "UK culture")
+            # and name/alias ("In the Netherlands,", "In the U.S.,") are all
+            # deletable -- see strip_country_reference(). Only plural-demonym
+            # rows ("What do Indians prefer", "the Dutch") stay excluded: the
+            # demonym there is the sentence's subject or object, not a
+            # modifier, so deleting it would leave no noun phrase at all.
+            question, nc_applied = strip_country_reference(question, country)
 
         scores = score_choices(model, tokenizer, wrap(build_prompt(question, opts)))
         pred = CHOICES[max(range(4), key=scores.__getitem__)]

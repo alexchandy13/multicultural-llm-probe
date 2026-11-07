@@ -31,7 +31,7 @@ from datasets import load_dataset
 
 from evaluate.country_names import (
     DEMONYMS, find_country_reference, resolve_probe_country,
-    swap_country_reference,
+    strip_country_reference, swap_country_reference,
 )
 
 TARGETS = ["us", "netherlands", "hungary", "bosnia_and_herzegovina",
@@ -106,6 +106,19 @@ def main() -> int:
     swappable = len(ds) - len(unswappable)
     print(f"\nswappable {swappable}/{len(ds)} = {swappable / len(ds):.3f}"
           f"   unreferenced {len(unswappable)}")
+
+    deletable = sum(1 for r in ds
+                    if strip_country_reference(r["prompt_question"], r["country"])[1])
+    print(f"deletable (--no-country): {deletable}/{len(ds)} = {deletable / len(ds):.3f}")
+    print("\nsample deletions:")
+    shown = 0
+    for r in ds:
+        new, applied = strip_country_reference(r["prompt_question"], r["country"])
+        if applied and shown < 6:
+            print(f"  [{r['country']}] {r['prompt_question']}")
+            print(f"  -> {new}\n")
+            shown += 1
+
     return 1 if bad_targets else 0
 
 
