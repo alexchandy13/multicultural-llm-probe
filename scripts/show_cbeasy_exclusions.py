@@ -22,7 +22,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from datasets import load_dataset
 
-from evaluate.country_names import find_country_reference, strip_country_reference
+from evaluate.country_names import (
+    find_country_reference, strip_country_reference, strip_unregistered_reference,
+)
 
 
 def main() -> int:
@@ -32,21 +34,21 @@ def main() -> int:
 
     ds = load_dataset("kellycyy/CulturalBench", "CulturalBench-Easy", split="test")
 
-    plural, not_found = [], []
+    still_excluded = []
     for r in ds:
         q, c = r["prompt_question"], r["country"]
         _, applied = strip_country_reference(q, c)
-        if applied:
-            continue
-        hit = find_country_reference(q, c)
-        (plural if hit and hit[0] == "plural" else not_found).append((c, q))
+        if not applied:
+            _, applied = strip_unregistered_reference(q)
+        if not applied:
+            still_excluded.append((c, q))
 
-    print(f"PLURAL -- demonym is the subject/object, deletion breaks the sentence: {len(plural)}")
-    for c, q in plural[: args.show]:
-        print(f"  [{c}] {q}")
-
-    print(f"\nNOT FOUND -- no country reference at all (ethnic group / city / religion): {len(not_found)}")
-    for c, q in not_found[: args.show]:
+    n = len(ds)
+    deletable = n - len(still_excluded)
+    print(f"deletable (--no-country, after both passes): {deletable}/{n} = {deletable / n:.3f}")
+    print(f"\nSTILL EXCLUDED -- benchmark typos, city/region names, unlisted demonyms: "
+          f"{len(still_excluded)}")
+    for c, q in still_excluded[: args.show]:
         print(f"  [{c}] {q[:100]}")
     return 0
 

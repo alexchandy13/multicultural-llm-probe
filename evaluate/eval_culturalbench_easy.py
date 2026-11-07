@@ -64,6 +64,7 @@ from evaluate._common import (
 from evaluate.country_names import (
     resolve_probe_country,
     strip_country_reference,
+    strip_unregistered_reference,
     swap_country_reference,
 )
 # One MCQ implementation, shared with BLEnD.
@@ -173,13 +174,17 @@ def evaluate_one(condition_name: str, out_path: Path,
 
         nc_applied = False
         if no_country:
-            # adjective/attributive ("Korean dining etiquette", "UK culture")
-            # and name/alias ("In the Netherlands,", "In the U.S.,") are all
-            # deletable -- see strip_country_reference(). Only plural-demonym
-            # rows ("What do Indians prefer", "the Dutch") stay excluded: the
-            # demonym there is the sentence's subject or object, not a
-            # modifier, so deleting it would leave no noun phrase at all.
+            # adjective/attributive/name/alias are deleted, plural is
+            # replaced with 'people' -- see strip_country_reference(). Rows
+            # with no country reference at all fall through to
+            # strip_unregistered_reference(), which deletes a curated list of
+            # ethnic/religious/regional references ('Yoruba', 'Judaism',
+            # 'rainbow nation') that aren't swappable to a country but are
+            # still safe to delete. What's left after both (benchmark typos,
+            # city/region names) stays excluded.
             question, nc_applied = strip_country_reference(question, country)
+            if not nc_applied:
+                question, nc_applied = strip_unregistered_reference(question)
 
         scores = score_choices(model, tokenizer, wrap(build_prompt(question, opts)))
         pred = CHOICES[max(range(4), key=scores.__getitem__)]

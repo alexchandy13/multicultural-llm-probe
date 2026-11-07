@@ -318,22 +318,44 @@ def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
     ('in'/'from') and a following comma, or 'In the Netherlands, which...'
     becomes 'In, which...' instead of 'Which...'.
 
-    plural: NOT deletable. 'What do Indians prefer' and 'the communication
-    style of the Dutch' use the demonym as the sentence's subject or object,
-    not as a modifier -- deleting it leaves no noun phrase at all. Returned
-    unchanged, same as a row with no reference; the caller must flag both as
+    plural: 'What do Indians prefer' and 'the communication style of the
+    Dutch' use the demonym as the sentence's subject or object, not as a
+    modifier, so deleting it outright would leave no noun phrase at all
+    ('What do prefer'). Substituted with 'people' instead -- 'What do people
+    prefer', 'the communication style of people' -- which keeps the sentence
+    about a culture in general rather than inventing a specific one.
+
+    No reference found: returned unchanged; the caller must flag the row as
     not run through the no-country arm.
     """
     hit = find_country_reference(text, country)
-    if hit is None or hit[0] == "plural":
+    if hit is None:
         return text, False
     kind, start, end = hit
 
+    if kind == "plural":
+        repl = "People" if start == 0 else "people"
+        return _tidy_spacing(text[:start] + repl + text[end:]), True
+
     if kind in ("adjective", "attributive"):
-        new = text[:start] + text[end:]
-        return _tidy_spacing(new), True
+        return _delete_span(text, start, end), True
 
     # name / alias
+    return _delete_prepositional_phrase(text, start, end), True
+
+
+def _delete_span(text: str, start: int, end: int) -> str:
+    """Delete text[start:end], the plain case: the word was a modifier."""
+    return _tidy_spacing(text[:start] + text[end:])
+
+
+def _delete_prepositional_phrase(text: str, start: int, end: int) -> str:
+    """Delete text[start:end] along with a preceding 'in'/'from' and a
+    following comma, so 'In the Netherlands, which...' becomes 'Which...'
+    rather than 'In, which...'. Shared by country names/aliases and by
+    unregistered name-form phrases like 'Judaism' or 'rainbow nation' -- see
+    strip_unregistered_reference().
+    """
     pre, tail = text[:start], text[end:]
     m = re.search(r"\b(?:in|from)\s*$", pre, re.I)
     new_pre = pre[: m.start()] if m else pre
@@ -342,7 +364,57 @@ def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
     new = _tidy_spacing(new_pre + new_tail)
     if sentence_start and new:
         new = new[0].upper() + new[1:]
-    return new, True
+    return new
+
+
+# ---------------------------------------------------------------------------
+# References CulturalBench-Easy makes that are not to a country at all
+# ---------------------------------------------------------------------------
+# 135 of the 1,227 questions name no country -- not even a demonym -- because
+# they refer to an ethnic group ('a young Yoruba man'), a religion ('In
+# Judaism,'), or a sub-national region ('many South American cultures')
+# instead. These rows are never candidates for the country-swap probe: there
+# is no country-level target to substitute Yoruba or Judaism FOR. But the
+# no-country arm only needs to delete the reference, not replace it with
+# anything, and that is just as safe to do here as for a registered country's
+# adjective -- 'a young Yoruba man' -> 'a young man' is exactly the same move
+# as 'Korean dining etiquette' -> 'dining etiquette'.
+#
+# A closed, by-hand list rather than a part-of-speech heuristic, for the same
+# reason DEMONYMS and ATTRIBUTIVE_HEADS are closed lists: a rule that deletes
+# "any capitalized word before a head noun" would also delete "English" from
+# "an English-language form" or "Western" from "a Western diplomat", whatever
+# those turn out to mean in context neither of us has read.
+UNREGISTERED_ADJECTIVES = (
+    "Yoruba", "Igbo", "Zulu", "Xhosa", "Batswana", "Chichewa",
+    "Shona", "Mashona", "Sahraoui", "Saharoui", "Valencian",
+    "Scottish", "Jewish", "Hindu", "Arabic", "Slavic", "South American",
+)
+
+# Proper nouns that function like a country name in an 'In X,'/'from X' clause
+# but name a religion or a nickname rather than a country.
+UNREGISTERED_NAME_PHRASES = (
+    "Judaism", "Sikhism", "rainbow nation",
+)
+
+
+def strip_unregistered_reference(text: str) -> tuple[str, bool]:
+    """Delete a non-country cultural reference strip_country_reference can't
+    see, because it was never told the row's country at all -- this is the
+    fallback for the 135 CulturalBench-Easy rows find_country_reference
+    returns None on. Tries phrases before single words, since 'rainbow
+    nation' must not be matched by a search for 'nation' alone (it isn't in
+    the word list; this comment is the reminder for the next word added).
+    """
+    for phrase in UNREGISTERED_NAME_PHRASES:
+        m = re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text, re.I)
+        if m:
+            return _delete_prepositional_phrase(text, m.start(), m.end()), True
+    for word in UNREGISTERED_ADJECTIVES:
+        m = re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text)
+        if m:
+            return _delete_span(text, m.start(), m.end()), True
+    return text, False
 
 
 def _tidy_spacing(s: str) -> str:
