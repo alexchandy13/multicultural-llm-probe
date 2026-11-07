@@ -138,7 +138,7 @@ def evaluate_one(condition_name: str, out_path: Path,
     if probe:
         print(f"Probe country: {probe!r} (from {probe_country!r})")
 
-    instruct = is_instruct(model_size) and not raw_prompt
+    instruct = is_instruct(model_size, condition_name) and not raw_prompt
     prefix, fewshot_turns = "", None
     if neutral_fewshot:
         prefix = build_neutral_fewshot_prefix()
@@ -305,7 +305,7 @@ def main():
     shuf = "_noshuf" if args.no_shuffle else ""
     probe_sfx = f"_probe_{args.probe_country}" if args.probe_country else ""
     nc = "_nocountry" if args.no_country else ""
-    raw = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
+    raw = "_raw" if args.raw_prompt and is_instruct(args.model_size, args.condition) else ""
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out) if args.out else (
         BEHAVIORAL / f"cbeasy_{args.condition}_{args.model_size}"

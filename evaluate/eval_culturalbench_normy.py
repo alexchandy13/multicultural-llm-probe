@@ -53,7 +53,7 @@ def evaluate_one(condition_name: str, out_path: Path,
                  us_probe: bool = False, probe_country: str | None = None):
     cond = resolve_condition(condition_name, model_size=model_size)
     tokenizer, model = load_model_for_eval(cond, precision=precision)
-    instruct = is_instruct(model_size)
+    instruct = is_instruct(model_size, condition_name)
 
     rows = json.loads(DATA_PATH.read_text())
     prefix = build_neutral_fewshot_prefix(multi_prompt_word=True)

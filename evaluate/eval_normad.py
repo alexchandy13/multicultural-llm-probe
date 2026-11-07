@@ -687,8 +687,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     # goes from one flat string to a sequence of chat turns. It also flips
     # leading_space back to True, since the flat prompt ends in "Answer:" where
     # the next token is space-prefixed.
-    instruct = is_instruct(model_size) and not raw_prompt
-    if raw_prompt and is_instruct(model_size):
+    instruct = is_instruct(model_size, condition_name) and not raw_prompt
+    if raw_prompt and is_instruct(model_size, condition_name):
         print("Raw prompt: chat template bypassed, scoring as a base model")
 
     # Resolved against the dataset's own country spellings, once, rather than
@@ -1027,7 +1027,7 @@ def main():
     cal_sfx = "_calibrated" if args.calibrate else ""
     # Guarded by is_instruct so passing --raw-prompt to a non-instruct size is a
     # true no-op: it already changed nothing, and now it renames nothing either.
-    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size, args.condition) else ""
     sys_sfx = "_sys" if args.system_prompt else ""
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"

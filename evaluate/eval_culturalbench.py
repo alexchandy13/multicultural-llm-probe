@@ -207,8 +207,8 @@ def evaluate_one(condition_name: str, out_path: Path,
     # See eval_blend.py: raw_prompt holds the prompt format constant so an
     # instruct-vs-base gap is a weights gap. It also flips leading_space back
     # to True below, since the flat prompt ends where a space-prefixed token goes.
-    instruct = is_instruct(model_size) and not raw_prompt
-    if raw_prompt and is_instruct(model_size):
+    instruct = is_instruct(model_size, condition_name) and not raw_prompt
+    if raw_prompt and is_instruct(model_size, condition_name):
         print("Raw prompt: chat template bypassed, scoring as a base model")
 
     rows = json.loads(DATA_PATH.read_text())
@@ -431,7 +431,7 @@ def main():
     sys_sfx = "_sys" if args.system_prompt else ""
     nc_sfx = "_nocountry" if args.no_country else ""
     # Guarded by is_instruct so the flag is a true no-op on non-instruct sizes.
-    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size, args.condition) else ""
 
     out = Path(args.out_path) if args.out_path else (
         BEHAVIORAL / f"culturalbench_{args.condition}{size_sfx}{shot_sfx}{nc_sfx}{probe_sfx}{raw_sfx}{sys_sfx}.json"

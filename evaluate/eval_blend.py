@@ -310,8 +310,8 @@ def evaluate_one(condition_name: str, data_path: Path, out_path: Path,
     # prompt is byte-identical to a base model's. Without it, comparing a vendor
     # instruct release against our aya conditions or tulu3_* changes two things
     # at once: the weights AND one flat string becoming a sequence of chat turns.
-    instruct = is_instruct(model_size) and not raw_prompt
-    if raw_prompt and is_instruct(model_size):
+    instruct = is_instruct(model_size, condition_name) and not raw_prompt
+    if raw_prompt and is_instruct(model_size, condition_name):
         print("Raw prompt: chat template bypassed, scoring as a base model")
     fewshot_turns: list[tuple[str, str]] | None = None
 
@@ -569,7 +569,7 @@ def main():
     nc_sfx = "_nocountry" if args.no_country else ""
     # Guarded by is_instruct so passing --raw-prompt to a non-instruct size
     # is a true no-op and does not rename files the probe grid pairs against.
-    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size) else ""
+    raw_sfx = "_raw" if args.raw_prompt and is_instruct(args.model_size, args.condition) else ""
 
     out = Path(args.out_path) if args.out_path else (
         PROJECT_ROOT / "outputs" / "behavioral"

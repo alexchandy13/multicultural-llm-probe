@@ -302,7 +302,7 @@ def load_model_for_eval(cond: Condition, precision: str = "matched_bf16"):
     # failure here is not a reason to stop — the tokenizer carries the chat
     # template too. Keep this separate from is_instruct(), which decides whether
     # prompts get templated at all, not which class loads them.
-    if is_instruct(cond.model_size):
+    if is_instruct(cond.model_size, cond.name):
         try:
             tokenizer = AutoProcessor.from_pretrained(cond.base)
         except Exception as e:
@@ -387,8 +387,30 @@ CHAT_TEMPLATED_SIZES = {
 }
 
 
-def is_instruct(model_size: str) -> bool:
-    return model_size in CHAT_TEMPLATED_SIZES
+# Conditions whose checkpoint is chat-templated although their model_size label
+# is not. Tulu is the case this exists for: it is a CONDITION over size "8b"
+# (allenai/Llama-3.1-Tulu-3-8B-DPO), because it is an alternative alignment
+# pipeline on the same base rather than a different model. But "8b" means the
+# raw Llama base, which has no chat template, so is_instruct("8b") was False
+# and every Tulu run was scored as a completion model while its filename said
+# otherwise -- it got the _sys tail from --system-prompt, which is not gated on
+# is_instruct, without the template or the system message that tail promises.
+CHAT_TEMPLATED_CONDITIONS = {
+    "tulu3_sft",
+    "tulu3_dpo",
+}
+
+
+def is_instruct(model_size: str, condition: str | None = None) -> bool:
+    """Whether prompts for this run go through a chat template.
+
+    `condition` is optional only so that callers with no condition in scope
+    keep working; pass it whenever it is available, or a condition that is
+    chat-templated over a base-model label will be scored as a base model.
+    """
+    if model_size in CHAT_TEMPLATED_SIZES:
+        return True
+    return condition is not None and condition in CHAT_TEMPLATED_CONDITIONS
 
 
 # Passing no system message does not mean "no system prompt" — a chat template is

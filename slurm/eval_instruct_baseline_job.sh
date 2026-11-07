@@ -187,7 +187,7 @@ cond_at() {
 # evaluate/_common.py rather than restating the set, and without importing it:
 # _common pulls in torch and peft, and --layout has to run on a login node.
 raw_tail_for() {
-    local label="$1"
+    local label="$1" cond="${2:-}"
     # --templated passes no --raw-prompt, so raw_sfx is empty; it passes
     # --system-prompt instead, which appends _sys after where _raw would sit.
     if [[ $TEMPLATED -eq 1 ]]; then
@@ -198,15 +198,21 @@ raw_tail_for() {
         echo "_sys"
         return
     fi
+    # Both sets, because a condition can be chat-templated over a base-model
+    # label: tulu3_dpo is size "8b", whose own label has no chat template.
     if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
          | grep -q "\"${label}\","; then
+        echo "_raw"
+    elif [[ -n "$cond" ]] && \
+         sed -n '/^CHAT_TEMPLATED_CONDITIONS = {/,/^}/p' evaluate/_common.py \
+           | grep -q "\"${cond}\","; then
         echo "_raw"
     fi
 }
 
 out_for() {
     local bench="$1" cond="$2" model="$3"
-    local raw; raw=$(raw_tail_for "$model")
+    local raw; raw=$(raw_tail_for "$model" "$cond")
     # _nocountry sits immediately before the _raw tail, matching the order the
     # eval scripts assemble their own suffixes in.
     local nc=""; [[ $NOCOUNTRY -eq 1 ]] && nc="_nocountry"

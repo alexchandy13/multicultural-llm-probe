@@ -397,7 +397,7 @@ def evaluate_one(condition_name: str, dataset: str, out_path: Path,
     else:
         ds = load_dataset(cfg["hf_path"], split=cfg["split"])
 
-    instruct = is_instruct(model_size)
+    instruct = is_instruct(model_size, condition_name)
     choices = cfg["choices"]
 
     prefix = ""

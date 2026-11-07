@@ -169,7 +169,7 @@ cond_at() {
 # evaluate/_common.py rather than restating the set, and without importing it:
 # _common pulls in torch and peft, and --layout has to run on a login node.
 raw_tail_for() {
-    local label="$1"
+    local label="$1" cond="${2:-}"
     if [[ $TEMPLATED -eq 1 ]]; then
         # Unconditional, unlike _raw: sys_sfx in the eval scripts is gated only
         # on --system-prompt being set, not on the label being chat-templated.
@@ -178,15 +178,21 @@ raw_tail_for() {
         echo "_sys"
         return
     fi
+    # Both sets, because a condition can be chat-templated over a base-model
+    # label: tulu3_dpo is size "8b", whose own label has no chat template.
     if sed -n '/^CHAT_TEMPLATED_SIZES = {/,/^}/p' evaluate/_common.py \
          | grep -q "\"${label}\","; then
+        echo "_raw"
+    elif [[ -n "$cond" ]] && \
+         sed -n '/^CHAT_TEMPLATED_CONDITIONS = {/,/^}/p' evaluate/_common.py \
+           | grep -q "\"${cond}\","; then
         echo "_raw"
     fi
 }
 
 base_for() {
     local bench="$1" cond="$2" model="$3"
-    local raw; raw=$(raw_tail_for "$model")
+    local raw; raw=$(raw_tail_for "$model" "$cond")
     local fs="" nfs=""
     if (( SHOTS > 0 )); then
         fs="_fs${SHOTS}"

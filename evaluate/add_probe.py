@@ -467,7 +467,7 @@ def main():
     # One model load for every probe country, not one per country.
     cond = resolve_condition(args.condition, model_size=args.model_size)
     tokenizer, model = load_model_for_eval(cond, precision=args.precision)
-    instruct = is_instruct(args.model_size) and not args.raw_prompt
+    instruct = is_instruct(args.model_size, args.condition) and not args.raw_prompt
 
     for probe, out_path in todo:
         print(f"--- probe={probe} -> {out_path.name}", flush=True)

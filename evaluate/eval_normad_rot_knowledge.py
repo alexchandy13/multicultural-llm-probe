@@ -168,7 +168,7 @@ def main():
 
     cond = resolve_condition(args.condition, model_size=args.model_size)
     tokenizer, model = load_model_for_eval(cond, precision=args.precision)
-    instruct = is_instruct(args.model_size)
+    instruct = is_instruct(args.model_size, args.condition)
     leading_space = not instruct
 
     ds = load_normad(Path(args.data_path))
