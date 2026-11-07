@@ -248,11 +248,26 @@ def _forms_for(country: str) -> list[tuple[str, str]]:
 # character, and \b after one demands a word character next, so "In the U.S.,"
 # would never match.
 def _pattern(kind: str, surface: str) -> str:
-    body = re.escape(surface)
+    # A leading "the" -- either added below for name/alias, or already part
+    # of a plural surface form like "the Dutch" -- is matched case-
+    # insensitively on its own, because it's the FIRST word of a sentence as
+    # often as not ("The Netherlands is...", "The Dutch are..."). Matching it
+    # case-sensitively only (the previous behaviour) means a capitalized "The"
+    # doesn't match the literal lowercase "the" in the pattern; since the
+    # group is optional, the match still succeeds on the country word ALONE,
+    # which strands "The " in the text afterwards -- "The  is known..." once
+    # tidied becomes "The is known...", a stray leftover word. The country
+    # word itself stays case-sensitive, same as everywhere else in this
+    # module: "turkey" the bird and "chile" the pepper must not match.
+    if surface.lower().startswith("the "):
+        the_part, rest = r"[Tt]he\s+", surface[4:]
+    else:
+        the_part, rest = "", surface
+    body = the_part + re.escape(rest)
     if kind in ("name", "alias"):
         # The article belongs to the matched span, so the replacement decides
         # whether the target takes one -- "the Netherlands" -> "Hungary".
-        body = rf"(?:the\s+)?{body}"
+        body = rf"(?:[Tt]he\s+)?{body}"
     return rf"(?<!\w){body}(?!\w)"
 
 
@@ -278,32 +293,46 @@ def find_country_reference(text: str, country: str):
 
 
 def swap_country_reference(text: str, country: str, target: str):
-    """Rewrite `text` to refer to `target` in the same grammatical form.
+    """Rewrite every reference `text` makes to `country`, in `target`'s form.
 
     Returns (new_text, kind). kind is None when no reference was found, and
     the text comes back unchanged -- the caller flags that row rather than
     scoring it as though a swap had happened, which is how a probe ends up
     silently measuring nothing on 72% of the set.
+
+    Loops rather than handling one match: a question can name the same
+    country twice in different forms ('In Thai culture, what is Thailand
+    commonly known as...' has both 'Thai' and 'Thailand'), and a single-match
+    version swaps whichever form find_country_reference happens to try first,
+    leaving the other -- 'In Thai culture, what is Hungary...' names two
+    countries in the one prompt. Each pass re-runs find_country_reference on
+    the UPDATED text, so a reference already rewritten into the target's
+    wording can never match the source country's forms again; the loop ends
+    when nothing does. kind reported is the first occurrence's, for logging.
     """
-    hit = find_country_reference(text, country)
-    if hit is None:
-        return text, None
-    kind, start, end = hit
+    first_kind = None
+    for _ in range(8):  # a real question never needs this many; a bug would
+        hit = find_country_reference(text, country)
+        if hit is None:
+            return text, first_kind
+        kind, start, end = hit
+        first_kind = first_kind or kind
 
-    if target not in DEMONYMS and kind in ("plural", "adjective", "attributive"):
-        raise ValueError(
-            f"{target!r} is referred to by a demonym here ({kind}), but has no "
-            f"DEMONYMS entry in evaluate/country_names.py. Add its adjective "
-            f"and plural; guessing them is how a probe column ends up spelled "
-            f"differently from the other seven.")
+        if target not in DEMONYMS and kind in ("plural", "adjective", "attributive"):
+            raise ValueError(
+                f"{target!r} is referred to by a demonym here ({kind}), but has no "
+                f"DEMONYMS entry in evaluate/country_names.py. Add its adjective "
+                f"and plural; guessing them is how a probe column ends up spelled "
+                f"differently from the other seven.")
 
-    if kind == "plural":
-        repl = DEMONYMS[target]["plural"][0]
-    elif kind in ("adjective", "attributive"):
-        repl = DEMONYMS[target]["adj"][0]
-    else:
-        repl = country_with_article(target)
-    return text[:start] + repl + text[end:], kind
+        if kind == "plural":
+            repl = DEMONYMS[target]["plural"][0]
+        elif kind in ("adjective", "attributive"):
+            repl = DEMONYMS[target]["adj"][0]
+        else:
+            repl = country_with_article(target)
+        text = text[:start] + repl + text[end:]
+    raise RuntimeError(f"still finding {country!r} after 8 swap passes: {text!r}")
 
 
 def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
@@ -327,25 +356,38 @@ def strip_country_reference(text: str, country: str) -> tuple[str, bool]:
 
     No reference found: returned unchanged; the caller must flag the row as
     not run through the no-country arm.
+
+    Loops rather than handling one match, for the same reason
+    swap_country_reference does: 'In Thai culture, what is Thailand commonly
+    known as...' names the country twice, as 'Thai' and 'Thailand', and
+    deleting only whichever one find_country_reference tries first leaves
+    the other standing -- the row reports nc_applied=True while the country
+    is still right there in the text. Each pass re-scans the UPDATED text, so
+    it stops once truly nothing of `country` is left in it.
     """
-    hit = find_country_reference(text, country)
-    if hit is None:
-        return text, False
-    kind, start, end = hit
+    applied = False
+    for _ in range(8):
+        hit = find_country_reference(text, country)
+        if hit is None:
+            return text, applied
+        kind, start, end = hit
+        applied = True
 
-    if kind == "plural":
-        repl = "People" if start == 0 else "people"
-        return _tidy_spacing(text[:start] + repl + text[end:]), True
+        if kind == "plural":
+            repl = "People" if start == 0 else "people"
+            text = _tidy_spacing(text[:start] + repl + text[end:])
+            continue
 
-    clause = _delete_intro_clause(text, start)
-    if clause is not None:
-        return clause, True
+        clause = _delete_intro_clause(text, start)
+        if clause is not None:
+            text = clause
+            continue
 
-    if kind in ("adjective", "attributive"):
-        return _delete_span(text, start, end), True
-
-    # name / alias
-    return _delete_prepositional_phrase(text, start, end), True
+        if kind in ("adjective", "attributive"):
+            text = _delete_span(text, start, end)
+        else:
+            text = _delete_prepositional_phrase(text, start, end)
+    raise RuntimeError(f"still finding {country!r} after 8 delete passes: {text!r}")
 
 
 # Clause-opening words that can introduce a droppable scene-setting clause:
@@ -399,7 +441,11 @@ def _delete_prepositional_phrase(text: str, start: int, end: int) -> str:
     pre, tail = text[:start], text[end:]
     m = re.search(r"\b(?:in|from)\s*$", pre, re.I)
     new_pre = pre[: m.start()] if m else pre
-    sentence_start = bool(m) and not new_pre.strip()
+    # Not "bool(m) and ...": a name can be the sentence's bare subject with no
+    # preposition at all ('The Netherlands is known for its tulips...'), and
+    # that is just as much the sentence start as 'In the Netherlands,' is --
+    # requiring m here left it uncapitalized ('is known for its tulips...').
+    sentence_start = not new_pre.strip()
     new_tail = re.sub(r"^\s*,\s*", "" if sentence_start else " ", tail)
     new = _tidy_spacing(new_pre + new_tail)
     if sentence_start and new:
@@ -438,29 +484,49 @@ UNREGISTERED_NAME_PHRASES = (
 )
 
 
-def strip_unregistered_reference(text: str) -> tuple[str, bool]:
-    """Delete a non-country cultural reference strip_country_reference can't
-    see, because it was never told the row's country at all -- this is the
-    fallback for the 135 CulturalBench-Easy rows find_country_reference
-    returns None on. Tries phrases before single words, since 'rainbow
-    nation' must not be matched by a search for 'nation' alone (it isn't in
-    the word list; this comment is the reminder for the next word added).
+def _find_unregistered(text: str):
+    """One pass: the first UNREGISTERED_* hit in `text`, or None.
+
+    Tries phrases before single words, since 'rainbow nation' must not be
+    matched by a search for 'nation' alone (it isn't in the word list; this
+    comment is the reminder for the next word added).
     """
     for phrase in UNREGISTERED_NAME_PHRASES:
         m = re.search(rf"(?<!\w){re.escape(phrase)}(?!\w)", text, re.I)
         if m:
-            clause = _delete_intro_clause(text, m.start())
-            if clause is not None:
-                return clause, True
-            return _delete_prepositional_phrase(text, m.start(), m.end()), True
+            return "phrase", m.start(), m.end()
     for word in UNREGISTERED_ADJECTIVES:
         m = re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text)
         if m:
-            clause = _delete_intro_clause(text, m.start())
-            if clause is not None:
-                return clause, True
-            return _delete_span(text, m.start(), m.end()), True
-    return text, False
+            return "word", m.start(), m.end()
+    return None
+
+
+def strip_unregistered_reference(text: str) -> tuple[str, bool]:
+    """Delete a non-country cultural reference strip_country_reference can't
+    see, because it was never told the row's country at all -- this is the
+    fallback for the 135 CulturalBench-Easy rows find_country_reference
+    returns None on.
+
+    Loops for the same reason strip_country_reference does: a row can name
+    more than one such reference ('Zulu' and 'Xhosa' in the same question),
+    and stopping after the first leaves the rest standing.
+    """
+    applied = False
+    for _ in range(8):
+        hit = _find_unregistered(text)
+        if hit is None:
+            return text, applied
+        kind, start, end = hit
+        applied = True
+        clause = _delete_intro_clause(text, start)
+        if clause is not None:
+            text = clause
+        elif kind == "phrase":
+            text = _delete_prepositional_phrase(text, start, end)
+        else:
+            text = _delete_span(text, start, end)
+    raise RuntimeError(f"still finding an unregistered reference after 8 passes: {text!r}")
 
 
 def _tidy_spacing(s: str) -> str:
