@@ -31,19 +31,25 @@ from datasets import load_dataset
 
 from evaluate.country_names import strip_country_reference, strip_unregistered_reference
 
-# Capitalized words common enough to appear mid-sentence without being a
-# proper-noun giveaway -- question words that got capitalized by a stray
-# "Read the following statements" continuation, Roman numerals used as list
-# markers, and the like. Short and reviewed by hand rather than guessed at;
-# anything not on it gets printed for a human to judge.
-_BENIGN = {"I", "II", "III", "IV", "Read", "Yes", "No"}
+# A capitalized word is only suspicious if its capital isn't explained by
+# position. 'Chewing' in '(i) Chewing loudly' is capitalized because it opens
+# a list item, the same reason the text's own first word is capitalized --
+# not because it's a proper noun. Checked by looking at everything between
+# the start of the word's LINE and the word itself: if that's nothing but
+# whitespace and/or a marker like '(i)', '2.', '-', the capital is positional.
+_LIST_MARKER = re.compile(
+    r"^\s*(?:\(?[ivxlcdm]{1,4}\)|\(?\d{1,2}[.):]?|[-*•])?\s*$", re.I)
 
 
 def suspicious_words(text: str) -> list[str]:
-    words = re.findall(r"\b[A-Z][a-zA-Z]*\b", text)
-    # Skip the sentence-initial word: its capital is just English orthography.
-    first = text.split(maxsplit=1)[0] if text else ""
-    return [w for w in words if w != first and w not in _BENIGN]
+    hits = []
+    for m in re.finditer(r"\b[A-Z][a-zA-Z]*\b", text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        prefix = text[line_start : m.start()]
+        if _LIST_MARKER.match(prefix):
+            continue
+        hits.append(m.group(0))
+    return hits
 
 
 def main() -> int:
