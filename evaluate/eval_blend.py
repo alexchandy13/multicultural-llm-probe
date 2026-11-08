@@ -25,7 +25,7 @@ import torch
 from datasets import load_dataset, load_from_disk
 from tqdm import tqdm
 
-from evaluate.country_names import resolve_probe_country
+from evaluate.country_names import resolve_probe_country, THE_COUNTRIES
 from evaluate._common import (
     PROJECT_ROOT,
     build_chat_prompt,
@@ -177,27 +177,55 @@ def strip_country(prompt: str, country: str) -> tuple[str, bool]:
     prompt is unchanged, which happens for the ~4.8% of rows where the country
     is the grammatical subject.
 
+    Loops until no pattern matches: ~0.3% of rows name the country twice via
+    two different patterns (e.g. "...food original from the UK, which
+    country's food is more popular in the UK?"), and stripping only the first
+    match left the other occurrence standing.
+
     Note what this does to the task where it succeeds. Each option is the
     correct answer for a different country (see choice_countries), so with no
     country named the question has no right answer and every option is true
     somewhere. The pick is a revealed default, to be read against
     choice_countries rather than against gold.
     """
-    for cand in (country, country.replace("_", " ")):
-        for rx in _STRIP_PATTERNS:
-            out = re.sub(rx.format(c=re.escape(cand)), "", prompt, count=1,
-                         flags=re.I)
-            if out != prompt:
-                return out, True
-    return prompt, False
+    applied = False
+    changed = True
+    while changed:
+        changed = False
+        for cand in (country, country.replace("_", " ")):
+            for rx in _STRIP_PATTERNS:
+                out = re.sub(rx.format(c=re.escape(cand)), "", prompt,
+                             count=1, flags=re.I)
+                if out != prompt:
+                    prompt, applied, changed = out, True, True
+                    break
+            if changed:
+                break
+    return prompt, applied
+
+
+# THE_COUNTRIES is keyed by full spellings ("United States", "United
+# Kingdom"); BLEnD's own country field abbreviates both to "US"/"UK", so that
+# lookup needs the abbreviations added locally rather than in the shared set.
+_BLEND_THE_COUNTRIES = THE_COUNTRIES | {"US", "UK"}
 
 
 def us_probe_prompt(prompt: str, country: str, probe: str = "US") -> str:
-    """Replace country name in prompt with probe country for probe scoring."""
-    replaced = prompt.replace(country, probe)
-    if replaced == prompt and "_" in country:
-        replaced = prompt.replace(country.replace("_", " "), probe)
-    return replaced
+    """Replace country name in prompt with probe country for probe scoring.
+
+    Strips any "the" already in front of the source country and adds one back
+    only if the probe country needs it ("US"/"UK"/"Netherlands"/...), so
+    swapping a non-article country into "US" reads "the US" rather than the
+    ungrammatical bare "US" -- and swapping "the UK" into "Ethiopia" doesn't
+    leave a stray "the Ethiopia" behind.
+    """
+    repl = ("the " if probe in _BLEND_THE_COUNTRIES else "") + probe
+    for cand in (country, country.replace("_", " ")):
+        pattern = r"(?:\bthe\s+)?\b" + re.escape(cand) + r"\b"
+        new_prompt = re.sub(pattern, repl, prompt)
+        if new_prompt != prompt:
+            return new_prompt
+    return prompt
 
 
 def build_neutral_fewshot_prefix(multi_prompt: bool = False) -> str | list[str]:
