@@ -175,7 +175,7 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
         existing = next(pred_iter)
         c = ex["country"]
 
-        us_pred = None
+        us_pred = us_scores_out = None
         if c != probe and _in_sample(ex.get("MCQID", ex.get("mcqid")), sample_frac):
             prompt = ex["prompt"]
             probe_prompt = us_probe_prompt(prompt, c, probe=probe)
@@ -186,9 +186,11 @@ def run_blend_probe(base_data: dict, probe: str, model, tokenizer,
             us_scores = score_choices(model, tokenizer, up)
             from evaluate.eval_blend import CHOICES
             us_pred = CHOICES[max(range(4), key=us_scores.__getitem__)]
+            us_scores_out = list(us_scores)
 
         new_predictions.append({
             "country": existing["country"], "group": existing["group"],
+            "us_scores": us_scores_out,
             "gold": existing["gold"], "pred": existing["pred"],
             "us_pred": us_pred, "mcqid": existing.get("mcqid"),
             "scores": existing.get("scores"),
