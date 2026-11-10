@@ -36,29 +36,43 @@ from analysis.cluster_probe_analysis import (default_rate_among_errors, probe_sl
 BEHAVIORAL = PROJECT_ROOT / "outputs" / "behavioral"
 FIGURES = PROJECT_ROOT / "outputs" / "figures" / "blend_defaults"
 
-# Same 8 countries as the project-wide cluster-representative set (CLUSTER_REPS
-# + US), in cluster order. These are the ones with _raw probe files run for all
-# four off-the-shelf instruct models -- BLEnD's own native cluster reps are a
-# different, narrower 7-country set and don't have this grid.
-ORDER = ["EnglishSpeaking", "ProtestantEurope", "CatholicEurope", "Orthodox",
-         "LatinAmerica", "Confucian", "SouthAsia", "AfricanIslamic"]
-REPS = {
+# Project-wide cluster-representative set (CLUSTER_REPS + US), in cluster
+# order. None of these 7 non-US countries are native to BLEnD's own 16 -- the
+# probe is a pure injection with no baseline rows of its own.
+ORDER_PROJECT = ["EnglishSpeaking", "ProtestantEurope", "CatholicEurope", "Orthodox",
+                 "LatinAmerica", "Confucian", "SouthAsia", "AfricanIslamic"]
+REPS_PROJECT = {
     "EnglishSpeaking": "us", "ProtestantEurope": "netherlands",
     "CatholicEurope": "hungary", "Orthodox": "bosnia_and_herzegovina",
     "LatinAmerica": "mexico", "Confucian": "taiwan",
     "SouthAsia": "philippines", "AfricanIslamic": "iran",
 }
+
+# BLEnD-native cluster reps: closest-to-centroid country within each cluster
+# that is ALSO one of BLEnD's own 16 countries (see the cluster-rep audit
+# earlier in this project's history). No BLEnD country belongs to
+# ProtestantEurope at all, so that cluster has no representative here -- a
+# real coverage gap, not an oversight.
+ORDER_NATIVE = ["EnglishSpeaking", "CatholicEurope", "Orthodox",
+                "LatinAmerica", "Confucian", "SouthAsia", "AfricanIslamic"]
+REPS_NATIVE = {
+    "EnglishSpeaking": "us", "CatholicEurope": "spain", "Orthodox": "greece",
+    "LatinAmerica": "mexico", "Confucian": "china",
+    "SouthAsia": "indonesia", "AfricanIslamic": "iran",
+}
+
 COUNTRY_LABEL = {
     "us": "US", "netherlands": "Netherlands", "hungary": "Hungary",
     "bosnia_and_herzegovina": "Bosnia & Herz.", "mexico": "Mexico",
     "taiwan": "Taiwan", "philippines": "Philippines", "iran": "Iran",
+    "spain": "Spain", "greece": "Greece", "china": "China", "indonesia": "Indonesia",
 }
 
 MODELS = [
-    ("8b_instruct",     "base",     "Llama-3.1-8B-Instruct"),
-    ("gemma4_instruct", "base",     "Gemma-4-12B-it"),
-    ("olmo3_instruct",  "offshelf", "Olmo-3-7B-Instruct"),
-    ("qwen35_instruct", "offshelf", "Qwen3.5-9B"),
+    ("8b_instruct",     "base",       "Llama-3.1-8B-Instruct"),
+    ("8b",              "tulu3_dpo",  "Tulu-3-DPO-8B"),
+    ("olmo3_instruct",  "offshelf",   "Olmo-3-7B-Instruct"),
+    ("qwen35_instruct", "offshelf",   "Qwen3.5-9B"),
 ]
 
 
@@ -90,8 +104,14 @@ def main() -> None:
     ap.add_argument("--min-n", type=int, default=30)
     ap.add_argument("--errors-only", action="store_true",
                     help="Default rate among errors only, instead of all rows (default).")
+    ap.add_argument("--countries", default="project", choices=["project", "native"],
+                    help="project: the 8 project-wide cluster reps (default). "
+                         "native: BLEnD's own 7 cluster reps (no ProtestantEurope).")
     args = ap.parse_args()
     FIGURES.mkdir(parents=True, exist_ok=True)
+
+    ORDER = ORDER_NATIVE if args.countries == "native" else ORDER_PROJECT
+    REPS = REPS_NATIVE if args.countries == "native" else REPS_PROJECT
 
     fig, axes = plt.subplots(1, len(MODELS), figsize=(16, 4.4), sharey=True)
     xs = range(len(ORDER))
@@ -130,10 +150,12 @@ def main() -> None:
     metric_label = "Default Rate Among Errors (%)" if args.errors_only else "Default Rate, All Rows (%)"
     axes[0].set_ylabel(metric_label)
     suffix = "errors" if args.errors_only else "allrows"
-    fig.suptitle(f"BLEnD — {metric_label}, 8 Probe Countries, Off-the-Shelf Instruct Models",
+    n_countries = len(ORDER)
+    set_label = "BLEnD-Native" if args.countries == "native" else "Project-Wide"
+    fig.suptitle(f"BLEnD — {metric_label}, {n_countries} {set_label} Probe Countries, Off-the-Shelf Instruct Models",
                  fontsize=12)
     fig.tight_layout()
-    out = FIGURES / f"blend_offshelf_default_rate_8country_{suffix}.{args.format}"
+    out = FIGURES / f"blend_offshelf_default_rate_{args.countries}{n_countries}country_{suffix}.{args.format}"
     fig.savefig(out, bbox_inches="tight",
                 dpi=200 if args.format != "pdf" else None, facecolor="white")
     plt.close(fig)

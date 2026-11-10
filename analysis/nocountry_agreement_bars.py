@@ -163,10 +163,10 @@ CELLS = [
 # All four are scored with --raw-prompt (the chat template bypassed), so the
 # panels are directly comparable to each other and to the pretrained runs.
 OTS_CELLS = [
-    ("base",     "8b_instruct",     "Llama-3.1-8B-Instruct"),
-    ("base",     "gemma4_instruct", "Gemma-4-12B-it"),
-    ("offshelf", "olmo3_instruct",  "OLMo-3-7B-Instruct"),
-    ("offshelf", "qwen35_instruct", "Qwen3.5-9B"),
+    ("base",       "8b_instruct",     "Llama-3.1-8B-Instruct"),
+    ("tulu3_dpo",  "8b",              "Tulu-3-DPO-8B"),
+    ("offshelf",   "olmo3_instruct",  "OLMo-3-7B-Instruct"),
+    ("offshelf",   "qwen35_instruct", "Qwen3.5-9B"),
 ]
 
 BENCH_TITLE = {"normad": "NormAd", "culturalbench": "CulturalBench",
